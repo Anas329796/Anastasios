@@ -102,6 +102,7 @@ export type CronServiceDeps = {
     abortSignal?: AbortSignal;
     onExecutionStarted?: (info?: CronAgentExecutionStarted) => void;
     onExecutionPhase?: (info: CronAgentExecutionPhaseUpdate) => void;
+    deadlineAtMs?: number;
   }) => Promise<
     {
       summary?: string;

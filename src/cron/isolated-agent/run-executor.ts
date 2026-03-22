@@ -105,6 +105,8 @@ export function createCronPromptExecutor(params: {
     info: Pick<CronAgentExecutionPhaseUpdate, "phase"> &
       Partial<Omit<CronAgentExecutionPhaseUpdate, "jobId" | "phase">>,
   ) => void;
+  deadlineAtMs?: number;
+  fallbackMinRemainingMs?: number;
 }) {
   const sessionFile =
     params.cronSession.sessionEntry.sessionFile?.trim() ||
@@ -136,6 +138,28 @@ export function createCronPromptExecutor(params: {
       lane: resolveCronAgentLane(params.lane),
       agentDir: params.agentDir,
       fallbacksOverride: cronFallbacksOverride,
+      beforeAttempt: ({ attempt }) => {
+        if (attempt <= 1) {
+          return;
+        }
+        if (
+          typeof params.deadlineAtMs !== "number" ||
+          !Number.isFinite(params.deadlineAtMs) ||
+          typeof params.fallbackMinRemainingMs !== "number" ||
+          params.fallbackMinRemainingMs <= 0
+        ) {
+          return;
+        }
+        const remainingMs = params.deadlineAtMs - Date.now();
+        if (remainingMs >= params.fallbackMinRemainingMs) {
+          return;
+        }
+        return {
+          type: "stop" as const,
+          reason: "timeout" as const,
+          error: `Skipping fallback: only ${Math.max(0, remainingMs)}ms remain before cron timeout (need at least ${params.fallbackMinRemainingMs}ms).`,
+        };
+      },
       run: async (providerOverride, modelOverride, runOptions) => {
         if (params.abortSignal?.aborted) {
           throw new Error(params.abortReason());
@@ -315,6 +339,8 @@ export async function executeCronRun(params: {
   thinkLevel: ThinkLevel | undefined;
   timeoutMs: number;
   suppressExecNotifyOnExit: boolean;
+  deadlineAtMs?: number;
+  fallbackMinRemainingMs?: number;
   runStartedAt?: number;
 }): Promise<CronExecutionResult> {
   const resolvedVerboseLevel: VerboseLevel =
@@ -350,6 +376,8 @@ export async function executeCronRun(params: {
     abortReason: params.abortReason,
     onExecutionStarted: params.onExecutionStarted,
     onExecutionPhase: params.onExecutionPhase,
+    deadlineAtMs: params.deadlineAtMs,
+    fallbackMinRemainingMs: params.fallbackMinRemainingMs,
   });
 
   const runStartedAt = params.runStartedAt ?? Date.now();

@@ -118,6 +118,7 @@ export async function executeJobCoreWithTimeout(
   }
 
   const runAbortController = new AbortController();
+  const deadlineAtMs = Date.now() + jobTimeoutMs;
   let timeoutId: NodeJS.Timeout | undefined;
   let setupTimeoutId: NodeJS.Timeout | undefined;
   let preModelTimeoutId: NodeJS.Timeout | undefined;
@@ -200,6 +201,7 @@ export async function executeJobCoreWithTimeout(
   const corePromise = executeJobCore(state, job, runAbortController.signal, {
     onExecutionStarted: deferTimeoutUntilExecutionStart ? onExecutionStarted : undefined,
     onExecutionPhase: deferTimeoutUntilExecutionStart ? onExecutionPhase : undefined,
+    deadlineAtMs,
   });
   if (!deferTimeoutUntilExecutionStart) {
     startTimeout();
@@ -1447,6 +1449,7 @@ export async function executeJobCore(
   options?: {
     onExecutionStarted?: (info?: CronAgentExecutionStarted) => void;
     onExecutionPhase?: (info: CronAgentExecutionPhaseUpdate) => void;
+    deadlineAtMs?: number;
   },
 ): Promise<
   CronRunOutcome &
@@ -1610,6 +1613,7 @@ async function executeDetachedCronJob(
   options?: {
     onExecutionStarted?: (info?: CronAgentExecutionStarted) => void;
     onExecutionPhase?: (info: CronAgentExecutionPhaseUpdate) => void;
+    deadlineAtMs?: number;
   },
 ): Promise<
   CronRunOutcome &
@@ -1646,6 +1650,7 @@ async function executeDetachedCronJob(
     abortSignal,
     onExecutionStarted: options?.onExecutionStarted,
     onExecutionPhase: options?.onExecutionPhase,
+    deadlineAtMs: options?.deadlineAtMs,
   });
 
   if (abortSignal?.aborted) {

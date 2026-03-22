@@ -164,6 +164,17 @@ type CronModelCatalogRuntime = typeof import("./run-model-catalog.runtime.js");
 type CronDeliveryRuntime = typeof import("./run-delivery.runtime.js");
 type ResolvedCronDeliveryTarget = Awaited<ReturnType<CronDeliveryRuntime["resolveDeliveryTarget"]>>;
 
+const MIN_CRON_FALLBACK_REMAINING_MS = 1_000;
+const MAX_CRON_FALLBACK_REMAINING_MS = 30_000;
+
+function resolveCronFallbackMinRemainingMs(timeoutMs: number): number {
+  const quarterTimeoutMs = Math.floor(timeoutMs / 4);
+  return Math.max(
+    MIN_CRON_FALLBACK_REMAINING_MS,
+    Math.min(MAX_CRON_FALLBACK_REMAINING_MS, quarterTimeoutMs),
+  );
+}
+
 function normalizeCronTraceTarget(
   target: CronDeliveryTraceTarget | undefined,
 ): CronDeliveryTraceTarget | undefined {
@@ -425,6 +436,7 @@ type RunCronAgentTurnParams = {
   job: CronJob;
   message: string;
   abortSignal?: AbortSignal;
+  deadlineAtMs?: number;
   signal?: AbortSignal;
   onExecutionStarted?: (info?: CronAgentExecutionStarted) => void;
   onExecutionPhase?: (info: CronAgentExecutionPhaseUpdate) => void;
@@ -1060,6 +1072,7 @@ export async function runCronIsolatedAgentTurn(params: {
   job: CronJob;
   message: string;
   abortSignal?: AbortSignal;
+  deadlineAtMs?: number;
   signal?: AbortSignal;
   onExecutionStarted?: (info?: CronAgentExecutionStarted) => void;
   onExecutionPhase?: (info: CronAgentExecutionPhaseUpdate) => void;
@@ -1105,6 +1118,7 @@ export async function runCronIsolatedAgentTurn(params: {
     });
   };
 
+  const fallbackMinRemainingMs = resolveCronFallbackMinRemainingMs(prepared.context.timeoutMs);
   try {
     const { executeCronRun } = await loadCronExecutorRuntime();
     const execution = await executeCronRun({
@@ -1139,6 +1153,8 @@ export async function runCronIsolatedAgentTurn(params: {
       thinkLevel: prepared.context.thinkLevel,
       timeoutMs: prepared.context.timeoutMs,
       suppressExecNotifyOnExit: prepared.context.suppressExecNotifyOnExit,
+      deadlineAtMs: params.deadlineAtMs,
+      fallbackMinRemainingMs,
     });
     if (isAborted()) {
       return prepared.context.withRunSession({
