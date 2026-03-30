@@ -72,6 +72,29 @@ describe("MattermostConfigSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("accepts legacy compatibility fields used by older Mattermost configs", () => {
+    const result = MattermostConfigSchema.safeParse({
+      allowFrom: ["*"],
+      groupPolicy: "allowlist",
+      groupAllowFrom: ["user-1"],
+      attachments: { enabled: true },
+      sessionPolicy: { mode: "isolated", idleMinutes: 30 },
+      channelOverrides: {
+        channel123: {
+          chatmode: "onmessage",
+        },
+      },
+      accounts: {
+        main: {
+          attachments: { enabled: true },
+          sessionPolicy: { mode: "isolated" },
+          channelOverrides: { channel456: { chatmode: "oncall" } },
+        },
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
   it("rejects unknown properties inside groups entry", () => {
     const result = MattermostConfigSchema.safeParse({
       groups: {
