@@ -14,6 +14,7 @@ import { isBlockedObjectKey } from "../config/prototype-keys.js";
 import { redactConfigObject } from "../config/redact-snapshot.js";
 import { readBestEffortRuntimeConfigSchema } from "../config/runtime-schema.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { buildConfigPathSuggestionHint } from "../config/suggest-path.js";
 import {
   coerceSecretRef,
   isValidEnvSecretRefId,
@@ -1955,6 +1956,10 @@ export async function runConfigGet(opts: { path: string; json?: boolean; runtime
           `Config path not found: ${opts.path}. Run ${formatCliCommand("openclaw config validate")} to inspect config shape.`,
         ),
       );
+      const hint = buildConfigPathSuggestionHint(opts.path);
+      if (hint) {
+        runtime.error(info(hint));
+      }
       runtime.exit(1);
       return;
     }
@@ -1997,6 +2002,10 @@ export async function runConfigUnset(opts: { path: string; runtime?: RuntimeEnv 
           `Config path not found: ${opts.path}. Nothing was changed. Run ${formatCliCommand("openclaw config get <path>")} first if you are unsure of the path.`,
         ),
       );
+      const hint = buildConfigPathSuggestionHint(opts.path);
+      if (hint) {
+        runtime.error(info(hint));
+      }
       runtime.exit(1);
       return;
     }
