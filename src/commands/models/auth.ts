@@ -403,6 +403,7 @@ export async function modelsAuthPasteTokenCommand(
     profileId?: string;
     expiresIn?: string;
     agent?: string;
+    token?: string;
   },
   runtime: RuntimeEnv,
 ) {
@@ -415,19 +416,22 @@ export async function modelsAuthPasteTokenCommand(
   const profileId =
     normalizeOptionalString(opts.profileId) || resolveDefaultTokenProfileId(provider);
 
-  const tokenInput = await text({
-    message: `Paste token for ${provider}`,
-    validate: (value) => {
-      const trimmed = value?.trim();
-      if (!trimmed) {
-        return "Required";
-      }
-      if (provider === "anthropic") {
-        return validateAnthropicSetupToken(trimmed.replaceAll(/\s+/g, ""));
-      }
-      return undefined;
-    },
-  });
+  const rawToken = normalizeOptionalString(opts.token);
+  const tokenInput =
+    rawToken ??
+    (await text({
+      message: `Paste token for ${provider}`,
+      validate: (value) => {
+        const trimmed = value?.trim();
+        if (!trimmed) {
+          return "Required";
+        }
+        if (provider === "anthropic") {
+          return validateAnthropicSetupToken(trimmed.replaceAll(/\s+/g, ""));
+        }
+        return undefined;
+      },
+    }));
   const token =
     provider === "anthropic"
       ? tokenInput.replaceAll(/\s+/g, "").trim()
