@@ -14,6 +14,7 @@ import {
 } from "./schedule-options.js";
 import {
   getCronChannelOptions,
+  looksLikeShellCommand,
   parseCronToolsAllow,
   parseDurationMs,
   warnIfCronSchedulerDisabled,
@@ -22,18 +23,6 @@ import { normalizeCronSessionTargetOption, parseCronThreadIdOption } from "./thr
 
 const CRON_EDIT_LOOKUP_PAGE_SIZE = 200;
 const CRON_EDIT_LOOKUP_MAX_PAGES = 50;
-
-const SHELL_COMMAND_PATTERN =
-  /(?:^|\s)(?:python3?|bash|sh|node|bun|deno|uv run|npx|tsx|ts-node|ruby|perl|php|make|cargo|go run|java|dotnet|\.\/)(?:\s|$)/m;
-
-/**
- * Returns true when the system-event text looks like it contains a shell
- * command invocation.  Used to warn users that systemEvent payloads on the
- * main session do not execute shell commands.
- */
-function looksLikeShellCommand(text: string): boolean {
-  return SHELL_COMMAND_PATTERN.test(text);
-}
 
 const assignIf = (
   target: Record<string, unknown>,
@@ -393,9 +382,28 @@ export function registerCronEditCommand(cron: Command) {
           // Warn when --system-event is being set on a job that is (or will be) a
           // main-session job and the text looks like a shell command.  Such commands
           // are never executed — the text is only dispatched as a context notification.
+          // When --session is not passed, fetch the existing job to check its target.
+          let effectiveSessionIsMain = sessionTarget === "main";
           if (
             hasSystemEventPatch &&
-            opts.session === "main" &&
+            !effectiveSessionIsMain &&
+            typeof opts.session !== "string"
+          ) {
+            try {
+              const listed = (await callGatewayFromCli("cron.list", opts, {
+                includeDisabled: true,
+              })) as { jobs?: CronJob[] } | null;
+              const existing = (listed?.jobs ?? []).find((job) => job.id === id);
+              if (existing?.sessionTarget === "main") {
+                effectiveSessionIsMain = true;
+              }
+            } catch {
+              // Best-effort: if we cannot fetch the job, skip the warning.
+            }
+          }
+          if (
+            hasSystemEventPatch &&
+            effectiveSessionIsMain &&
             looksLikeShellCommand(String(opts.systemEvent))
           ) {
             process.stderr.write(
