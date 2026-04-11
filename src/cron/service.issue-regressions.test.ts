@@ -6,6 +6,7 @@ import { CommandLane } from "../process/lanes.js";
 import * as schedule from "./schedule.js";
 import {
   createAbortAwareIsolatedRunner,
+  createDefaultIsolatedRunner,
   createDeferred,
   createDueIsolatedJob,
   createIsolatedRegressionJob,
