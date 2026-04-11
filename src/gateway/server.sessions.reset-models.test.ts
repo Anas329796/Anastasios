@@ -313,6 +313,7 @@ test("sessions.reset preserves spawned session ownership metadata", async () => 
       execAsk?: string;
       execNode?: string;
       displayName?: string;
+      suppressCliHistoryImport?: boolean;
       cliSessionBindings?: Record<
         string,
         {
@@ -368,6 +369,7 @@ test("sessions.reset preserves spawned session ownership metadata", async () => 
   expect(reset.payload?.entry.execAsk).toBe("on-miss");
   expect(reset.payload?.entry.execNode).toBe("mac-mini");
   expect(reset.payload?.entry.displayName).toBe("Ops Child");
+  expect(reset.payload?.entry.suppressCliHistoryImport).toBe(true);
   expect(reset.payload?.entry.cliSessionBindings).toEqual({
     "claude-cli": {
       sessionId: "cli-session-123",
@@ -423,6 +425,7 @@ test("sessions.reset preserves spawned session ownership metadata", async () => 
       execAsk?: string;
       execNode?: string;
       displayName?: string;
+      suppressCliHistoryImport?: boolean;
       cliSessionBindings?: Record<
         string,
         {
@@ -476,6 +479,7 @@ test("sessions.reset preserves spawned session ownership metadata", async () => 
   expect(store["agent:main:subagent:child"]?.execAsk).toBe("on-miss");
   expect(store["agent:main:subagent:child"]?.execNode).toBe("mac-mini");
   expect(store["agent:main:subagent:child"]?.displayName).toBe("Ops Child");
+  expect(store["agent:main:subagent:child"]?.suppressCliHistoryImport).toBe(true);
   expect(store["agent:main:subagent:child"]?.cliSessionBindings).toEqual({
     "claude-cli": {
       sessionId: "cli-session-123",
