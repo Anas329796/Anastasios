@@ -67,6 +67,7 @@ export type SubagentRunRecord = {
   pendingFinalDeliveryAttemptCount?: number;
   pendingFinalDeliveryLastError?: string | null;
   pendingFinalDeliveryPayload?: PendingFinalDeliveryPayload;
+  browserCleanupDispatchedAt?: number;
   completionAnnouncedAt?: number;
   attachmentsDir?: string;
   attachmentsRootDir?: string;
