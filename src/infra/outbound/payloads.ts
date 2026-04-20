@@ -46,6 +46,7 @@ export type OutboundPayloadJson = {
   delivery?: ReplyPayloadDelivery;
   interactive?: InteractiveReply;
   channelData?: Record<string, unknown>;
+  droppedMedia?: DroppedMediaItem[];
 };
 
 export type OutboundPayloadPlan = {
@@ -332,6 +333,7 @@ export function projectOutboundPayloadPlanForJson(
       delivery: payload.delivery,
       interactive: payload.interactive,
       channelData: payload.channelData,
+      ...(payload.droppedMedia?.length ? { droppedMedia: payload.droppedMedia } : {}),
     });
   }
   return normalized;
