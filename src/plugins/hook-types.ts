@@ -346,7 +346,6 @@ export type PluginHookModelFailureTerminalEvent = {
     provider?: string;
     model?: string;
     reason?: string | null;
-    stage?: "prompt" | "assistant";
   }>;
 };
 
