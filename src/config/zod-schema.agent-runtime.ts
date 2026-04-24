@@ -9,7 +9,7 @@ import {
 } from "../shared/string-coerce.js";
 import { AgentModelSchema } from "./zod-schema.agent-model.js";
 import {
-  GroupChatSchema,
+  AgentGroupChatSchema,
   HumanDelaySchema,
   IdentitySchema,
   SecretInputSchema,
@@ -948,7 +948,7 @@ export const AgentEntrySchema = z
     contextTokens: z.number().int().positive().optional(),
     heartbeat: HeartbeatSchema,
     identity: IdentitySchema,
-    groupChat: GroupChatSchema,
+    groupChat: AgentGroupChatSchema,
     subagents: z
       .object({
         delegationMode: z.enum(["suggest", "prefer"]).optional(),

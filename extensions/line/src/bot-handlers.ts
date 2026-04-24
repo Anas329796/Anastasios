@@ -1,5 +1,9 @@
 import type { webhook } from "@line/bot-sdk";
-import { buildMentionRegexes, matchesMentionPatterns } from "openclaw/plugin-sdk/channel-inbound";
+import {
+  buildMentionRegexes,
+  matchesMentionPatterns,
+  resolveMentionPatternsEnabled,
+} from "openclaw/plugin-sdk/channel-inbound";
 import { resolveStableChannelMessageIngress } from "openclaw/plugin-sdk/channel-ingress-runtime";
 import { createChannelPairingChallengeIssuer } from "openclaw/plugin-sdk/channel-pairing";
 import { shouldComputeCommandAuthorized } from "openclaw/plugin-sdk/command-auth-native";
@@ -267,7 +271,14 @@ async function shouldProcessLineEvent(
       accountId: account.accountId,
       peer: { kind: "group", id: peerId },
     });
-    const mentionRegexes = buildMentionRegexes(cfg, agentId);
+    const mentionRegexes = resolveMentionPatternsEnabled({
+      cfg,
+      provider: "line",
+      conversationId: peerId,
+      agentId,
+    })
+      ? buildMentionRegexes(cfg, agentId)
+      : [];
     const wasMentionedByNative = isLineBotMentioned(event.message);
     const wasMentionedByPattern =
       event.message.type === "text" ? matchesMentionPatterns(rawText, mentionRegexes) : false;
@@ -460,6 +471,7 @@ async function handleMessageEvent(event: MessageEvent, context: LineHandlerConte
           timestamp: event.timestamp,
         },
       });
+
     }
     return;
   }
