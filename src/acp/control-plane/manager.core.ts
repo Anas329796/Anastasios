@@ -1,6 +1,12 @@
 import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { logVerbose } from "../../globals.js";
+import { fireAndForgetHook } from "../../hooks/fire-and-forget.js";
+import {
+  type AgentTurnEndHookContext,
+  createInternalHookEvent,
+  triggerInternalHook,
+} from "../../hooks/internal-hooks.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { normalizeAgentId } from "../../routing/session-key.js";
 import { isAcpSessionKey } from "../../sessions/session-key-utils.js";
@@ -787,6 +793,7 @@ export class AcpSessionManager {
                 )
               : error;
           this.recordTurnCompletion({
+            sessionKey,
             startedAt: turnStartedAt,
             errorCode: errorToRecord.code,
           });
@@ -953,6 +960,7 @@ export class AcpSessionManager {
                 );
               }
               this.recordTurnCompletion({
+                sessionKey,
                 startedAt: turnStartedAt,
               });
               if (taskContext) {
@@ -1758,16 +1766,30 @@ export class AcpSessionManager {
     }
   }
 
-  private recordTurnCompletion(params: { startedAt: number; errorCode?: AcpRuntimeError["code"] }) {
+  private recordTurnCompletion(params: {
+    sessionKey: string;
+    startedAt: number;
+    errorCode?: AcpRuntimeError["code"];
+  }) {
     const durationMs = Math.max(0, Date.now() - params.startedAt);
     this.turnLatencyStats.totalMs += durationMs;
     this.turnLatencyStats.maxMs = Math.max(this.turnLatencyStats.maxMs, durationMs);
     if (params.errorCode) {
       this.turnLatencyStats.failed += 1;
       this.recordErrorCode(params.errorCode);
-      return;
+    } else {
+      this.turnLatencyStats.completed += 1;
     }
-    this.turnLatencyStats.completed += 1;
+    fireAndForgetHook(
+      triggerInternalHook(
+        createInternalHookEvent("agent", "turn:end", params.sessionKey, {
+          sessionKey: params.sessionKey,
+          success: !params.errorCode,
+          durationMs,
+        } satisfies AgentTurnEndHookContext),
+      ),
+      "agent:turn:end internal hook failed",
+    );
   }
 
   private recordErrorCode(code: string): void {
