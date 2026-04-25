@@ -188,6 +188,9 @@ export type MatrixMonitorHandlerParams = {
   groupAllowFrom?: string[];
   groupAllowFromResolvedEntries?: readonly MatrixResolvedAllowlistEntry[];
   roomsConfig?: Record<string, MatrixRoomConfig>;
+  providerMentionPatterns?: Parameters<
+    PluginRuntime["channel"]["mentions"]["resolveMentionPatternsEnabled"]
+  >[0]["providerPolicy"];
   accountAllowBots?: boolean | "mentions";
   configuredBotUserIds?: ReadonlySet<string>;
   groupPolicy: "open" | "allowlist" | "disabled";
@@ -404,6 +407,7 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
     allowFromResolvedEntries = [],
     groupAllowFromResolvedEntries = [],
     roomsConfig,
+    providerMentionPatterns,
     accountAllowBots,
     configuredBotUserIds = new Set<string>(),
     groupPolicy,
@@ -939,6 +943,7 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
           provider: "matrix",
           conversationId: roomId,
           agentId: _route.agentId,
+          providerPolicy: providerMentionPatterns,
         });
         const agentMentionRegexes = mentionPatternsEnabled
           ? core.channel.mentions.buildMentionRegexes(cfg, _route.agentId)

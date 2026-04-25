@@ -398,6 +398,7 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
       groupAllowFrom,
       groupAllowFromResolvedEntries,
       roomsConfig,
+      providerMentionPatterns: accountConfig.mentionPatterns,
       accountAllowBots,
       configuredBotUserIds,
       groupPolicy,

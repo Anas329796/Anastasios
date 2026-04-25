@@ -280,7 +280,6 @@ export function resolveMentions(params: {
   const explicitMention =
     mentionedInFormattedBody || metadataBackedUserMention || metadataBackedRoomMention;
 
-  const wasMentioned =
-    explicitMention || textMentioned || nativeTextMentioned || visibleRoomMention;
+  const wasMentioned = explicitMention || textMentioned || visibleRoomMention;
   return { wasMentioned, hasExplicitMention: explicitMention };
 }

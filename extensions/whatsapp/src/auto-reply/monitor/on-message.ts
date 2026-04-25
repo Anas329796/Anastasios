@@ -35,7 +35,12 @@ export function createWebOnMessageHandler(params: {
   replyResolver: typeof getReplyFromConfig;
   replyLogger: ReturnType<(typeof import("openclaw/plugin-sdk/runtime-env"))["getChildLogger"]>;
   baseMentionConfig: MentionConfig;
-  account: { authDir?: string; accountId?: string; selfChatMode?: boolean };
+  account: {
+    authDir?: string;
+    accountId?: string;
+    selfChatMode?: boolean;
+    mentionPatterns?: Parameters<typeof applyGroupGating>[0]["providerMentionPatterns"];
+  };
 }) {
   const processForRoute = async (
     cfg: OpenClawConfig,
@@ -226,6 +231,7 @@ export function createWebOnMessageHandler(params: {
         agentId: route.agentId,
         sessionKey: route.sessionKey,
         baseMentionConfig,
+        providerMentionPatterns: account.mentionPatterns,
         authDir: account.authDir,
         selfChatMode: account.selfChatMode,
         groupHistories: params.groupHistories,
@@ -250,9 +256,16 @@ export function createWebOnMessageHandler(params: {
           groupHistoryKey,
           agentId: route.agentId,
           sessionKey: route.sessionKey,
+<<<<<<< HEAD
           baseMentionConfig,
           authDir: account.authDir,
           selfChatMode: account.selfChatMode,
+=======
+          baseMentionConfig: params.baseMentionConfig,
+          providerMentionPatterns: params.account.mentionPatterns,
+          authDir: params.account.authDir,
+          selfChatMode: params.account.selfChatMode,
+>>>>>>> 1bf3d66c14 (fix: address mention policy review follow-ups)
           groupHistories: params.groupHistories,
           groupHistoryLimit: params.groupHistoryLimit,
           groupMemberNames: params.groupMemberNames,

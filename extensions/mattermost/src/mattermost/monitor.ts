@@ -1365,6 +1365,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
           provider: "mattermost",
           conversationId: kind === "direct" ? senderId : channelId,
           agentId: route.agentId,
+          providerPolicy: account.config.mentionPatterns,
         })
           ? core.channel.mentions.buildMentionRegexes(cfg, route.agentId)
           : [];
