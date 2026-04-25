@@ -175,6 +175,8 @@ export type AgentTurnEndHookContext = {
   success: boolean;
   /** Wall-clock duration of the turn in milliseconds. */
   durationMs: number;
+  /** ACP runtime error code when the turn failed. Omitted for successful turns. */
+  errorCode?: string;
 };
 
 /** Internal hook event emitted after each agent turn cycle completes. */
@@ -476,7 +478,8 @@ export function isAgentTurnEndEvent(event: InternalHookEvent): event is AgentTur
   return (
     hasStringContextField(context, "sessionKey") &&
     hasBooleanContextField(context, "success") &&
-    hasNumberContextField(context, "durationMs")
+    hasNumberContextField(context, "durationMs") &&
+    (context.errorCode === undefined || typeof context.errorCode === "string")
   );
 }
 

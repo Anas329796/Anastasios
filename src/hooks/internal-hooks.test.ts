@@ -266,8 +266,20 @@ describe("hooks", () => {
           sessionKey: "test-session",
           success: false,
           durationMs: 500,
+          errorCode: "ACP_TURN_FAILED",
         } satisfies AgentTurnEndHookContext),
         expected: true,
+      },
+
+      {
+        name: "returns false when errorCode is not a string",
+        event: createInternalHookEvent("agent", "turn:end", "test-session", {
+          sessionKey: "test-session",
+          success: false,
+          durationMs: 100,
+          errorCode: 500,
+        }),
+        expected: false,
       },
       {
         name: "returns false for agent:bootstrap events",
