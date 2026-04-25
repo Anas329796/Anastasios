@@ -19,6 +19,7 @@ import {
   resolveSessionResetType,
   resolveThreadFlag,
   type SessionFreshness,
+  type SessionResetMode,
 } from "../../config/sessions/reset.js";
 import { resolveAndPersistSessionFile } from "../../config/sessions/session-file.js";
 import { resolveSessionKey } from "../../config/sessions/session-key.js";
@@ -80,7 +81,7 @@ function loadSessionArchiveRuntime() {
 
 type ReplySessionEndReason = Extract<
   PluginHookSessionEndReason,
-  "new" | "reset" | "idle" | "daily" | "unknown"
+  "new" | "reset" | "idle" | "daily" | "adaptive" | "unknown"
 >;
 
 function stripThreadIdFromDeliveryContext(
@@ -132,14 +133,16 @@ function resolveStaleSessionEndReason(params: {
   entry: SessionEntry | undefined;
   freshness?: SessionFreshness;
   now: number;
+  resetMode: SessionResetMode;
 }): ReplySessionEndReason | undefined {
   if (!params.entry || !params.freshness) {
     return undefined;
   }
-  const staleDaily =
-    params.freshness.dailyResetAt != null && params.entry.updatedAt < params.freshness.dailyResetAt;
-  const staleIdle =
-    params.freshness.idleExpiresAt != null && params.now > params.freshness.idleExpiresAt;
+  const staleDaily = params.freshness.staleDaily === true;
+  const staleIdle = params.freshness.staleIdle === true;
+  if (params.resetMode === "adaptive") {
+    return staleDaily && staleIdle ? "adaptive" : undefined;
+  }
   if (staleIdle) {
     return "idle";
   }
@@ -484,6 +487,7 @@ export async function initSessionState(params: {
         entry,
         freshness: entryFreshness,
         now,
+        resetMode: resetPolicy.mode,
       });
   clearBootstrapSnapshotOnSessionRollover({
     sessionKey,
