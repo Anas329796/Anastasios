@@ -1,4 +1,9 @@
 import { resolveUserTimezone } from "../../agents/date-time.js";
+import {
+  escapeInternalRuntimeContextDelimiters,
+  INTERNAL_RUNTIME_CONTEXT_BEGIN,
+  INTERNAL_RUNTIME_CONTEXT_END,
+} from "../../agents/internal-runtime-context.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { buildChannelSummary } from "../../infra/channel-summary.js";
 import {
@@ -98,7 +103,8 @@ export async function drainFormattedSystemEvents(params: {
   };
 
   const summaryLines: string[] = [];
-  const systemLines: string[] = [];
+  const userFacingLines: string[] = [];
+  const internalLines: string[] = [];
   // Exec completions have a dedicated heartbeat prompt; leave those entries queued
   // so the heartbeat path can consume and deliver them.
   const queued = consumeSelectedSystemEventEntries(
@@ -112,11 +118,30 @@ export async function drainFormattedSystemEvents(params: {
     }
     const prefix = event.trusted === false ? "System (untrusted)" : "System";
     const timestamp = `[${formatSystemEventTimestamp(event.ts, params.cfg)}]`;
+    const target = (event.audience ?? "user-facing") === "internal" ? internalLines : userFacingLines;
     let index = 0;
     for (const subline of compacted.split("\n")) {
-      systemLines.push(`${prefix}: ${index === 0 ? `${timestamp} ` : ""}${subline}`);
+      target.push(`${prefix}: ${index === 0 ? `${timestamp} ` : ""}${subline}`);
       index += 1;
     }
+  }
+  const systemLines: string[] = [...userFacingLines];
+  if (internalLines.length > 0) {
+    // Wrap internal-audience events in the runtime-context delimiters so the
+    // agent runtime sees the content but user-facing surfaces strip it via
+    // the existing stripInternalRuntimeContext consumers. Framing matches
+    // `formatAgentInternalEventsForPrompt` in `src/agents/internal-events.ts`
+    // (BEGIN, header, blank line, body, END): the header line tells the
+    // model the wrapped block is runtime context, not user-authored, so it
+    // should not echo the contents back into its reply.
+    systemLines.push(INTERNAL_RUNTIME_CONTEXT_BEGIN);
+    systemLines.push("OpenClaw runtime context (internal):");
+    systemLines.push(
+      "This context is runtime-generated, not user-authored. Keep internal details private.",
+    );
+    systemLines.push("");
+    systemLines.push(escapeInternalRuntimeContextDelimiters(internalLines.join("\n")));
+    systemLines.push(INTERNAL_RUNTIME_CONTEXT_END);
   }
   if (params.isMainSession && params.isNewSession) {
     const summary = await buildChannelSummary(params.cfg);
