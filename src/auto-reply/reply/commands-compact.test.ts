@@ -20,8 +20,12 @@ vi.mock("./commands-compact.runtime.js", () => ({
   waitForEmbeddedPiRunEnd: vi.fn().mockResolvedValue(undefined),
 }));
 
-const { compactEmbeddedPiSession, incrementCompactionCount, resolveSessionFilePathOptions } =
-  await import("./commands-compact.runtime.js");
+const {
+  compactEmbeddedPiSession,
+  incrementCompactionCount,
+  resolveFreshSessionTotalTokens,
+  resolveSessionFilePathOptions,
+} = await import("./commands-compact.runtime.js");
 const { handleCompactCommand } = await import("./commands-compact.js");
 
 function buildCompactParams(
@@ -184,6 +188,10 @@ describe("handleCompactCommand", () => {
     expect(call.senderUsername).toBe("alice_u");
     expect(call.senderE164).toBe("+15551234567");
     expect(call.agentDir).toBe("/tmp/openclaw-agent-compact");
+    expect(call.currentTokenCount).toBe(12_345);
+    expect(vi.mocked(resolveFreshSessionTotalTokens)).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "session-1" }),
+    );
   });
 
   it("uses the canonical session agent when resolving the compaction session file", async () => {
