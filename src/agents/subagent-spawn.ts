@@ -126,6 +126,11 @@ function getSubagentGatewayReadinessRetryDelaysMs(): readonly number[] {
     ? SUBAGENT_GATEWAY_READINESS_RETRY_DELAYS_MS_FAST
     : SUBAGENT_GATEWAY_READINESS_RETRY_DELAYS_MS_DEFAULT;
 }
+=======
+const SUBAGENT_GATEWAY_READINESS_RETRY_DELAYS_MS = process.env.OPENCLAW_TEST_FAST === "1"
+  ? ([8, 16, 32] as const)
+  : ([1_000, 3_000, 10_000] as const);
+>>>>>>> 760c95c4 (fix(agents): refresh subagent gateway readiness hardening)
 
 export type SpawnSubagentParams = {
   task: string;
@@ -615,6 +620,7 @@ async function ensureGatewayReadyForSubagentSpawn(): Promise<void> {
   let attempt = 0;
   for (;;) {
     try {
+<<<<<<< HEAD
       // Probe at admin scope rather than read scope so that the gateway
       // connection pairs at a tier sufficient for the subsequent lifecycle
       // calls (agent → write, sessions.delete / sessions.patch → admin).
@@ -624,11 +630,18 @@ async function ensureGatewayReadyForSubagentSpawn(): Promise<void> {
         method: "sessions.list",
         params: {},
         timeoutMs: SUBAGENT_GATEWAY_READINESS_TIMEOUT_MS,
+<<<<<<< HEAD
         scopes: [ADMIN_SCOPE],
       });
       return;
     } catch (err) {
       const delayMs = getSubagentGatewayReadinessRetryDelaysMs()[attempt];
+=======
+      });
+      return;
+    } catch (err) {
+      const delayMs = SUBAGENT_GATEWAY_READINESS_RETRY_DELAYS_MS[attempt];
+>>>>>>> 760c95c4 (fix(agents): refresh subagent gateway readiness hardening)
       if (delayMs == null || !isGatewayLifecycleReadinessError(err)) {
         throw err;
       }
@@ -859,6 +872,14 @@ export async function spawnSubagentDirect(
       ? { threadId: ctx.agentThreadId }
       : {}),
   });
+  try {
+    await ensureGatewayReadyForSubagentSpawn();
+  } catch (err) {
+    return {
+      status: "error",
+      error: summarizeError(err),
+    };
+  }
   let childSessionOrigin = resolveRequesterOriginForChild({
     cfg,
     targetAgentId,
