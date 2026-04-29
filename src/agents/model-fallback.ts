@@ -411,6 +411,7 @@ function throwFallbackFailureSummary(params: {
   attempts: FallbackAttempt[];
   candidates: ModelCandidate[];
   lastError: unknown;
+  rethrowLastError?: boolean;
   label: string;
   formatAttempt: (attempt: FallbackAttempt) => string;
   soonestCooldownExpiry?: number | null;
@@ -418,7 +419,10 @@ function throwFallbackFailureSummary(params: {
   cfg?: OpenClawConfig;
   agentDir?: string;
 }): never {
-  if (params.attempts.length <= 1 && params.lastError) {
+  if (
+    params.lastError !== undefined &&
+    (params.rethrowLastError === true || params.attempts.length <= 1)
+  ) {
     throw params.lastError;
   }
 
@@ -882,6 +886,7 @@ export async function runWithModelFallback<T>(params: {
     : null;
   const attempts: FallbackAttempt[] = [];
   let lastError: unknown;
+  let rethrowLastError = false;
   const cooldownProbeUsedProviders = new Set<string>();
   const observeDecision = async (decision: ModelFallbackDecisionParams) => {
     if (!params.onFallbackStep && !isModelFallbackDecisionLogEnabled()) {
@@ -1112,9 +1117,7 @@ export async function runWithModelFallback<T>(params: {
         fallbackConfigured: hasFallbackCandidates,
         previousAttempts: attempts,
       });
-      if (lastError !== undefined) {
-        throw lastError;
-      }
+      rethrowLastError = lastError !== undefined;
       break;
     }
 
@@ -1262,6 +1265,7 @@ export async function runWithModelFallback<T>(params: {
     attempts,
     candidates,
     lastError,
+    rethrowLastError,
     label: "models",
     formatAttempt: (attempt) =>
       `${attempt.provider}/${attempt.model}: ${attempt.error}${
