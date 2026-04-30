@@ -1726,6 +1726,80 @@ describe("runReplyAgent typing (heartbeat)", () => {
     }
   });
 
+  it("clears persisted auto fallback overrides only after accounting keeps the origin", async () => {
+    const sessionEntry: SessionEntry = {
+      sessionId: "session",
+      updatedAt: Date.now(),
+      providerOverride: "openai-codex",
+      modelOverride: "gpt-5.4",
+      modelOverrideSource: "auto",
+      modelOverrideFallbackOriginProvider: "anthropic",
+      modelOverrideFallbackOriginModel: "claude-opus",
+      authProfileOverride: "anthropic:work",
+      authProfileOverrideSource: "user",
+      authProfileOverrideCompactionCount: 2,
+    };
+    const sessionStore = { main: sessionEntry };
+    const dir = await mkdtemp(join(tmpdir(), "openclaw-agent-runner-auto-fallback-clear-"));
+    const storePath = join(dir, "sessions.json");
+    await writeFile(storePath, JSON.stringify({ main: sessionEntry }), "utf8");
+
+    state.runEmbeddedPiAgentMock.mockResolvedValue({
+      payloads: [{ text: "final" }],
+      meta: {},
+    });
+    const fallbackSpy = vi
+      .spyOn(modelFallbackModule, "runWithModelFallback")
+      .mockImplementation(
+        async ({ run }: { run: (provider: string, model: string) => Promise<unknown> }) => ({
+          result: await run("anthropic", "claude-haiku"),
+          provider: "anthropic",
+          model: "claude-haiku",
+          attempts: [
+            {
+              provider: "openai-codex",
+              model: "gpt-5.4",
+              error: "rate limit",
+              reason: "rate_limit",
+            },
+          ],
+        }),
+      );
+    try {
+      const { run } = createMinimalRun({
+        sessionEntry,
+        sessionStore,
+        sessionKey: "main",
+        storePath,
+        runOverrides: {
+          provider: "openai-codex",
+          model: "gpt-5.4",
+        },
+      });
+      await run();
+    } finally {
+      fallbackSpy.mockRestore();
+    }
+
+    const stored = JSON.parse(await readFile(storePath, "utf8")).main as SessionEntry;
+    expect(sessionEntry.providerOverride).toBeUndefined();
+    expect(sessionEntry.modelOverride).toBeUndefined();
+    expect(sessionEntry.modelOverrideSource).toBeUndefined();
+    expect(sessionEntry.authProfileOverride).toBe("anthropic:work");
+    expect(sessionEntry.authProfileOverrideSource).toBe("user");
+    expect(sessionEntry.authProfileOverrideCompactionCount).toBe(2);
+    expect(stored.providerOverride).toBeUndefined();
+    expect(stored.modelOverride).toBeUndefined();
+    expect(stored.modelOverrideSource).toBeUndefined();
+    expect(stored.authProfileOverride).toBe("anthropic:work");
+    expect(stored.authProfileOverrideSource).toBe("user");
+    expect(stored.authProfileOverrideCompactionCount).toBe(2);
+    expect(stored.modelProvider).toBe("anthropic");
+    expect(stored.model).toBe("claude-opus");
+    expect(stored.fallbackNoticeSelectedModel).toBe("anthropic/claude-opus");
+    expect(stored.fallbackNoticeActiveModel).toBe("anthropic/claude-haiku");
+  });
+
   it("does not persist fallback state for an equivalent CLI runtime alias", async () => {
     const sessionEntry: SessionEntry = {
       sessionId: "session",

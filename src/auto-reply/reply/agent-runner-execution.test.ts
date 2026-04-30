@@ -1187,7 +1187,9 @@ describe("runAgentTurnWithFallback", () => {
       compactionCount: 0,
     };
     const activeSessionStore = { main: sessionEntry };
-    state.runEmbeddedPiAgentMock.mockResolvedValueOnce({ payloads: [], meta: {} });
+    state.runEmbeddedPiAgentMock
+      .mockResolvedValueOnce({ payloads: [], meta: {} })
+      .mockResolvedValueOnce({ payloads: [{ text: "fallback ok" }], meta: {} });
     state.runWithModelFallbackMock.mockImplementationOnce(async (params: FallbackRunnerParams) => {
       const failedResult = await params.run("openai-codex", "gpt-5.4");
       expect(sessionEntry.providerOverride).toBe("openai-codex");
@@ -1204,8 +1206,9 @@ describe("runAgentTurnWithFallback", () => {
       });
       expect(sessionEntry.providerOverride).toBeUndefined();
       expect(sessionEntry.modelOverride).toBeUndefined();
+      const successfulResult = await params.run("anthropic", "claude");
       return {
-        result: { payloads: [{ text: "fallback ok" }], meta: {} },
+        result: successfulResult,
         provider: "anthropic",
         model: "claude",
         attempts: [],
@@ -1219,7 +1222,7 @@ describe("runAgentTurnWithFallback", () => {
       getActiveSessionEntry: () => sessionEntry,
     });
 
-    expect(result.kind).toBe("success");
+    expect(result.kind).toBe("final");
     expect(sessionEntry.providerOverride).toBeUndefined();
     expect(sessionEntry.modelOverride).toBeUndefined();
   });
@@ -3537,11 +3540,13 @@ describe("runAgentTurnWithFallback", () => {
       authProfileId: undefined,
       authProfileIdSource: undefined,
     });
-    expect(sessionEntry.providerOverride).toBe("openai-codex");
-    expect(sessionEntry.modelOverride).toBe("gpt-5.4");
-    expect(sessionEntry.modelOverrideSource).toBe("auto");
+    expect(sessionEntry.providerOverride).toBeUndefined();
+    expect(sessionEntry.modelOverride).toBeUndefined();
+    expect(sessionEntry.modelOverrideSource).toBeUndefined();
     expect(sessionEntry.authProfileOverride).toBeUndefined();
     expect(sessionEntry.authProfileOverrideSource).toBeUndefined();
+    expect(sessionStore.main.providerOverride).toBeUndefined();
+    expect(sessionStore.main.modelOverride).toBeUndefined();
     expect(sessionStore.main.authProfileOverride).toBeUndefined();
   });
 

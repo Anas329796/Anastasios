@@ -1,3 +1,4 @@
+import { areRuntimeModelRefsEquivalent } from "../../agents/model-runtime-aliases.js";
 import { deriveSessionTotalTokens, type NormalizedUsage } from "../../agents/usage.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { incrementCompactionCount } from "./session-updates.js";
@@ -22,6 +23,47 @@ function resolvePositiveTokenCount(value: number | undefined): number | undefine
   return typeof value === "number" && Number.isFinite(value) && value > 0
     ? Math.floor(value)
     : undefined;
+}
+
+function modelRefsEquivalent(
+  left: { provider?: string; model?: string },
+  right: { provider?: string; model?: string },
+): boolean {
+  if (!left.provider || !left.model || !right.provider || !right.model) {
+    return false;
+  }
+  return areRuntimeModelRefsEquivalent(
+    `${left.provider}/${left.model}`,
+    `${right.provider}/${right.model}`,
+  );
+}
+
+export function resolveRunSessionModelPersistence(params: {
+  selectedProvider?: string;
+  selectedModel?: string;
+  providerUsed?: string;
+  modelUsed?: string;
+}): Pick<PersistRunSessionUsageParams, "sessionModelProvider" | "sessionModel"> {
+  if (
+    !params.selectedProvider ||
+    !params.selectedModel ||
+    !params.providerUsed ||
+    !params.modelUsed
+  ) {
+    return {};
+  }
+  if (
+    modelRefsEquivalent(
+      { provider: params.selectedProvider, model: params.selectedModel },
+      { provider: params.providerUsed, model: params.modelUsed },
+    )
+  ) {
+    return {};
+  }
+  return {
+    sessionModelProvider: params.selectedProvider,
+    sessionModel: params.selectedModel,
+  };
 }
 
 export async function persistRunSessionUsage(params: PersistRunSessionUsageParams): Promise<void> {

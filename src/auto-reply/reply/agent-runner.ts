@@ -98,7 +98,11 @@ import {
   type ReplyOperation,
 } from "./reply-run-registry.js";
 import { createReplyToModeFilterForChannel, resolveReplyToMode } from "./reply-threading.js";
-import { incrementRunCompactionCount, persistRunSessionUsage } from "./session-run-accounting.js";
+import {
+  incrementRunCompactionCount,
+  persistRunSessionUsage,
+  resolveRunSessionModelPersistence,
+} from "./session-run-accounting.js";
 import { resolveSourceReplyVisibilityPolicy } from "./source-reply-delivery-mode.js";
 import { createTypingSignaler } from "./typing-mode.js";
 import type { TypingController } from "./typing.js";
@@ -197,6 +201,73 @@ function resolveConfiguredFallbackModel(params: {
     model: params.run.model,
     persistedAutoFallback: false,
   };
+}
+
+type AutoFallbackSelectionSnapshot = Pick<
+  SessionEntry,
+  | "providerOverride"
+  | "modelOverride"
+  | "modelOverrideSource"
+  | "modelOverrideFallbackOriginProvider"
+  | "modelOverrideFallbackOriginModel"
+>;
+
+function snapshotAutoFallbackSelection(
+  entry: SessionEntry,
+): AutoFallbackSelectionSnapshot | undefined {
+  if (entry.modelOverrideSource !== "auto") {
+    return undefined;
+  }
+  return {
+    providerOverride: entry.providerOverride,
+    modelOverride: entry.modelOverride,
+    modelOverrideSource: entry.modelOverrideSource,
+    modelOverrideFallbackOriginProvider: entry.modelOverrideFallbackOriginProvider,
+    modelOverrideFallbackOriginModel: entry.modelOverrideFallbackOriginModel,
+  };
+}
+
+function matchesAutoFallbackSelectionSnapshot(
+  entry: SessionEntry,
+  snapshot: AutoFallbackSelectionSnapshot,
+): boolean {
+  return (
+    entry.providerOverride === snapshot.providerOverride &&
+    entry.modelOverride === snapshot.modelOverride &&
+    entry.modelOverrideSource === snapshot.modelOverrideSource &&
+    entry.modelOverrideFallbackOriginProvider === snapshot.modelOverrideFallbackOriginProvider &&
+    entry.modelOverrideFallbackOriginModel === snapshot.modelOverrideFallbackOriginModel
+  );
+}
+
+function clearAutoFallbackSelectionAfterAccounting(
+  entry: SessionEntry,
+  expected: AutoFallbackSelectionSnapshot,
+): boolean {
+  if (!matchesAutoFallbackSelectionSnapshot(entry, expected)) {
+    return false;
+  }
+  let updated = false;
+  const clear = (key: keyof SessionEntry) => {
+    if (Object.hasOwn(entry, key)) {
+      delete entry[key];
+      updated = true;
+    }
+  };
+  clear("providerOverride");
+  clear("modelOverride");
+  clear("modelOverrideSource");
+  clear("modelOverrideFallbackOriginProvider");
+  clear("modelOverrideFallbackOriginModel");
+  if (entry.authProfileOverrideSource !== "user") {
+    clear("authProfileOverride");
+    clear("authProfileOverrideSource");
+    clear("authProfileOverrideCompactionCount");
+  }
+  if (updated) {
+    entry.updatedAt = Date.now();
+  }
+  return updated;
 }
 
 function buildInlinePluginStatusPayload(params: {
@@ -1539,6 +1610,15 @@ export async function runReplyAgent(params: {
       attempts: fallbackAttempts,
       state: fallbackStateEntry,
     });
+    const sessionModelPersistence = resolveRunSessionModelPersistence({
+      selectedProvider,
+      selectedModel,
+      providerUsed,
+      modelUsed,
+    });
+    const autoFallbackSelectionToClear = fallbackStateEntry
+      ? snapshotAutoFallbackSelection(fallbackStateEntry)
+      : undefined;
     if (fallbackTransition.stateChanged) {
       if (fallbackStateEntry) {
         fallbackStateEntry.fallbackNoticeSelectedModel = fallbackTransition.nextState.selectedModel;
@@ -1597,11 +1677,53 @@ export async function runReplyAgent(params: {
       usageIsContextSnapshot: usedCliProvider ? true : undefined,
       modelUsed,
       providerUsed,
+      ...sessionModelPersistence,
       contextTokensUsed,
       systemPromptReport: runResult.meta?.systemPromptReport,
       cliSessionId,
       cliSessionBinding,
     });
+
+    if (autoFallbackSelectionToClear) {
+      const currentFallbackStateEntry =
+        (sessionKey ? activeSessionStore?.[sessionKey] : undefined) ?? fallbackStateEntry;
+      if (
+        currentFallbackStateEntry &&
+        clearAutoFallbackSelectionAfterAccounting(
+          currentFallbackStateEntry,
+          autoFallbackSelectionToClear,
+        )
+      ) {
+        activeSessionEntry = currentFallbackStateEntry;
+        if (sessionKey && activeSessionStore) {
+          activeSessionStore[sessionKey] = currentFallbackStateEntry;
+        }
+      }
+      if (sessionKey && storePath) {
+        await updateSessionStoreEntry({
+          storePath,
+          sessionKey,
+          update: async (entry) => {
+            if (!matchesAutoFallbackSelectionSnapshot(entry, autoFallbackSelectionToClear)) {
+              return null;
+            }
+            const preserveUserAuthProfile = entry.authProfileOverrideSource === "user";
+            return {
+              providerOverride: undefined,
+              modelOverride: undefined,
+              modelOverrideSource: undefined,
+              modelOverrideFallbackOriginProvider: undefined,
+              modelOverrideFallbackOriginModel: undefined,
+              authProfileOverride: preserveUserAuthProfile ? entry.authProfileOverride : undefined,
+              authProfileOverrideSource: preserveUserAuthProfile ? "user" : undefined,
+              authProfileOverrideCompactionCount: preserveUserAuthProfile
+                ? entry.authProfileOverrideCompactionCount
+                : undefined,
+            };
+          },
+        });
+      }
+    }
 
     const returnSilentFallbackFailureIfNeeded = async (): Promise<ReplyPayload | undefined> => {
       const silentFallbackFailurePayload = buildSilentFallbackFailurePayload({

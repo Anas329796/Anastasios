@@ -1620,6 +1620,16 @@ export async function runAgentTurnWithFallback(params: {
                 });
                 lifecycleTerminalEmitted = true;
 
+                if (rollbackFallbackCandidateSelection) {
+                  try {
+                    await rollbackFallbackCandidateSelection();
+                    clearPendingFallbackRollback(rollbackFallbackCandidateSelection);
+                  } catch (rollbackError) {
+                    logVerbose(
+                      `failed to roll back fallback candidate selection after success (non-fatal): ${String(rollbackError)}`,
+                    );
+                  }
+                }
                 return result;
               } catch (err) {
                 unsubscribeAssistantBridge();
@@ -1994,6 +2004,16 @@ export async function runAgentTurnWithFallback(params: {
                 result.meta?.agentMeta?.compactionCount ?? 0,
               );
               attemptCompactionCount = Math.max(attemptCompactionCount, resultCompactionCount);
+              if (rollbackFallbackCandidateSelection) {
+                try {
+                  await rollbackFallbackCandidateSelection();
+                  clearPendingFallbackRollback(rollbackFallbackCandidateSelection);
+                } catch (rollbackError) {
+                  logVerbose(
+                    `failed to roll back fallback candidate selection after success (non-fatal): ${String(rollbackError)}`,
+                  );
+                }
+              }
               return result;
             } catch (err) {
               if (rollbackFallbackCandidateSelection) {
