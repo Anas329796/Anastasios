@@ -648,7 +648,7 @@ describe("command queue", () => {
       await blocker.promise;
     });
 
-    enqueueCommandInLane(lane, async () => {
+    void enqueueCommandInLane(lane, async () => {
       order.push("normal");
     });
     const high = enqueueCommandInLane(
@@ -701,10 +701,10 @@ describe("command queue", () => {
       await blocker.promise;
     });
 
-    enqueueCommandInLane(lane, async () => {
+    void enqueueCommandInLane(lane, async () => {
       order.push("default");
     });
-    enqueueCommandInLane(
+    void enqueueCommandInLane(
       lane,
       async () => {
         order.push("low");
@@ -730,7 +730,7 @@ describe("command queue", () => {
       });
 
       // Enqueue a low-priority entry that will age past the starvation threshold.
-      enqueueCommandInLane(
+      void enqueueCommandInLane(
         lane,
         async () => {
           order.push("low-aged");
@@ -741,15 +741,15 @@ describe("command queue", () => {
       // Advance past the starvation threshold so the low entry ages.
       await vi.advanceTimersByTimeAsync(STARVATION_PROMOTION_MS + 1);
 
-      // Now enqueue high-priority entries — they should NOT starve the aged low entry.
-      enqueueCommandInLane(
+      // Now enqueue high-priority entries -- they should NOT starve the aged low entry.
+      void enqueueCommandInLane(
         lane,
         async () => {
           order.push("high-1");
         },
         { priority: CommandPriority.High },
       );
-      enqueueCommandInLane(
+      void enqueueCommandInLane(
         lane,
         async () => {
           order.push("high-2");
@@ -780,7 +780,7 @@ describe("command queue", () => {
         await blocker.promise;
       });
 
-      enqueueCommandInLane(lane, async () => {}, {
+      void enqueueCommandInLane(lane, async () => {}, {
         priority: CommandPriority.Low,
         warnAfterMs: 5,
         onWait: (ms) => {
@@ -793,8 +793,7 @@ describe("command queue", () => {
       await first;
       await vi.advanceTimersByTimeAsync(1);
 
-      expect(reportedWaitMs).not.toBeNull();
-      expect(reportedWaitMs!).toBeGreaterThanOrEqual(10);
+      expect(reportedWaitMs).toBeGreaterThanOrEqual(10);
     } finally {
       vi.useRealTimers();
     }
