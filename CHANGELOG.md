@@ -541,6 +541,7 @@ Docs: https://docs.openclaw.ai
 
 ### Breaking
 
+- Packaging: exclude documentation images and assets (sponsor logos, showcase PNGs, screenshots) from the npm tarball, reducing compressed package size by ~6 MB without affecting runtime docs search or CLI behavior. Thanks @SebTardif.
 - Channels/iMessage: remove the bundled BlueBubbles channel surface and deprecate BlueBubbles-backed iMessage setup in OpenClaw. Existing `channels.bluebubbles` configs must migrate to `channels.imessage` using `imsg` on a signed-in Mac or an SSH wrapper, and non-macOS default `imsg` configs now report remote-Mac wrapper guidance.
 
 ### Fixes
