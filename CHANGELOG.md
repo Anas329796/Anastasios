@@ -541,6 +541,7 @@ Docs: https://docs.openclaw.ai
 
 ### Breaking
 
+- Performance/plugins: add optional `discovery` parameter to `loadBundledCapabilityRuntimeRegistry`, `resolveBundledPluginSources`, and `listChannelCatalogEntries` so callers that already hold a `PluginDiscoveryResult` can skip redundant filesystem walks; reuse discovery across retry attempts in the scoped capability loader. Thanks @SebTardif.
 - Channels/iMessage: remove the bundled BlueBubbles channel surface and deprecate BlueBubbles-backed iMessage setup in OpenClaw. Existing `channels.bluebubbles` configs must migrate to `channels.imessage` using `imsg` on a signed-in Mac or an SSH wrapper, and non-macOS default `imsg` configs now report remote-Mac wrapper guidance.
 
 ### Fixes
