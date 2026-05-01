@@ -541,6 +541,7 @@ Docs: https://docs.openclaw.ai
 
 ### Breaking
 
+- Agents/compaction: validate identifier survival after summarization, extracting opaque identifiers from the full pre-compaction transcript (including tool call arguments and tool result content, but not stripped `toolResult.details`), comparing against the post-compaction summary, and retrying with a preservation hint when more than two identifiers are lost under the strict identifier policy, within the existing quality guard retry budget. Thanks @SebTardif.
 - Channels/iMessage: remove the bundled BlueBubbles channel surface and deprecate BlueBubbles-backed iMessage setup in OpenClaw. Existing `channels.bluebubbles` configs must migrate to `channels.imessage` using `imsg` on a signed-in Mac or an SSH wrapper, and non-macOS default `imsg` configs now report remote-Mac wrapper guidance.
 
 ### Fixes
