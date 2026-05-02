@@ -137,6 +137,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+### Fixes
 - CLI backends: keep versioned OAuth identity matches reusable when auth profile ids rotate, so Claude CLI sessions do not reset and lose continuity during same-account OAuth refresh/profile alias changes. Fixes #78541.
 - Model providers: normalize APNG sniffed PNG uploads, preserve Gemini 3 tool-call thought-signature replay with documented fallback signatures, accept legacy `__env__:VAR` custom-provider keys, and repair snake_case tool-call transcript sanitization. Fixes #51881, #48915, #77566, and #42858.
 - Telegram/models: parse provider ids containing dots in `/models` callback buttons so `hf.co` model lists render as inline keyboard buttons. Fixes #38745.
@@ -1441,6 +1442,8 @@ Docs: https://docs.openclaw.ai
 - Providers/Google Vertex: route authorized_user ADC credentials through OpenClaw's REST transport so Docker installs using gcloud application-default credentials no longer crash in the Google SDK before requests are sent. Fixes #74628. Thanks @frankhal2001-design.
 - ACP/resolver: fall through to thread-bound session resolution when an explicit `--session` token cannot be resolved while preserving the bad-token diagnostic when no thread binding exists, so Discord slash commands that auto-fill the current thread ID as the positional ACP target no longer return "Unable to resolve session target" errors. Fixes #66299. Thanks @hclsys, @kindomLee, and @martingarramon.
 - macOS/Talk: route remote and custom Talk providers through Gateway `talk.speak` before falling back to the system voice, so configured providers such as OpenAI are no longer treated as local-voice-only. (#74645) Thanks @Fuma2013.
+- Heartbeat/parser: keep parsing later `tasks:` entries when a task contains an unrecognized indented field (e.g. `notes:`), so silent task drops no longer occur after the first non-`name`/`interval`/`prompt` field. (#74320) Thanks @BSG2000.
+
 - Agents/sessions: emit a terminal lifecycle backstop when embedded timeout/error turns return without `agent_end`, so Gateway sessions no longer stay stuck in `running` after failover surfaces a timeout. Fixes #74607. Thanks @millerc79.
 - Gateway/diagnostics: include stuck-session reason hints and recovery skip causes in warnings, so operators can tell whether a lane is waiting on active work, queued work, or stale bookkeeping. Thanks @vincentkoc.
 - Providers/DeepSeek: expose native DeepSeek V4 `xhigh` and `max` thinking levels through the provider `resolveThinkingProfile` hook so `/think xhigh|max` applies the intended effort instead of falling back to base levels. (#73008) Thanks @ai-hpc.
