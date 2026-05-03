@@ -2847,8 +2847,7 @@ main() {
                 OPENCLAW_UPDATE_IN_PROGRESS=1 "$claw" doctor </dev/tty || doctor_exit=$?
             fi
             if (( doctor_exit == 130 )); then
-                ui_warn "Installation interrupted"
-                return 0
+                abort_install
             fi
             if (( doctor_exit == 0 )); then
                 doctor_ok=1
