@@ -256,16 +256,10 @@ export function createWebOnMessageHandler(params: {
           groupHistoryKey,
           agentId: route.agentId,
           sessionKey: route.sessionKey,
-<<<<<<< HEAD
           baseMentionConfig,
+          providerMentionPatterns: account.mentionPatterns,
           authDir: account.authDir,
           selfChatMode: account.selfChatMode,
-=======
-          baseMentionConfig: params.baseMentionConfig,
-          providerMentionPatterns: params.account.mentionPatterns,
-          authDir: params.account.authDir,
-          selfChatMode: params.account.selfChatMode,
->>>>>>> 1bf3d66c14 (fix: address mention policy review follow-ups)
           groupHistories: params.groupHistories,
           groupHistoryLimit: params.groupHistoryLimit,
           groupMemberNames: params.groupMemberNames,

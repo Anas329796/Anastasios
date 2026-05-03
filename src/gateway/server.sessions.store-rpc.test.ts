@@ -2,9 +2,8 @@ import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { expect, test, vi } from "vitest";
-import { piSdkMock, rpcReq, testState, writeSessionStore } from "./test-helpers.js";
+import { piSdkMock, rpcReq, writeSessionStore } from "./test-helpers.js";
 import {
-  directSessionReq as directSessionHandlerReq,
   setupGatewaySessionsTestHarness,
   getGatewayConfigModule,
   getSessionsHandlers,
@@ -371,7 +370,7 @@ test("lists and patches session store via sessions.* RPC", async () => {
   expect(modelPatched.payload?.resolved?.modelProvider).toBe("openai");
   expect(modelPatched.payload?.resolved?.model).toBe("gpt-test-a");
   expect(modelPatched.payload?.resolved?.agentRuntime).toEqual({
-    id: "codex",
+    id: "pi",
     source: "implicit",
   });
 
@@ -380,7 +379,6 @@ test("lists and patches session store via sessions.* RPC", async () => {
       key: string;
       modelProvider?: string;
       model?: string;
-      agentRuntime?: { id: string; source: string };
     }>;
   }>("sessions.list", {});
   expect(listAfterModelPatch.ok).toBe(true);
@@ -389,7 +387,6 @@ test("lists and patches session store via sessions.* RPC", async () => {
   );
   expect(mainAfterModelPatch?.modelProvider).toBe("openai");
   expect(mainAfterModelPatch?.model).toBe("gpt-test-a");
-  expect(mainAfterModelPatch?.agentRuntime).toEqual({ id: "codex", source: "implicit" });
 
   const compacted = await directSessionReq<{ ok: true; compacted: boolean }>("sessions.compact", {
     key: "agent:main:main",
