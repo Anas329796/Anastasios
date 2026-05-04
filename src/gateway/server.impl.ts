@@ -1270,6 +1270,7 @@ export async function startGatewayServer(
       chatDeltaSentAt: chatRunState.deltaSentAt,
       chatDeltaLastBroadcastLen: chatRunState.deltaLastBroadcastLen,
       chatDeltaLastBroadcastText: chatRunState.deltaLastBroadcastText,
+      chatPendingUserMessages: chatRunState.pendingUserMessages,
       addChatRun,
       removeChatRun,
       subscribeSessionEvents: sessionEventSubscribers.subscribe,

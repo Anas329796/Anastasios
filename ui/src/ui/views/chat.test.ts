@@ -143,6 +143,7 @@ vi.mock("../chat/grouped-render.ts", () => ({
   renderReadingIndicatorGroup: () => {
     const element = document.createElement("div");
     element.className = "chat-reading-indicator";
+    element.textContent = "Got it. I'm on it.";
     return element;
   },
   renderStreamingGroup: (text: string) => {
@@ -526,6 +527,7 @@ describe("chat loading skeleton", () => {
 
     expect(container.querySelector(".chat-loading-skeleton")).toBeNull();
     expect(container.querySelectorAll(".chat-reading-indicator")).toHaveLength(1);
+    expect(container.textContent).toContain("Got it. I'm on it.");
   });
 });
 
