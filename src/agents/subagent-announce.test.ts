@@ -172,6 +172,18 @@ vi.mock("./subagent-announce-delivery.js", () => ({
     params.requesterOrigin,
   resolveSubagentAnnounceTimeoutMs: () => 10_000,
   runAnnounceDeliveryWithRetry: async <T>(params: { run: () => Promise<T> }) => await params.run(),
+<<<<<<< HEAD
+=======
+  isTransientAnnounceDeliveryError: (error: unknown) => {
+    const message =
+      error instanceof Error
+        ? error.message
+        : typeof error === "string"
+          ? error
+          : "";
+    return message.toLowerCase().includes("gateway closed");
+  },
+>>>>>>> d7004520 (test(agents): satisfy announce retry mock lint rule)
 }));
 
 vi.mock("./subagent-announce.registry.runtime.js", () => subagentRegistryRuntimeMock);
