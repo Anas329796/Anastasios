@@ -849,6 +849,19 @@ export async function spawnSubagentDirect(
         'sessions_spawn sandbox="require" needs a sandboxed target runtime. Pick a sandboxed agentId or use sandbox="inherit".',
     };
   }
+
+  // All local guards passed — verify gateway is reachable at the scope tier
+  // required for subsequent lifecycle calls (agent → write, sessions.delete/
+  // sessions.patch → admin) before performing any gateway operations.
+  try {
+    await ensureGatewayReadyForSubagentSpawn();
+  } catch (err) {
+    return {
+      status: "error",
+      error: summarizeError(err),
+    };
+  }
+
   const childDepth = callerDepth + 1;
   const spawnedByKey = requesterInternalKey;
   const childCapabilities = resolveSubagentCapabilities({
