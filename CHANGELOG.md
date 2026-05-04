@@ -340,6 +340,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Auto-reply: clear stale runtime model cache fields when `/new` or `/reset` creates a fresh channel session, so changed model defaults apply after reset unless the user kept an explicit override. Fixes #77322. Thanks @mjamiv.
 - Google/Gemini: default new API-key onboarding to stable `google/gemini-2.5-flash` instead of the preview Pro route, reducing surprise daily quota exhaustion. Fixes #79670. Thanks @HugeBunny.
 - Amazon Bedrock: expose Claude thinking profiles through the lightweight provider policy surface so `/think:adaptive` validates before the Bedrock runtime plugin is loaded. Fixes #79754. Thanks @phoenixyy and @hclsys.
 - Codex/transcripts: mirror dynamic tool calls and outputs into Codex app-server transcripts so tool activity is visible alongside assistant text instead of being elided, with per-item output capped at 12,000 characters. (#79952) Thanks @scoootscooob.
