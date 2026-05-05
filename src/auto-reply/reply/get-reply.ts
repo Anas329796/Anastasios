@@ -43,7 +43,6 @@ import {
 import { handleInlineActions } from "./get-reply-inline-actions.js";
 import { maybeResolveNativeSlashCommandFastReply } from "./get-reply-native-slash-fast-path.js";
 import { runPreparedReply } from "./get-reply-run.js";
-import { resolveChannelModelSupportsVision } from "./image-model-helpers.js";
 import { finalizeInboundContext } from "./inbound-context.js";
 import { hasInboundMedia } from "./inbound-media.js";
 import { emitPreAgentMessageHooks } from "./message-preprocess-hooks.js";
@@ -266,11 +265,10 @@ export async function getReplyFromConfig(
             // providerless fallbacks should resolve against that provider, not defaultProvider.
             // This matches the allowlist check logic in chat.ts.
             const overrideProvider = modelRef.ref.provider;
-            const providerContext = overrideProvider ?? defaultProvider;
             // Rebuild alias index with the correct provider context
             const fallbackAliasIndex =
-              overrideProvider && overrideProvider !== defaultProvider
-                ? buildModelAliasIndex({ cfg, defaultProvider: providerContext })
+              overrideProvider !== defaultProvider
+                ? buildModelAliasIndex({ cfg, defaultProvider: overrideProvider })
                 : aliasIndex;
             for (const fallbackRaw of opts.modelOverrideFallbacks) {
               if (typeof fallbackRaw !== "string") {
@@ -282,7 +280,7 @@ export async function getReplyFromConfig(
               }
               const fallbackRef = resolveModelRefFromString({
                 raw: trimmed,
-                defaultProvider: providerContext,
+                defaultProvider: overrideProvider,
                 aliasIndex: fallbackAliasIndex,
               });
               if (fallbackRef) {
@@ -333,6 +331,8 @@ export async function getReplyFromConfig(
       }
     }
   } else if (opts?.isHeartbeat) {
+    // Note: modelOverride and isHeartbeat are mutually exclusive.
+    // modelOverride takes precedence when both are set (unlikely in practice).
     // Prefer the resolved per-agent heartbeat model passed from the heartbeat runner,
     // fall back to the global defaults heartbeat model for backward compatibility.
     const heartbeatRaw =
