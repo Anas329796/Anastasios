@@ -411,6 +411,7 @@ Docs: https://docs.openclaw.ai
 - Exec approvals: enforce allowlist `argPattern` argument restrictions on Linux and macOS as well as Windows, so an entry like `{ pattern: "python3", argPattern: "^safe\.py$" }` no longer silently relaxes to a path-only match on non-Windows hosts. (#75143) Thanks @eleqtrizit.
 - Agents/compaction: disable Pi auto-compaction whenever OpenClaw effectively owns safeguard compaction, including provider-backed safeguard mode, so Pi and OpenClaw no longer fight over long-session compaction. Fixes #73003. (#73839) Thanks @bradhallett.
 - Telegram/streaming: finalize text replies by stopping the edited stream message instead of sending a second answer bubble, so Telegram turns cannot duplicate the streamed final response. (#77947) Thanks @obviyus.
+- Agents/exec: surface the target node name in exec tool transparency messages when `host=node` is set, so users with paired nodes (Raspberry Pi, remote servers) can tell at a glance where a command ran. (#77719)
 
 ## 2026.5.3-1
 
