@@ -312,11 +312,12 @@ export async function handleNextcloudTalkInbound(params: {
   })
     ? core.channel.mentions.buildMentionRegexes(config as OpenClawConfig, route.agentId)
     : [];
-  const wasMentioned = mentionRegexes.length
+  const canDetectMention = mentionRegexes.length > 0;
+  const wasMentioned = canDetectMention
     ? core.channel.mentions.matchesMentionPatterns(rawBody, mentionRegexes)
     : false;
   if (isGroup) {
-    access = await resolveAccess(wasMentioned);
+    access = await resolveAccess(canDetectMention ? wasMentioned : undefined);
   }
 
   if (isGroup && access.activationAccess.shouldSkip) {
