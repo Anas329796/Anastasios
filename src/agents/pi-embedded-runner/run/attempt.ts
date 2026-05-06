@@ -3848,6 +3848,7 @@ export async function runEmbeddedAttempt(
         // This is fire-and-forget, so we don't await
         // Run even on compaction timeout so plugins can log/cleanup
         if (hookRunner?.hasHooks("agent_end")) {
+          const prepStagesSnapshot = prepStages.snapshot();
           hookRunner
             .runAgentEnd(
               {
@@ -3855,6 +3856,7 @@ export async function runEmbeddedAttempt(
                 success: !aborted && !promptError,
                 error: promptError ? formatErrorMessage(promptError) : undefined,
                 durationMs: Date.now() - promptStartedAt,
+                prepStages: prepStagesSnapshot,
               },
               {
                 runId: params.runId,
@@ -4078,6 +4080,7 @@ export async function runEmbeddedAttempt(
         bootstrapPromptWarningSignaturesSeen: bootstrapPromptWarning.warningSignaturesSeen,
         bootstrapPromptWarningSignature: bootstrapPromptWarning.signature,
         systemPromptReport,
+        prepStages: prepStages.snapshot(),
         finalPromptText,
         messagesSnapshot,
         assistantTexts,
