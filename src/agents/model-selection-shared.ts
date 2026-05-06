@@ -702,7 +702,13 @@ export function buildAllowedModelSetWithFallbacks(params: {
     if (options?.resolveAliasFirst && !trimmed.includes("/")) {
       const aliasMatch = aliasIndex.byAlias.get(normalizeLowercaseStringOrEmpty(trimmed));
       if (aliasMatch) {
-        addAllowedRef(aliasMatch.ref);
+        const inferredProvider = resolveBareModelDefaultProvider({
+          cfg: params.cfg,
+          catalog,
+          model: aliasMatch.ref.model,
+          defaultProvider: aliasMatch.ref.provider,
+        });
+        addAllowedRef({ provider: inferredProvider, model: aliasMatch.ref.model });
         return;
       }
     }
