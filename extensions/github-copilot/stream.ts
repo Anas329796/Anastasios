@@ -7,6 +7,7 @@ import {
   streamWithPayloadPatch,
 } from "openclaw/plugin-sdk/provider-stream-shared";
 import { rewriteCopilotResponsePayloadConnectionBoundIds } from "./connection-bound-ids.js";
+import { createCopilotNativeWebSearchWrapper } from "./native-web-search.js";
 
 type _StreamContext = Parameters<StreamFn>[1];
 type StreamOptions = Parameters<StreamFn>[2];
@@ -86,5 +87,7 @@ export function wrapCopilotOpenAIResponsesStream(
 }
 
 export function wrapCopilotProviderStream(ctx: ProviderWrapStreamFnContext): StreamFn | undefined {
-  return wrapCopilotOpenAIResponsesStream(wrapCopilotAnthropicStream(ctx.streamFn));
+  const copilotWrapped = wrapCopilotOpenAIResponsesStream(wrapCopilotAnthropicStream(ctx.streamFn));
+  if (!copilotWrapped) return undefined;
+  return createCopilotNativeWebSearchWrapper(copilotWrapped, { config: ctx.config });
 }
