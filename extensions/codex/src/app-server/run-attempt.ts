@@ -2241,7 +2241,7 @@ function filterCodexDynamicToolsForAllowlist<T extends { name: string }>(
   tools: T[],
   toolsAllow?: string[],
 ): T[] {
-  if (!toolsAllow || toolsAllow.length === 0) {
+  if (toolsAllow === undefined) {
     return tools;
   }
   const allowSet = new Set(
