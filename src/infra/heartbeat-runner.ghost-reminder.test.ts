@@ -608,14 +608,17 @@ describe("Ghost reminder bug (issue #13317)", () => {
     });
   });
 
-  it("does not force owner downgrade for audience: 'internal' events even when trusted: false", async () => {
-    // `audience: "internal" + trusted: false` is the shape used by the hidden
-    // runtime-context lane (e.g. queueCronAwarenessSystemEvent). The text is
-    // wrapped in INTERNAL_RUNTIME_CONTEXT_*, never reaches a user-facing
-    // surface, and is therefore not user-impersonatable. The heartbeat
-    // owner-auth scan must skip it; otherwise a hidden cron-awareness event
-    // would silently strip owner-only tools/directives from the next
-    // heartbeat-driven reply turn.
+  it("forces owner downgrade for audience: 'internal' events when trusted: false", async () => {
+    // `audience: "internal" + trusted: false` events (e.g.
+    // queueCronAwarenessSystemEvent relaying cron output for hidden agent
+    // awareness) are wrapped in INTERNAL_RUNTIME_CONTEXT_* delimiters and
+    // hidden from user-facing transcripts — but the wrapped text still
+    // flows into the model's prompt. Attacker-influenceable content must
+    // NOT have owner-only tool access just because the line is later
+    // hidden from the user-facing surface; the trust signal is the source
+    // of truth, not visibility. Defense in depth: heartbeat owner-auth
+    // downgrade fires for ANY pending event with trusted: false,
+    // regardless of audience.
     const { result, calledCtx } = await runHeartbeatCase({
       tmpPrefix: "openclaw-internal-audience-untrusted-",
       replyText: "Handled internally",
@@ -632,7 +635,7 @@ describe("Ghost reminder bug (issue #13317)", () => {
 
     expect(result.status).toBe("ran");
     expect(calledCtx?.Provider).toBe("heartbeat");
-    expect(calledCtx?.ForceSenderIsOwnerFalse).toBe(false);
+    expect(calledCtx?.ForceSenderIsOwnerFalse).toBe(true);
   });
 
   it("routes wake-triggered heartbeat replies using queued system-event delivery context", async () => {

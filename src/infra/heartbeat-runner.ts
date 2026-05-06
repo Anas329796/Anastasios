@@ -1525,21 +1525,19 @@ export async function runHeartbeatOnce(opts: {
     runSessionKey === sessionKey
       ? preflight.pendingEventEntries
       : peekSystemEventEntries(runSessionKey);
-  // Owner-auth downgrade detects user-impersonation of System (untrusted)
-  // lines, but `audience: "internal"` events are runtime-generated, hidden
-  // behind the INTERNAL_RUNTIME_CONTEXT wrap, and stripped from every
-  // user-facing surface — they cannot have come from user input. Excluding
-  // them here mirrors the consumer-side carve-out in get-reply-run.ts and
-  // keeps the heartbeat path from disabling owner-only tools/directives
-  // because of an `audience: "internal" + trusted: false` event queued for
-  // hidden agent awareness (e.g. queueCronAwarenessSystemEvent).
-  const isUserFacingUntrustedEvent = (event: SystemEvent): boolean =>
-    event.trusted === false && event.audience !== "internal";
+  // Owner-auth downgrade fires for ANY pending event with `trusted: false`,
+  // regardless of audience. `audience: "internal"` events are hidden from
+  // user-facing transcripts but still flow into the model's prompt via the
+  // INTERNAL_RUNTIME_CONTEXT wrap, so attacker-influenceable content (e.g.
+  // a cron payload relayed via `queueCronAwarenessSystemEvent` with
+  // `trusted: false`) must NOT have access to owner-only tools or
+  // directives during the heartbeat-driven reply turn that drains it. The
+  // trust signal is the source of truth; visibility is not.
   const hasUntrustedInspectedEvents =
     preflight.shouldInspectPendingEvents &&
-    preflight.pendingEventEntries.some(isUserFacingUntrustedEvent);
+    preflight.pendingEventEntries.some((event) => event.trusted === false);
   const hasUntrustedActiveSessionEvents = activeSessionPendingEventEntries.some(
-    isUserFacingUntrustedEvent,
+    (event) => event.trusted === false,
   );
   const hasUntrustedPendingEvents = hasUntrustedInspectedEvents || hasUntrustedActiveSessionEvents;
 

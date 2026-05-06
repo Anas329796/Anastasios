@@ -3,7 +3,6 @@ import { resolveSessionAuthProfileOverride } from "../../agents/auth-profiles/se
 import type { ExecToolDefaults } from "../../agents/bash-tools.js";
 import { resolveFastModeState } from "../../agents/fast-mode.js";
 import { resolveAgentHarnessPolicy } from "../../agents/harness/selection.js";
-import { stripInternalRuntimeContext } from "../../agents/internal-runtime-context.js";
 import { listOpenAIAuthProfileProvidersForAgentRuntime } from "../../agents/openai-codex-routing.js";
 import { resolveEmbeddedFullAccessState } from "../../agents/pi-embedded-runner/sandbox-info.js";
 import type { EmbeddedFullAccessBlockedReason } from "../../agents/pi-embedded-runner/types.js";
@@ -704,16 +703,15 @@ export async function runPreparedReply(
       });
       if (eventsBlock) {
         drainedSystemEventBlocks.push(eventsBlock);
-        // Owner-auth downgrade detects potential user-impersonation of System
-        // (untrusted) lines. Internal-runtime-context blocks are
-        // runtime-generated and stripped from every user-facing surface, so
-        // their `System (untrusted):` prefixes cannot have come from user
-        // input — exclude them from the scan. Without this, an
-        // `audience: "internal"` event that happens to carry an untrusted
-        // text payload (e.g. cron output relayed for agent awareness) would
-        // strip owner-only tools from the next reply turn even though the
-        // user never saw the event.
-        if (UNTRUSTED_SYSTEM_EVENT_LINE_RE.test(stripInternalRuntimeContext(eventsBlock))) {
+        // Owner-auth downgrade fires for any `System (untrusted):` line in
+        // the drained block — including lines inside an
+        // INTERNAL_RUNTIME_CONTEXT wrap. The wrapped block is hidden from
+        // the user-facing transcript but still flows into the model's
+        // prompt, so attacker-influenceable content (e.g. a cron payload
+        // relayed via `queueCronAwarenessSystemEvent` with `trusted:
+        // false`) must NOT have access to owner-only tools or directives.
+        // The trust signal is the source of truth here; visibility is not.
+        if (UNTRUSTED_SYSTEM_EVENT_LINE_RE.test(eventsBlock)) {
           forceSenderIsOwnerFalseFromSystemEvents = true;
         }
       }

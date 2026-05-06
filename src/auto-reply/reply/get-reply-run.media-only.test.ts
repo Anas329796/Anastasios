@@ -1528,14 +1528,15 @@ describe("runPreparedReply media-only handling", () => {
     expect(call?.followupRun.run.senderIsOwner).toBe(true);
   });
 
-  it("does not downgrade sender ownership when untrusted lines are inside an internal-runtime-context wrap", async () => {
-    // Internal-runtime-context blocks are runtime-generated and stripped from
-    // every user-facing surface, so untrusted-system-event lines inside the
-    // wrap cannot have come from user input — the owner-auth scan must
-    // ignore them. Without this, an `audience: "internal"` event whose
-    // payload happens to carry an untrusted text fragment (e.g. cron output
-    // relayed for agent awareness) would silently strip owner-only tools
-    // from the next reply turn.
+  it("downgrades sender ownership when untrusted lines are inside an internal-runtime-context wrap", async () => {
+    // Internal-runtime-context blocks are hidden from user-facing
+    // transcripts but still flow into the model's prompt via the wrap, so
+    // attacker-influenceable `System (untrusted):` content inside the wrap
+    // (e.g. a cron payload relayed via queueCronAwarenessSystemEvent with
+    // trusted: false) must still trigger owner-tool downgrade. Visibility
+    // is not the source of truth here — the trust signal is. Defense in
+    // depth: refuse owner-only tools whenever any drained block carries an
+    // untrusted line, even if the user never sees the line.
     vi.mocked(drainFormattedSystemEvents).mockResolvedValueOnce(
       [
         "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>",
@@ -1551,13 +1552,13 @@ describe("runPreparedReply media-only handling", () => {
     await runPreparedReply(params);
 
     const call = vi.mocked(runReplyAgent).mock.calls[0]?.[0];
-    expect(call?.followupRun.run.senderIsOwner).toBe(true);
+    expect(call?.followupRun.run.senderIsOwner).toBe(false);
   });
 
-  it("still downgrades sender ownership when untrusted lines appear outside the internal-runtime-context wrap", async () => {
-    // Confirms the fix scopes precisely to wrapped content. An untrusted
-    // line that is NOT inside an internal-runtime-context block must still
-    // trip the downgrade — wrapping is the carve-out, not the new default.
+  it("downgrades sender ownership when untrusted lines appear outside the internal-runtime-context wrap", async () => {
+    // Same downgrade applies regardless of whether the untrusted line sits
+    // inside or outside an internal-runtime-context wrap. This is the
+    // base case; the test above is the wrapped case.
     vi.mocked(drainFormattedSystemEvents).mockResolvedValueOnce(
       [
         "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>",
