@@ -345,7 +345,9 @@ describe("runEmbeddedAttempt context engine sessionKey forwarding", () => {
   });
 
   it("exposes embedded prep stages on attempt result and agent_end hook event", async () => {
-    const runAgentEnd = vi.fn(async () => {});
+    let clock = 1_000;
+    vi.spyOn(Date, "now").mockImplementation(() => clock);
+    const runAgentEnd = vi.fn(async (_event: unknown, _ctx: unknown) => {});
     hoisted.getGlobalHookRunnerMock.mockReturnValue({
       hasHooks: vi.fn((name: string) => name === "agent_end"),
       runAgentEnd,
@@ -356,6 +358,7 @@ describe("runEmbeddedAttempt context engine sessionKey forwarding", () => {
       sessionKey,
       tempPaths,
       sessionPrompt: async (session) => {
+        clock = 2_000;
         session.messages = [
           ...session.messages,
           { role: "assistant", content: "done", timestamp: 2 },
@@ -363,6 +366,7 @@ describe("runEmbeddedAttempt context engine sessionKey forwarding", () => {
       },
     });
 
+    expect(result.prepStages?.totalMs).toBe(0);
     expect(result.prepStages).toEqual(
       expect.objectContaining({
         totalMs: expect.any(Number),
@@ -385,6 +389,11 @@ describe("runEmbeddedAttempt context engine sessionKey forwarding", () => {
         ]),
       }),
     );
+    const agentEndEvent = runAgentEnd.mock.calls[0]?.[0] as
+      | { durationMs?: number; prepStages?: unknown }
+      | undefined;
+    expect(agentEndEvent?.durationMs).toBe(1_000);
+    expect(agentEndEvent?.prepStages).toBe(result.prepStages);
     expect(runAgentEnd).toHaveBeenCalledWith(
       expect.objectContaining({
         durationMs: expect.any(Number),
