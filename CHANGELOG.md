@@ -94,6 +94,7 @@ Docs: https://docs.openclaw.ai
 
 ### Changes
 
+- MCP/approvals: gate bundle-MCP tool calls through the existing plugin-approval pipeline when an MCP server returns a standard consent envelope (`{ok: false, requires_confirmation: true, action_id, summary}`). The `action_id` is redacted from the model's view; the user replies `/approve <id> allow-once|allow-always|deny` on the trusted channel and OpenClaw re-calls the tool with `confirmation_token = action_id`. Servers that don't return the envelope are unaffected. Reuses the same channel-auth, ID-prefix routing, and reply parser already used for shell-exec approvals. Disable per-deployment with `mcp.approvals.enabled: false`. Thanks @oalterg.
 - Docs: add a dedicated ds4 provider page with local DeepSeek V4 Flash config, on-demand startup, context sizing, and live verification steps.
 - Maintainers: add a Clawdtributor skill for Discrawl-backed contributor PR triage, live status checks, and compact review formatting.
 - Telegram: support Mini App `web_app` buttons in generic message presentation payloads, allowing `openclaw message send --presentation` to render Telegram Web App inline buttons for private chats. (#81356) Thanks @jzakirov.
