@@ -5,8 +5,10 @@ import { MALFORMED_STREAMING_FRAGMENT_ERROR_MESSAGE } from "../shared/assistant-
 import { getSlashCommands, parseCommand } from "./commands.js";
 import {
   createBackspaceDeduper,
+  createStartupConversationSummaryListParams,
   createDeferredTuiFinish,
   drainAndStopTuiSafely,
+  formatStartupConversationSummary,
   installTuiTerminalLossExitHandler,
   isIgnorableTuiStopError,
   isTuiTerminalLossError,
@@ -19,6 +21,7 @@ import {
   resolveLocalAuthSpawnCwd,
   resolveLocalAuthSpawnOptions,
   resolveTuiSessionKey,
+  shouldFetchStartupConversationSummary,
   stopTuiSafely,
 } from "./tui.js";
 
@@ -191,6 +194,39 @@ describe("resolveGatewayDisconnectState", () => {
     expect(state.connectionStatus).toBe("gateway disconnected: network timeout");
     expect(state.activityStatus).toBe("idle");
     expect(state.pairingHint).toBeUndefined();
+  });
+});
+
+describe("startup conversation summary", () => {
+  it("formats a bounded prior-session preview", () => {
+    expect(formatStartupConversationSummary("  Project plan\n\nNext step  ")).toEqual([
+      "startup summary from your last conversation:",
+      "- Project plan",
+      "- Next step",
+    ]);
+  });
+
+  it("only fetches on the first non-local connection", () => {
+    expect(shouldFetchStartupConversationSummary({ isLocalMode: false, reconnected: false })).toBe(
+      true,
+    );
+    expect(shouldFetchStartupConversationSummary({ isLocalMode: false, reconnected: true })).toBe(
+      false,
+    );
+    expect(shouldFetchStartupConversationSummary({ isLocalMode: true, reconnected: false })).toBe(
+      false,
+    );
+  });
+
+  it("scopes startup session lookup to the current agent", () => {
+    expect(createStartupConversationSummaryListParams("Work")).toEqual({
+      limit: 10,
+      includeGlobal: false,
+      includeUnknown: false,
+      includeDerivedTitles: true,
+      includeLastMessage: true,
+      agentId: "work",
+    });
   });
 });
 
