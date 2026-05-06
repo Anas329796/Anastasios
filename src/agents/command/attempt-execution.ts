@@ -460,6 +460,11 @@ export function runAgentAttempt(params: {
     workspaceDir: params.workspaceDir,
   });
   if (!isRawModelRun && isCliProvider(cliExecutionProvider, params.cfg)) {
+    if (params.opts.toolsAllow !== undefined) {
+      throw new Error(
+        "toolsAllow is only supported for embedded native runs; CLI-backed native runs cannot enforce runtime tool allowlists.",
+      );
+    }
     const cliSessionBinding = getCliSessionBinding(params.sessionEntry, cliExecutionProvider);
     const resolveReusableCliSessionBinding = async () => {
       if (

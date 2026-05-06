@@ -155,6 +155,7 @@ describe("CLI attempt execution", () => {
     sessionStore: Record<string, SessionEntry>;
     body: string;
     runId: string;
+    opts?: Partial<Parameters<typeof runAgentAttempt>[0]["opts"]>;
   }) {
     await runAgentAttempt({
       providerOverride: "claude-cli",
@@ -172,7 +173,10 @@ describe("CLI attempt execution", () => {
       resolvedThinkLevel: "medium",
       timeoutMs: 1_000,
       runId: params.runId,
-      opts: { senderIsOwner: false } as Parameters<typeof runAgentAttempt>[0]["opts"],
+      opts: {
+        senderIsOwner: false,
+        ...params.opts,
+      } as Parameters<typeof runAgentAttempt>[0]["opts"],
       runContext: {} as Parameters<typeof runAgentAttempt>[0]["runContext"],
       spawnedBy: undefined,
       messageChannel: undefined,
@@ -186,6 +190,38 @@ describe("CLI attempt execution", () => {
       sessionHasHistory: false,
     });
   }
+
+  it.each([
+    { label: "non-empty", toolsAllow: ["read"] },
+    { label: "empty", toolsAllow: [] },
+  ])(
+    "rejects $label toolsAllow for CLI-backed native runs before dispatch",
+    async ({ toolsAllow }) => {
+      const sessionKey = "agent:main:subagent:cli-tools-allow";
+      const sessionEntry: SessionEntry = {
+        sessionId: "session-cli-tools-allow",
+        updatedAt: Date.now(),
+      };
+      const sessionStore: Record<string, SessionEntry> = { [sessionKey]: sessionEntry };
+      await fs.writeFile(storePath, JSON.stringify(sessionStore, null, 2), "utf-8");
+
+      await expect(
+        runClaudeCliAttempt({
+          sessionKey,
+          sessionEntry,
+          sessionStore,
+          body: "use only read",
+          runId: "run-cli-tools-allow",
+          opts: { toolsAllow },
+        }),
+      ).rejects.toThrow(
+        "toolsAllow is only supported for embedded native runs; CLI-backed native runs cannot enforce runtime tool allowlists.",
+      );
+
+      expect(runCliAgentMock).not.toHaveBeenCalled();
+      expect(runEmbeddedPiAgentMock).not.toHaveBeenCalled();
+    },
+  );
 
   it("clears stale Claude CLI session IDs before retrying after session expiration", async () => {
     const sessionKey = "agent:main:subagent:cli-expired";
