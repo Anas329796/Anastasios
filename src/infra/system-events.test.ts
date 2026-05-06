@@ -243,6 +243,51 @@ describe("system events (session routing)", () => {
     ]);
   });
 
+  it("drains heartbeat-noise-shaped audience: 'internal' events through the wrap (audience bypasses noise filter)", async () => {
+    // compactSystemEvent strips heartbeat-noise text ("reason periodic",
+    // "Read HEARTBEAT.md", "heartbeat poll", "heartbeat wake") from
+    // user-facing relays so they don't appear in chat. Internal-audience
+    // events route through the wrap (never user-relayed), so the noise
+    // filter must be bypassed for them — otherwise the event is consumed
+    // from the queue and silently dropped (same no-consumer hole class as
+    // the exec-shape filter). Each of the four noise patterns is asserted
+    // here so a future filter regression in any of them is caught.
+    const noisePhrases = [
+      "Reason periodic: cron run completed at 09:00",
+      "Read HEARTBEAT.md awareness: cron output ready for review",
+      "Cron output: heartbeat poll reference attached",
+      "Awareness: heartbeat wake context for the next turn",
+    ];
+    for (const text of noisePhrases) {
+      const key = `agent:main:test-audience-internal-noise-${text.length}`;
+      enqueueSystemEvent(text, {
+        sessionKey: key,
+        trusted: false,
+        audience: "internal",
+      });
+      const result = await drainFormattedEvents(key);
+      expect(result, `noise phrase: ${text}`).toBeDefined();
+      expect(result).toContain("<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>");
+      expect(result).toContain(text);
+      expect(result).toContain("<<<END_OPENCLAW_INTERNAL_CONTEXT>>>");
+      expect(peekSystemEvents(key)).toEqual([]);
+    }
+  });
+
+  it("still strips heartbeat-noise from user-facing events (regression scope kept narrow to internal)", async () => {
+    // Confirms the audience-bypass is precise: user-facing events still
+    // get filtered through compactSystemEvent's noise gates. Without this
+    // assertion a regression that flipped the polarity of the audience
+    // check would silently start relaying heartbeat noise to users.
+    const key = "agent:main:test-user-facing-noise-still-stripped";
+    enqueueSystemEvent("Read HEARTBEAT.md and proceed with periodic checkin", {
+      sessionKey: key,
+    });
+    const result = await drainFormattedEvents(key);
+    expect(result).toBeUndefined();
+    expect(peekSystemEvents(key)).toEqual([]);
+  });
+
   it("drains exec-shaped audience: 'internal' events through the wrap (audience overrides text-shape filter)", async () => {
     // The exec-completion filter exists to keep user-facing exec completion
     // events on the heartbeat relay path. `audience: "internal"` events

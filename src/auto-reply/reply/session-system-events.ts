@@ -16,6 +16,7 @@ import {
   consumeSelectedSystemEventEntries,
   peekSystemEventEntries,
   type SystemEvent,
+  type SystemEventAudience,
 } from "../../infra/system-events.js";
 import {
   normalizeLowercaseStringOrEmpty,
@@ -48,22 +49,30 @@ export async function drainFormattedSystemEvents(params: {
   isMainSession: boolean;
   isNewSession: boolean;
 }): Promise<string | undefined> {
-  const compactSystemEvent = (line: string): string | null => {
+  const compactSystemEvent = (line: string, audience: SystemEventAudience): string | null => {
     const trimmed = line.trim();
     if (!trimmed) {
       return null;
     }
-    const lower = normalizeLowercaseStringOrEmpty(trimmed);
-    if (lower.includes("reason periodic")) {
-      return null;
-    }
-    // Filter out the actual heartbeat prompt, but not cron jobs that mention "heartbeat".
-    // The heartbeat prompt starts with "Read HEARTBEAT.md" - cron payloads won't match this.
-    if (lower.startsWith("read heartbeat.md")) {
-      return null;
-    }
-    if (lower.includes("heartbeat poll") || lower.includes("heartbeat wake")) {
-      return null;
+    // Heartbeat-noise filters keep user-facing relay prompts clean. They do
+    // NOT apply to audience: "internal" events — those go through the
+    // wrap-on-drain path and never reach a user-facing surface, so the
+    // filter would silently drop the event after consumption (same
+    // no-consumer hole class as the exec-shape filter). The Node:
+    // transformation below is a sanitizer that runs for both audiences.
+    if (audience !== "internal") {
+      const lower = normalizeLowercaseStringOrEmpty(trimmed);
+      if (lower.includes("reason periodic")) {
+        return null;
+      }
+      // Filter out the actual heartbeat prompt, but not cron jobs that mention "heartbeat".
+      // The heartbeat prompt starts with "Read HEARTBEAT.md" - cron payloads won't match this.
+      if (lower.startsWith("read heartbeat.md")) {
+        return null;
+      }
+      if (lower.includes("heartbeat poll") || lower.includes("heartbeat wake")) {
+        return null;
+      }
     }
     if (trimmed.startsWith("Node:")) {
       return trimmed.replace(/ · last input [^·]+/i, "").trim();
@@ -121,13 +130,14 @@ export async function drainFormattedSystemEvents(params: {
     selectGenericSystemEvents(peekSystemEventEntries(params.sessionKey)),
   );
   for (const event of queued) {
-    const compacted = compactSystemEvent(event.text);
+    const audience: SystemEventAudience = event.audience ?? "user-facing";
+    const compacted = compactSystemEvent(event.text, audience);
     if (!compacted) {
       continue;
     }
     const prefix = event.trusted === false ? "System (untrusted)" : "System";
     const timestamp = `[${formatSystemEventTimestamp(event.ts, params.cfg)}]`;
-    const target = (event.audience ?? "user-facing") === "internal" ? internalLines : userFacingLines;
+    const target = audience === "internal" ? internalLines : userFacingLines;
     let index = 0;
     for (const subline of compacted.split("\n")) {
       target.push(`${prefix}: ${index === 0 ? `${timestamp} ` : ""}${subline}`);
