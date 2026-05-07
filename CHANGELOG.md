@@ -152,6 +152,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- WhatsApp: drain pending outbound deliveries on a 30s periodic timer in addition to the reconnect handler, so messages enqueued while the provider is already connected no longer wait for the next reconnect to send. (#79083)
 - Docs/Docker: document a local Compose override for Docker Desktop DNS failures in the shared-network `openclaw-cli` sidecar, keeping the default compose setup hardened while unblocking `openclaw plugins install` when users opt in. Fixes #79018. Thanks @Jason-Vaughan.
 - Compute plugin callback authorization dynamically [AI]. (#78866) Thanks @pgondhi987.
 - fix(active-memory): require admin scope for global toggles [AI]. (#78863) Thanks @pgondhi987.
