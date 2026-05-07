@@ -160,6 +160,21 @@ describe("runAgentHarnessAttempt", () => {
     expect(piRunAttempt).not.toHaveBeenCalled();
   });
 
+  it("rejects the candidate when the forced plugin harness does not support its provider", async () => {
+    registerFailingCodexHarness();
+
+    const params = createAttemptParams({
+      agents: { defaults: { agentRuntime: { id: "codex" } } },
+    });
+    params.provider = "9router";
+    params.modelId = "cc/claude-opus-4-6";
+
+    await expect(runAgentHarnessAttempt(params)).rejects.toThrow(
+      /Requested agent harness "codex" does not support 9router\/cc\/claude-opus-4-6/,
+    );
+    expect(piRunAttempt).not.toHaveBeenCalled();
+  });
+
   it("uses the Codex harness by default for OpenAI agent model runs", async () => {
     registerSuccessfulCodexHarness();
 
@@ -422,11 +437,23 @@ describe("selectAgentHarness", () => {
 
     expect(
       selectAgentHarness({
-        provider: "openai",
+        provider: "codex",
         modelId: "gpt-5.4",
         agentHarnessId: "codex",
       }).id,
     ).toBe("codex");
+  });
+
+  it("rejects a session pinned to a plugin harness when the candidate provider is unsupported", () => {
+    registerFailingCodexHarness();
+
+    expect(() =>
+      selectAgentHarness({
+        provider: "9router",
+        modelId: "cc/claude-opus-4-6",
+        agentHarnessId: "codex",
+      }),
+    ).toThrow(/Requested agent harness "codex" does not support 9router\/cc\/claude-opus-4-6/);
   });
 
   it("does not compact a plugin-pinned session through PI when the plugin has no compactor", async () => {
@@ -438,7 +465,7 @@ describe("selectAgentHarness", () => {
         sessionKey: "agent:main:main",
         sessionFile: "/tmp/session.jsonl",
         workspaceDir: "/tmp/workspace",
-        provider: "openai",
+        provider: "codex",
         model: "gpt-5.4",
         agentHarnessId: "codex",
       }),
@@ -447,5 +474,23 @@ describe("selectAgentHarness", () => {
       compacted: false,
       reason: 'Agent harness "codex" does not support compaction.',
     });
+  });
+
+  it("rejects compaction routing for a plugin-pinned session whose provider the plugin does not support", async () => {
+    registerFailingCodexHarness();
+
+    await expect(
+      maybeCompactAgentHarnessSession({
+        sessionId: "session-1",
+        sessionKey: "agent:main:main",
+        sessionFile: "/tmp/session.jsonl",
+        workspaceDir: "/tmp/workspace",
+        provider: "9router",
+        model: "cc/claude-opus-4-6",
+        agentHarnessId: "codex",
+      }),
+    ).rejects.toThrow(
+      /Requested agent harness "codex" does not support 9router\/cc\/claude-opus-4-6/,
+    );
   });
 });

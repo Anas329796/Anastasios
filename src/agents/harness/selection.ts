@@ -111,12 +111,24 @@ function selectAgentHarnessDecision(params: {
   if (runtime !== "auto") {
     const forced = pluginHarnesses.find((entry) => entry.id === runtime);
     if (forced) {
-      return buildSelectionDecision({
-        harness: forced,
-        policy,
-        selectedReason: pinnedPolicy ? "pinned" : "forced_plugin",
-        candidates: listHarnessCandidates(pluginHarnesses),
+      const support = forced.supports({
+        provider: params.provider,
+        modelId: params.modelId,
+        requestedRuntime: runtime,
       });
+      if (support.supported) {
+        return buildSelectionDecision({
+          harness: forced,
+          policy,
+          selectedReason: pinnedPolicy ? "pinned" : "forced_plugin",
+          candidates: listHarnessCandidates(pluginHarnesses),
+        });
+      }
+      throw new Error(
+        `Requested agent harness "${runtime}" does not support ${formatProviderModel(params)}${
+          support.reason ? ` (${support.reason})` : ""
+        }.`,
+      );
     }
     throw new Error(`Requested agent harness "${runtime}" is not registered.`);
   }
@@ -368,4 +380,8 @@ function resolveAgentEmbeddedHarnessConfig(
   return resolveAgentRuntimePolicy(
     listAgentEntries(config).find((entry) => normalizeAgentId(entry.id) === sessionAgentId),
   );
+}
+
+function formatProviderModel(params: { provider: string; modelId?: string }): string {
+  return params.modelId ? `${params.provider}/${params.modelId}` : params.provider;
 }
