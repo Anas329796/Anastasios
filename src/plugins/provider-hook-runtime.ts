@@ -3,6 +3,7 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import { getLoadedRuntimePluginRegistry } from "./active-runtime-registry.js";
 import {
+  createPluginCacheKey,
   resolveConfigScopedRuntimeCacheValue,
   type ConfigScopedRuntimeCache,
 } from "./plugin-cache-primitives.js";
@@ -23,6 +24,8 @@ import type {
 
 const providerRuntimePluginCache: ConfigScopedRuntimeCache<ProviderPlugin | null> = new WeakMap();
 const PREPARED_PROVIDER_RUNTIME_SURFACES = ["channel"] as const;
+const providerHookFunctionIds = new WeakMap<Function, number>();
+let nextProviderHookFunctionId = 1;
 
 export type ProviderRuntimePluginLookupParams = {
   provider: string;
@@ -70,6 +73,39 @@ function resolveProviderRuntimePluginCacheKey(params: ProviderRuntimePluginLooku
     bundledProviderAllowlistCompat: params.bundledProviderAllowlistCompat ?? null,
     bundledProviderVitestCompat: params.bundledProviderVitestCompat ?? null,
   });
+}
+
+function resolveProviderHookFunctionIdentity(hook: unknown): string {
+  if (typeof hook !== "function") {
+    return "";
+  }
+  const cached = providerHookFunctionIds.get(hook);
+  if (cached !== undefined) {
+    return String(cached);
+  }
+  const id = nextProviderHookFunctionId;
+  nextProviderHookFunctionId += 1;
+  providerHookFunctionIds.set(hook, id);
+  return String(id);
+}
+
+export function resolveProviderToolSchemaNormalizeHookIdentity(
+  params: ProviderRuntimePluginLookupParams,
+): string {
+  const plugin = resolveProviderRuntimePlugin(params);
+  return createPluginCacheKey([
+    "provider-tool-schema-normalize-hook",
+    resolveProviderRuntimePluginCacheKey(params),
+    plugin
+      ? {
+          pluginId: plugin.pluginId ?? "",
+          providerId: plugin.id,
+          aliases: [...(plugin.aliases ?? [])].toSorted(),
+          hookAliases: [...(plugin.hookAliases ?? [])].toSorted(),
+          normalizeToolSchemas: resolveProviderHookFunctionIdentity(plugin.normalizeToolSchemas),
+        }
+      : null,
+  ]);
 }
 
 function matchesProviderLiteralId(provider: ProviderPlugin, providerId: string): boolean {
