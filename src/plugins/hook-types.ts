@@ -345,10 +345,21 @@ export type PluginHookBeforeDispatchEvent = {
   content: string;
   body?: string;
   channel?: string;
+  accountId?: string;
+  conversationId?: string;
   sessionKey?: string;
   senderId?: string;
+  threadId?: string | number;
+  messageId?: string;
   isGroup?: boolean;
   timestamp?: number;
+  mediaPath?: string;
+  mediaUrl?: string;
+  mediaType?: string;
+  mediaPaths?: string[];
+  mediaUrls?: string[];
+  mediaTypes?: string[];
+  metadata?: Record<string, unknown>;
 };
 
 export type PluginHookBeforeDispatchContext = {
