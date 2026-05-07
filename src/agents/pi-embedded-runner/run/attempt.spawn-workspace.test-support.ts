@@ -14,6 +14,7 @@ import type {
   IngestResult,
 } from "../../../context-engine/types.js";
 import { formatErrorMessage } from "../../../infra/errors.js";
+import type { PluginMetadataSnapshot } from "../../../plugins/plugin-metadata-snapshot.js";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalLowercaseString,
@@ -60,6 +61,7 @@ type AttemptSpawnWorkspaceHoisted = {
   sessionManagerOpenMock: UnknownMock;
   resolveSandboxContextMock: UnknownMock;
   ensureGlobalUndiciEnvProxyDispatcherMock: UnknownMock;
+  ensureGlobalUndiciDispatcherStreamTimeoutsMock: UnknownMock;
   ensureGlobalUndiciStreamTimeoutsMock: UnknownMock;
   buildEmbeddedMessageActionDiscoveryInputMock: UnknownMock;
   createOpenClawCodingToolsMock: UnknownMock;
@@ -125,6 +127,7 @@ const hoisted = vi.hoisted((): AttemptSpawnWorkspaceHoisted => {
   const sessionManagerOpenMock = vi.fn();
   const resolveSandboxContextMock = vi.fn();
   const ensureGlobalUndiciEnvProxyDispatcherMock = vi.fn();
+  const ensureGlobalUndiciDispatcherStreamTimeoutsMock = vi.fn();
   const ensureGlobalUndiciStreamTimeoutsMock = vi.fn();
   const buildEmbeddedMessageActionDiscoveryInputMock = vi.fn((params: unknown) => params);
   const createOpenClawCodingToolsMock = vi.fn(() => []);
@@ -193,6 +196,7 @@ const hoisted = vi.hoisted((): AttemptSpawnWorkspaceHoisted => {
     sessionManagerOpenMock,
     resolveSandboxContextMock,
     ensureGlobalUndiciEnvProxyDispatcherMock,
+    ensureGlobalUndiciDispatcherStreamTimeoutsMock,
     ensureGlobalUndiciStreamTimeoutsMock,
     buildEmbeddedMessageActionDiscoveryInputMock,
     createOpenClawCodingToolsMock,
@@ -225,6 +229,51 @@ const hoisted = vi.hoisted((): AttemptSpawnWorkspaceHoisted => {
 export function getHoisted(): AttemptSpawnWorkspaceHoisted {
   return hoisted;
 }
+
+const emptyPluginMetadataSnapshot: PluginMetadataSnapshot = {
+  policyHash: "",
+  index: {
+    version: 1,
+    hostContractVersion: "test",
+    compatRegistryVersion: "test",
+    migrationVersion: 1,
+    policyHash: "",
+    generatedAtMs: 1,
+    installRecords: {},
+    plugins: [],
+    diagnostics: [],
+  },
+  registryDiagnostics: [],
+  manifestRegistry: { plugins: [], diagnostics: [] },
+  plugins: [],
+  diagnostics: [],
+  byPluginId: new Map(),
+  normalizePluginId: (pluginId: string) => pluginId,
+  owners: {
+    channels: new Map(),
+    channelConfigs: new Map(),
+    providers: new Map(),
+    modelCatalogProviders: new Map(),
+    cliBackends: new Map(),
+    setupProviders: new Map(),
+    commandAliases: new Map(),
+    contracts: new Map(),
+  },
+  metrics: {
+    registrySnapshotMs: 0,
+    manifestRegistryMs: 0,
+    ownerMapsMs: 0,
+    totalMs: 0,
+    indexPluginCount: 0,
+    manifestPluginCount: 0,
+  },
+};
+
+vi.mock("../../../plugins/plugin-metadata-snapshot.js", () => ({
+  isPluginMetadataSnapshotCompatible: () => true,
+  listPluginOriginsFromMetadataSnapshot: () => new Map(),
+  loadPluginMetadataSnapshot: () => emptyPluginMetadataSnapshot,
+}));
 
 vi.mock("@mariozechner/pi-coding-agent", () => {
   function AuthStorage() {}
@@ -287,6 +336,8 @@ vi.mock("../../../infra/net/undici-global-dispatcher.js", () => ({
   DEFAULT_UNDICI_STREAM_TIMEOUT_MS: 120_000,
   ensureGlobalUndiciEnvProxyDispatcher: (...args: unknown[]) =>
     hoisted.ensureGlobalUndiciEnvProxyDispatcherMock(...args),
+  ensureGlobalUndiciDispatcherStreamTimeouts: (...args: unknown[]) =>
+    hoisted.ensureGlobalUndiciDispatcherStreamTimeoutsMock(...args),
   ensureGlobalUndiciStreamTimeouts: (...args: unknown[]) =>
     hoisted.ensureGlobalUndiciStreamTimeoutsMock(...args),
 }));
@@ -792,6 +843,7 @@ export function resetEmbeddedAttemptHarness(
   hoisted.sessionManagerOpenMock.mockReset().mockReturnValue(hoisted.sessionManager);
   hoisted.resolveSandboxContextMock.mockReset();
   hoisted.ensureGlobalUndiciEnvProxyDispatcherMock.mockReset();
+  hoisted.ensureGlobalUndiciDispatcherStreamTimeoutsMock.mockReset();
   hoisted.ensureGlobalUndiciStreamTimeoutsMock.mockReset();
   hoisted.buildEmbeddedMessageActionDiscoveryInputMock
     .mockReset()
