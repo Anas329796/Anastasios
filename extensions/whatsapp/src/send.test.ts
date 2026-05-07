@@ -83,6 +83,7 @@ describe("web outbound", () => {
   const sendMessage = vi.fn(async () => acceptedSendResult("text", "msg123"));
   const sendPoll = vi.fn(async () => acceptedSendResult("poll", "poll123"));
   const sendReaction = vi.fn(async () => acceptedSendResult("reaction", "reaction123"));
+  const lookupPnLidEntry = vi.fn(async () => null);
 
   beforeAll(async () => {
     ({ sendMessageWhatsApp, sendPollWhatsApp, sendReactionWhatsApp } = await import("./send.js"));
@@ -121,6 +122,7 @@ describe("web outbound", () => {
       sendMessage,
       sendPoll,
       sendReaction,
+      lookupPnLidEntry,
     });
   });
 
@@ -169,6 +171,7 @@ describe("web outbound", () => {
       sendMessage,
       sendPoll,
       sendReaction,
+      lookupPnLidEntry,
     });
 
     const result = await sendMessageWhatsApp("+1555", "hi", {
@@ -435,6 +438,7 @@ describe("web outbound", () => {
       sendMessage,
       sendPoll,
       sendReaction,
+      lookupPnLidEntry,
     });
     loadWebMediaMock.mockResolvedValueOnce({
       buffer: Buffer.from("img"),
