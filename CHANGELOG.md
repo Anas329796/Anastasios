@@ -147,6 +147,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Provider plugins: expose sanitized provider catalog headers on the resolved runtime model passed to stream wrappers. Fixes #78843. Thanks @0xCAB0.
 - Compute plugin callback authorization dynamically [AI]. (#78866) Thanks @pgondhi987.
 - fix(active-memory): require admin scope for global toggles [AI]. (#78863) Thanks @pgondhi987.
 - Honor owner enforcement for native commands [AI]. (#78864) Thanks @pgondhi987.
