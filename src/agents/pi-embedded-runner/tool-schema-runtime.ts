@@ -7,7 +7,7 @@ import type { ProviderRuntimeModel } from "../../plugins/provider-runtime-model.
 import {
   inspectProviderToolSchemasWithPlugin,
   normalizeProviderToolSchemasWithPlugin,
-  resolveProviderToolSchemaNormalizeHookIdentity,
+  resolveProviderToolSchemaNormalizeCacheKey,
 } from "../../plugins/provider-runtime.js";
 import type { ProviderToolSchemaDiagnostic } from "../../plugins/types.js";
 import type { AnyAgentTool } from "../tools/common.js";
@@ -136,13 +136,13 @@ function applyCachedToolParameters<TSchemaType extends TSchema = TSchema, TResul
 function buildProviderToolSchemaCacheKey(
   params: ProviderToolSchemaParams,
   provider: string,
-  hookIdentity: string,
+  hookCacheKey: string,
 ): string | null {
   try {
     return createPluginCacheKey([
       "provider-tool-schema",
       PROVIDER_TOOL_SCHEMA_CACHE_VERSION,
-      hookIdentity,
+      hookCacheKey,
       provider,
       normalizeCacheString(params.modelId),
       normalizeCacheString(params.modelApi),
@@ -190,17 +190,19 @@ export function normalizeProviderToolSchemas<
   TResult = unknown,
 >(params: ProviderToolSchemaParams<TSchemaType, TResult>): AgentTool<TSchemaType, TResult>[] {
   const provider = params.provider.trim();
+  const context = buildProviderToolSchemaContext(params, provider);
   const cacheEnabled = isProviderToolSchemaCacheEnabled(params.env);
-  const hookIdentity = cacheEnabled
-    ? resolveProviderToolSchemaNormalizeHookIdentity({
+  const hookCacheKey = cacheEnabled
+    ? resolveProviderToolSchemaNormalizeCacheKey({
         provider,
         config: params.config,
         workspaceDir: params.workspaceDir,
         env: params.env,
+        context,
       })
     : null;
-  const cacheKey = hookIdentity
-    ? buildProviderToolSchemaCacheKey(params, provider, hookIdentity)
+  const cacheKey = hookCacheKey
+    ? buildProviderToolSchemaCacheKey(params, provider, hookCacheKey)
     : null;
   if (cacheKey) {
     const cached = providerToolSchemaCache.get(cacheKey);
@@ -222,7 +224,7 @@ export function normalizeProviderToolSchemas<
     workspaceDir: params.workspaceDir,
     env: params.env,
     runtimeHandle: params.runtimeHandle,
-    context: buildProviderToolSchemaContext(params, provider),
+    context,
   });
   const normalized = Array.isArray(pluginNormalized)
     ? (pluginNormalized as AgentTool<TSchemaType, TResult>[])
