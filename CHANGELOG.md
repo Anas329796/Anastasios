@@ -145,6 +145,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Agents/gateway: allow agent-driven `gateway config.patch` to tune documented compaction budgets and notices while keeping neighboring compaction policy fields protected. Fixes #78911. Thanks @jessewunderlich.
 - fix(active-memory): require admin scope for global toggles [AI]. (#78863) Thanks @pgondhi987.
 - Honor owner enforcement for native commands [AI]. (#78864) Thanks @pgondhi987.
 - Config/BlueBubbles: remove the duplicate core-owned BlueBubbles config schema while preserving plugin-owned `dmPolicy` allowFrom validation for channel and account configs. Fixes #69238. Thanks @omarshahine.
