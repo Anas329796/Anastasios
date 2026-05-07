@@ -13,6 +13,11 @@ import {
 function buildProps(overrides?: Partial<DreamingProps>): DreamingProps {
   return {
     active: true,
+    selectedAgentId: "main",
+    agentOptions: [
+      { id: "main", label: "main" },
+      { id: "ceo", label: "ceo" },
+    ],
     shortTermCount: 47,
     groundedSignalCount: 9,
     totalSignalCount: 182,
@@ -176,6 +181,7 @@ function buildProps(overrides?: Partial<DreamingProps>): DreamingProps {
       ],
     },
     onRefresh: () => {},
+    onSelectAgent: () => {},
     onRefreshDiary: () => {},
     onRefreshImports: () => {},
     onRefreshMemoryPalace: () => {},
@@ -670,6 +676,26 @@ describe("dreaming view", () => {
 
     setDreamAdvancedWaitingSort("recent");
     setDreamSubTab("scene");
+  });
+
+  it("renders an agent selector and switches agent contexts", () => {
+    const onSelectAgent = vi.fn();
+    const container = renderInto(
+      buildProps({
+        selectedAgentId: "ceo",
+        onSelectAgent,
+      }),
+    );
+
+    const select = container.querySelector(
+      'select[data-dreaming-agent-select="true"]',
+    ) as HTMLSelectElement | null;
+    expect(select).not.toBeNull();
+    expect(select?.value).toBe("ceo");
+
+    select!.value = "main";
+    select!.dispatchEvent(new Event("change"));
+    expect(onSelectAgent).toHaveBeenCalledWith("main");
   });
 
   // Toggle lives in the page header (app-render.ts), not inside the dreaming view.
