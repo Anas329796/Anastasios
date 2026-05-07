@@ -90,6 +90,8 @@ const SESSION_ENTRY_RESERVED_SLOT_KEY_LIST = [
   "memoryFlushAt",
   "memoryFlushCompactionCount",
   "memoryFlushContextHash",
+  "suppressCliHistoryImport",
+  "suppressCliHistoryImportProviders",
   "cliSessionIds",
   "cliSessionBindings",
   "claudeCliSessionId",
