@@ -24,23 +24,21 @@ export type HeartbeatSummary = {
 
 const DEFAULT_HEARTBEAT_TARGET = "none";
 
-function hasExplicitHeartbeatAgents(cfg: OpenClawConfig) {
-  const list = cfg.agents?.list ?? [];
-  return list.some((entry) => Boolean(entry?.heartbeat));
-}
-
 export function isHeartbeatEnabledForAgent(cfg: OpenClawConfig, agentId?: string): boolean {
   const resolvedAgentId = normalizeAgentId(agentId ?? resolveDefaultAgentId(cfg));
   const list = cfg.agents?.list ?? [];
-  const hasExplicit = hasExplicitHeartbeatAgents(cfg);
-  if (hasExplicit) {
-    return list.some(
-      (entry) => Boolean(entry?.heartbeat) && normalizeAgentId(entry?.id) === resolvedAgentId,
-    );
+  const agentEntry = list.find((entry) => normalizeAgentId(entry?.id) === resolvedAgentId);
+
+  // If this agent has an explicit heartbeat config (even disabled), honor it.
+  if (agentEntry && "heartbeat" in agentEntry) {
+    return Boolean(agentEntry.heartbeat?.every);
   }
+
+  // Otherwise fall back to the global default.
   if (cfg.agents?.defaults?.heartbeat) {
     return true;
   }
+
   return resolvedAgentId === resolveDefaultAgentId(cfg);
 }
 

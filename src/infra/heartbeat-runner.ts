@@ -278,9 +278,16 @@ function resolveHeartbeatSchedulerSeed(explicitSeed?: string) {
   }
 }
 
-function hasExplicitHeartbeatAgents(cfg: OpenClawConfig) {
-  const list = cfg.agents?.list ?? [];
-  return list.some((entry) => Boolean(entry?.heartbeat));
+function resolveHeartbeatAgents(cfg: OpenClawConfig): HeartbeatAgent[] {
+  const agentIds = listAgentIds(cfg);
+  return agentIds
+    .map((agentId) => {
+      if (!isHeartbeatEnabledForAgent(cfg, agentId)) {
+        return null;
+      }
+      return { agentId, heartbeat: resolveHeartbeatConfig(cfg, agentId) };
+    })
+    .filter((entry): entry is HeartbeatAgent => entry !== null);
 }
 
 function resolveHeartbeatConfig(
@@ -296,27 +303,6 @@ function resolveHeartbeatConfig(
     return overrides;
   }
   return { ...defaults, ...overrides };
-}
-
-function resolveHeartbeatAgents(cfg: OpenClawConfig): HeartbeatAgent[] {
-  const list = cfg.agents?.list ?? [];
-  if (hasExplicitHeartbeatAgents(cfg)) {
-    return list
-      .filter((entry) => entry?.heartbeat)
-      .map((entry) => {
-        const id = normalizeAgentId(entry.id);
-        return { agentId: id, heartbeat: resolveHeartbeatConfig(cfg, id) };
-      })
-      .filter((entry) => entry.agentId);
-  }
-  if (cfg.agents?.defaults?.heartbeat) {
-    return listAgentIds(cfg).map((agentId) => ({
-      agentId,
-      heartbeat: resolveHeartbeatConfig(cfg, agentId),
-    }));
-  }
-  const fallbackId = resolveDefaultAgentId(cfg);
-  return [{ agentId: fallbackId, heartbeat: resolveHeartbeatConfig(cfg, fallbackId) }];
 }
 
 function resolveHeartbeatPromptRaw(cfg: OpenClawConfig, heartbeat?: HeartbeatConfig) {
