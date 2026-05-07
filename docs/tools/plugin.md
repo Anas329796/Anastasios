@@ -406,8 +406,9 @@ do not run in live chat traffic, check these first:
   containers, PID 1 may only be a supervisor; restart or signal the child
   `openclaw gateway run` process.
 - Use `openclaw plugins inspect <id> --runtime --json` to confirm hook registrations and
-  diagnostics. Non-bundled conversation hooks such as `llm_input`,
-  `llm_output`, `before_agent_finalize`, and `agent_end` need
+  diagnostics. Non-bundled conversation hooks such as `before_model_resolve`,
+  `before_agent_reply`, `before_agent_run`, `llm_input`, `llm_output`,
+  `before_agent_finalize`, and `agent_end` need
   `plugins.entries.<id>.hooks.allowConversationAccess=true`.
 - For model switching, prefer `before_model_resolve`. It runs before model
   resolution for agent turns; `llm_output` only runs after a model attempt
@@ -577,6 +578,11 @@ top-level `installRecords` and rebuildable manifest metadata in `plugins`. If
 the registry is missing, stale, or invalid, `openclaw plugins registry
 --refresh` rebuilds its manifest view from install records, config policy, and
 manifest/package metadata without loading plugin runtime modules.
+
+In Nix mode (`OPENCLAW_NIX_MODE=1`), plugin lifecycle mutators are disabled.
+Manage plugin package selection and config through the Nix source for the
+install instead; for nix-openclaw, start with the agent-first
+[Quick Start](https://github.com/openclaw/nix-openclaw#quick-start).
 `openclaw plugins update <id-or-npm-spec>` applies to tracked installs. Passing
 an npm package spec with a dist-tag or exact version resolves the package name
 back to the tracked plugin record and records the new spec for future updates.
@@ -587,6 +593,10 @@ without downloading, reinstalling, or rewriting config.
 When `openclaw update` runs on the beta channel, default-line npm and ClawHub
 plugin records try `@beta` first and fall back to default/latest when no plugin
 beta release exists. Exact versions and explicit tags stay pinned.
+
+OpenClaw does not yet expose LTS or monthly support plugin channels. Planned
+monthly support-line work will need plugin npm and ClawHub tags to follow the
+same support line as the core package instead of silently using `latest`.
 
 `--pin` is npm-only. It is not supported with `--marketplace`, because
 marketplace installs persist marketplace source metadata instead of an npm spec.
