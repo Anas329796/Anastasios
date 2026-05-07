@@ -35,6 +35,7 @@ packageExtensionsChecksum: sha256-oc/FAHkBR844HBfph1RZWyRMHHBpIFya25tyv5SGf6s=
 
 patchedDependencies:
   '@agentclientprotocol/claude-agent-acp@0.33.1': 3995624bb834cc60fea1461c7ef33f1fcdd8fb58b8f43f2f1490bc689f6e1be2
+  '@earendil-works/pi-coding-agent@0.74.0': 39a07dd21e1dd57df8d8acae5eb3bdc4533e6a2c5ae0b61739f500339553f66e
   baileys@7.0.0-rc10: a9aea1790d2c65b1ae543c77faca4119bbfb91ee3b6ca6c38d1cad4f5702ada2
 
 importers:
@@ -76,7 +77,7 @@ importers:
         version: 0.74.0(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.20.0)(zod@4.4.3)
       '@earendil-works/pi-coding-agent':
         specifier: 0.74.0
-        version: 0.74.0(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.20.0)(zod@4.4.3)
+        version: 0.74.0(patch_hash=39a07dd21e1dd57df8d8acae5eb3bdc4533e6a2c5ae0b61739f500339553f66e)(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.20.0)(zod@4.4.3)
       '@earendil-works/pi-tui':
         specifier: 0.74.0
         version: 0.74.0
@@ -519,7 +520,7 @@ importers:
     dependencies:
       '@earendil-works/pi-coding-agent':
         specifier: 0.74.0
-        version: 0.74.0(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.20.0)(zod@4.4.3)
+        version: 0.74.0(patch_hash=39a07dd21e1dd57df8d8acae5eb3bdc4533e6a2c5ae0b61739f500339553f66e)(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.20.0)(zod@4.4.3)
       '@openai/codex':
         specifier: 0.130.0
         version: 0.130.0
@@ -9025,7 +9026,7 @@ snapshots:
       - ws
       - zod
 
-  '@earendil-works/pi-coding-agent@0.74.0(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.20.0)(zod@4.4.3)':
+  '@earendil-works/pi-coding-agent@0.74.0(patch_hash=39a07dd21e1dd57df8d8acae5eb3bdc4533e6a2c5ae0b61739f500339553f66e)(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.20.0)(zod@4.4.3)':
     dependencies:
       '@earendil-works/pi-agent-core': 0.74.0(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.20.0)(zod@4.4.3)
       '@earendil-works/pi-ai': 0.74.0(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.20.0)(zod@4.4.3)

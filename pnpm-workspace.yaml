@@ -94,3 +94,4 @@ peerDependencyRules:
 patchedDependencies:
   "baileys@7.0.0-rc10": "patches/baileys@7.0.0-rc10.patch"
   "@agentclientprotocol/claude-agent-acp@0.33.1": "patches/@agentclientprotocol__claude-agent-acp@0.33.1.patch"
+  "@earendil-works/pi-coding-agent@0.74.0": "patches/@earendil-works__pi-coding-agent@0.74.0.patch"
