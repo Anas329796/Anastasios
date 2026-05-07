@@ -1,8 +1,8 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { TSchema } from "typebox";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import type { ProviderRuntimePluginHandle } from "../../plugins/provider-hook-runtime.js";
 import { PluginLruCache, createPluginCacheKey } from "../../plugins/plugin-cache-primitives.js";
+import type { ProviderRuntimePluginHandle } from "../../plugins/provider-hook-runtime.js";
 import type { ProviderRuntimeModel } from "../../plugins/provider-runtime-model.types.js";
 import {
   inspectProviderToolSchemasWithPlugin,
