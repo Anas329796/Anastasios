@@ -73,13 +73,20 @@ function stripFormattedReasoningMessage(text: string): string {
   return lines.slice(index).join("\n").trim();
 }
 
-function sanitizePresentationTextFields(value: unknown): unknown {
+function sanitizeUserVisibleToolText(text: string, bootPrompt: string | undefined): string {
+  return stripBootEchoFromOutboundText(
+    stripInternalRuntimeContext(stripFormattedReasoningMessage(text)),
+    bootPrompt,
+  );
+}
+
+function sanitizePresentationTextFields(value: unknown, bootPrompt: string | undefined): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return value;
   }
   const presentation = { ...(value as Record<string, unknown>) };
   if (typeof presentation.title === "string") {
-    presentation.title = stripFormattedReasoningMessage(presentation.title);
+    presentation.title = sanitizeUserVisibleToolText(presentation.title, bootPrompt);
   }
   if (Array.isArray(presentation.blocks)) {
     presentation.blocks = presentation.blocks.map((block) => {
@@ -89,7 +96,7 @@ function sanitizePresentationTextFields(value: unknown): unknown {
       const sanitizedBlock = { ...(block as Record<string, unknown>) };
       for (const field of ["text", "placeholder"]) {
         if (typeof sanitizedBlock[field] === "string") {
-          sanitizedBlock[field] = stripFormattedReasoningMessage(sanitizedBlock[field]);
+          sanitizedBlock[field] = sanitizeUserVisibleToolText(sanitizedBlock[field], bootPrompt);
         }
       }
       if (Array.isArray(sanitizedBlock.buttons)) {
@@ -99,7 +106,7 @@ function sanitizePresentationTextFields(value: unknown): unknown {
           }
           const sanitizedButton = { ...(button as Record<string, unknown>) };
           if (typeof sanitizedButton.label === "string") {
-            sanitizedButton.label = stripFormattedReasoningMessage(sanitizedButton.label);
+            sanitizedButton.label = sanitizeUserVisibleToolText(sanitizedButton.label, bootPrompt);
           }
           return sanitizedButton;
         });
@@ -111,7 +118,7 @@ function sanitizePresentationTextFields(value: unknown): unknown {
           }
           const sanitizedOption = { ...(option as Record<string, unknown>) };
           if (typeof sanitizedOption.label === "string") {
-            sanitizedOption.label = stripFormattedReasoningMessage(sanitizedOption.label);
+            sanitizedOption.label = sanitizeUserVisibleToolText(sanitizedOption.label, bootPrompt);
           }
           return sanitizedOption;
         });
@@ -846,13 +853,13 @@ export function createMessageTool(options?: MessageToolOptions): AnyAgentTool {
       const bootPromptForSession = getBootEchoContextForSession(options?.agentSessionKey);
       for (const field of ["text", "content", "message", "caption"]) {
         if (typeof params[field] === "string") {
-          params[field] = stripBootEchoFromOutboundText(
-            stripInternalRuntimeContext(stripFormattedReasoningMessage(params[field])),
-            bootPromptForSession,
-          );
+          params[field] = sanitizeUserVisibleToolText(params[field], bootPromptForSession);
         }
       }
-      params.presentation = sanitizePresentationTextFields(params.presentation);
+      params.presentation = sanitizePresentationTextFields(
+        params.presentation,
+        bootPromptForSession,
+      );
 
       const action = readStringParam(params, "action", {
         required: true,
