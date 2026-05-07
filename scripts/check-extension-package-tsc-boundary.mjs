@@ -13,6 +13,7 @@ import {
 import { createRequire } from "node:module";
 import os from "node:os";
 import path, { dirname, join, resolve } from "node:path";
+import { getLocalNativeTypecheckRefusalError } from "./lib/local-heavy-check-runtime.mjs";
 
 const require = createRequire(import.meta.url);
 const repoRoot = resolve(import.meta.dirname, "..");
@@ -771,6 +772,17 @@ async function runCanaryCheck(extensionIds) {
 export async function main(argv = process.argv.slice(2)) {
   const startedAt = Date.now();
   const mode = parseMode(argv);
+  const nativeTypecheckRefusalError = getLocalNativeTypecheckRefusalError({
+    args: argv,
+    env: process.env,
+    shouldRunHeavyCheck: mode === "all" || mode === "compile",
+    toolName: "extension package boundary tsgo",
+  });
+  if (nativeTypecheckRefusalError) {
+    process.stderr.write(`${nativeTypecheckRefusalError}\n`);
+    process.exitCode = 1;
+    return;
+  }
   const optInExtensionIds = collectOptInExtensionIds();
   const canaryExtensionIds = collectCanaryExtensionIds(optInExtensionIds);
   const cleanupExtensionIds = optInExtensionIds;
