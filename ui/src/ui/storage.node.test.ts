@@ -531,6 +531,84 @@ describe("loadSettings default gateway URL derivation", () => {
     });
   });
 
+  it("falls back to main when restoring a routed direct session", async () => {
+    setTestLocation({
+      protocol: "https:",
+      host: "gateway.example:8443",
+      pathname: "/",
+    });
+
+    const gwUrl = expectedGatewayUrl("");
+    const scopedKey = `openclaw.control.settings.v1:${gwUrl}`;
+    localStorage.setItem(
+      scopedKey,
+      JSON.stringify({
+        gatewayUrl: gwUrl,
+        theme: "claw",
+        themeMode: "system",
+        chatFocusMode: false,
+        chatShowThinking: true,
+        chatShowToolCalls: true,
+        splitRatio: 0.6,
+        navCollapsed: false,
+        navWidth: 220,
+        navGroupsCollapsed: {},
+        borderRadius: 50,
+        sessionsByGateway: {
+          [gwUrl]: {
+            sessionKey: "agent:main:feishu:direct:ou_123",
+            lastActiveSessionKey: "agent:main:feishu:direct:ou_123",
+          },
+        },
+      }),
+    );
+
+    expect(loadSettings()).toMatchObject({
+      gatewayUrl: gwUrl,
+      sessionKey: "main",
+      lastActiveSessionKey: "main",
+    });
+  });
+
+  it("falls back to main when restoring a routed group session", async () => {
+    setTestLocation({
+      protocol: "https:",
+      host: "gateway.example:8443",
+      pathname: "/",
+    });
+
+    const gwUrl = expectedGatewayUrl("");
+    const scopedKey = `openclaw.control.settings.v1:${gwUrl}`;
+    localStorage.setItem(
+      scopedKey,
+      JSON.stringify({
+        gatewayUrl: gwUrl,
+        theme: "claw",
+        themeMode: "system",
+        chatFocusMode: false,
+        chatShowThinking: true,
+        chatShowToolCalls: true,
+        splitRatio: 0.6,
+        navCollapsed: false,
+        navWidth: 220,
+        navGroupsCollapsed: {},
+        borderRadius: 50,
+        sessionsByGateway: {
+          [gwUrl]: {
+            sessionKey: "agent:main:feishu:group:chat_456",
+            lastActiveSessionKey: "agent:main:feishu:group:chat_456",
+          },
+        },
+      }),
+    );
+
+    expect(loadSettings()).toMatchObject({
+      gatewayUrl: gwUrl,
+      sessionKey: "main",
+      lastActiveSessionKey: "main",
+    });
+  });
+
   it("caps persisted session scopes to the most recent gateways", async () => {
     setTestLocation({
       protocol: "https:",

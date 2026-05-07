@@ -126,6 +126,31 @@ function tokenSessionKeyForGateway(gatewayUrl: string): string {
   return `${TOKEN_SESSION_KEY_PREFIX}${normalizeGatewayTokenScope(gatewayUrl)}`;
 }
 
+function isHistoricalRoutedSessionKey(value: string | undefined): boolean {
+  const trimmed = normalizeOptionalString(value);
+  if (!trimmed) {
+    return false;
+  }
+  return /^agent:[^:]+:[^:]+:(direct|group):.+$/u.test(trimmed);
+}
+
+function sanitizeRestoredSessionSelection(
+  selection: ScopedSessionSelection,
+  defaults: UiSettings,
+): ScopedSessionSelection {
+  const fallback = defaults.sessionKey || "main";
+  const sessionKey = isHistoricalRoutedSessionKey(selection.sessionKey)
+    ? fallback
+    : selection.sessionKey;
+  const lastActiveSessionKey = isHistoricalRoutedSessionKey(selection.lastActiveSessionKey)
+    ? fallback
+    : selection.lastActiveSessionKey;
+  return {
+    sessionKey,
+    lastActiveSessionKey: lastActiveSessionKey || sessionKey || fallback,
+  };
+}
+
 function resolveScopedSessionSelection(
   gatewayUrl: string,
   parsed: PersistedUiSettings,
@@ -136,10 +161,13 @@ function resolveScopedSessionSelection(
   const scopedSessionKey = normalizeOptionalString(scoped?.sessionKey);
   const scopedLastActiveSessionKey = normalizeOptionalString(scoped?.lastActiveSessionKey);
   if (scopedSessionKey && scopedLastActiveSessionKey) {
-    return {
-      sessionKey: scopedSessionKey,
-      lastActiveSessionKey: scopedLastActiveSessionKey,
-    };
+    return sanitizeRestoredSessionSelection(
+      {
+        sessionKey: scopedSessionKey,
+        lastActiveSessionKey: scopedLastActiveSessionKey,
+      },
+      defaults,
+    );
   }
 
   const legacySessionKey = normalizeOptionalString(parsed.sessionKey) ?? defaults.sessionKey;
@@ -148,10 +176,13 @@ function resolveScopedSessionSelection(
     legacySessionKey ??
     defaults.lastActiveSessionKey;
 
-  return {
-    sessionKey: legacySessionKey,
-    lastActiveSessionKey: legacyLastActiveSessionKey,
-  };
+  return sanitizeRestoredSessionSelection(
+    {
+      sessionKey: legacySessionKey,
+      lastActiveSessionKey: legacyLastActiveSessionKey,
+    },
+    defaults,
+  );
 }
 
 function loadSessionToken(gatewayUrl: string): string {
