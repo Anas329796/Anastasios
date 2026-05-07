@@ -74,7 +74,13 @@ function shouldStartAcceptedTypingFeedback(ctx: DiscordMessagePreflightContext):
     return false;
   }
   const configuredTypingMode = ctx.cfg.session?.typingMode ?? ctx.cfg.agents?.defaults?.typingMode;
-  return configuredTypingMode === undefined || configuredTypingMode === "instant";
+  if (configuredTypingMode !== undefined) {
+    return configuredTypingMode === "instant";
+  }
+  if (ctx.isGuildMessage || ctx.isGroupDm) {
+    return ctx.effectiveWasMentioned;
+  }
+  return true;
 }
 
 function startAcceptedTypingFeedback(params: {

@@ -328,11 +328,58 @@ describe("createDiscordMessageHandler queue behavior", () => {
     },
   );
 
-  it("starts accepted typing immediately for accepted guild allowlist messages without a mention", async () => {
+  it("does not prestart accepted typing for default accepted guild allowlist messages without a mention", async () => {
     preflightDiscordMessageMock.mockReset();
     processDiscordMessageMock.mockReset();
     preflightDiscordMessageMock.mockResolvedValue(
       createAcceptedDmPreflightContext({
+        channelConfig: { enabled: true, requireMention: false },
+        effectiveWasMentioned: false,
+        isDirectMessage: false,
+        isGuildMessage: true,
+        messageChannelId: "guild-channel",
+        shouldRequireMention: false,
+      }),
+    );
+    const replyTypingFeedback = createReplyTypingFeedbackMock("guild-channel");
+    const createReplyTypingFeedback = vi.fn(() => replyTypingFeedback);
+    processDiscordMessageMock.mockResolvedValue(undefined);
+
+    const handler = createDiscordMessageHandler({
+      ...createDiscordHandlerParams(),
+      __testing: { createReplyTypingFeedback },
+    });
+    await expect(
+      handler(createMessageData("m-guild", "guild-channel") as never, {} as never),
+    ).resolves.toBeUndefined();
+
+    await flushQueueWork();
+
+    expect(createReplyTypingFeedback).not.toHaveBeenCalled();
+    expect(replyTypingFeedback.onReplyStart).not.toHaveBeenCalled();
+    expect(processDiscordMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelConfig: expect.objectContaining({ requireMention: false }),
+        effectiveWasMentioned: false,
+        replyTypingFeedback: undefined,
+        shouldRequireMention: false,
+      }),
+    );
+  });
+
+  it("prestarts accepted typing for explicitly instant guild allowlist messages without a mention", async () => {
+    preflightDiscordMessageMock.mockReset();
+    processDiscordMessageMock.mockReset();
+    preflightDiscordMessageMock.mockResolvedValue(
+      createAcceptedDmPreflightContext({
+        cfg: {
+          ...createPreflightContext().cfg,
+          agents: {
+            defaults: {
+              typingMode: "instant",
+            },
+          },
+        },
         channelConfig: { enabled: true, requireMention: false },
         effectiveWasMentioned: false,
         isDirectMessage: false,
@@ -352,7 +399,7 @@ describe("createDiscordMessageHandler queue behavior", () => {
       __testing: { createReplyTypingFeedback },
     });
     await expect(
-      handler(createMessageData("m-guild", "guild-channel") as never, {} as never),
+      handler(createMessageData("m-guild-instant", "guild-channel") as never, {} as never),
     ).resolves.toBeUndefined();
 
     await flushQueueWork();
@@ -389,7 +436,7 @@ describe("createDiscordMessageHandler queue behavior", () => {
   it("starts accepted typing feedback once and carries it into the queued run", async () => {
     preflightDiscordMessageMock.mockReset();
     processDiscordMessageMock.mockReset();
-    installDefaultDiscordPreflight();
+    preflightDiscordMessageMock.mockResolvedValue(createAcceptedDmPreflightContext());
     const replyTypingFeedback = createReplyTypingFeedbackMock();
     const createReplyTypingFeedback = vi.fn(() => replyTypingFeedback);
     processDiscordMessageMock.mockImplementation(async () => {
@@ -404,7 +451,7 @@ describe("createDiscordMessageHandler queue behavior", () => {
     await flushQueueWork();
 
     expect(createReplyTypingFeedback).toHaveBeenCalledWith(
-      expect.objectContaining({ channelId: "ch-1" }),
+      expect.objectContaining({ channelId: "dm-1" }),
     );
     expect(replyTypingFeedback.onReplyStart).toHaveBeenCalledTimes(1);
     expect(processDiscordMessageMock).toHaveBeenCalledWith(
@@ -708,8 +755,20 @@ describe("createDiscordMessageHandler queue behavior", () => {
       })
       .mockImplementationOnce(async () => undefined);
     preflightDiscordMessageMock.mockImplementation(
-      async (params: { data: { channel_id: string } }) =>
-        createPreflightContext(params.data.channel_id),
+      async (params: { data: { channel_id: string } }) => {
+        const ctx = createPreflightContext(params.data.channel_id);
+        return {
+          ...ctx,
+          cfg: {
+            ...ctx.cfg,
+            agents: {
+              defaults: {
+                typingMode: "instant",
+              },
+            },
+          },
+        };
+      },
     );
 
     const handler = createDiscordMessageHandler({
