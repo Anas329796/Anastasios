@@ -129,7 +129,7 @@ observation-only.
 - `message_received` - observe inbound content, sender, thread, and metadata
 - **`message_sending`** - rewrite outbound content or cancel delivery
 - `message_sent` - observe outbound delivery success or failure
-- **`before_dispatch`** - inspect or rewrite an outbound dispatch before channel handoff
+- **`before_dispatch`** - inspect or rewrite an inbound channel message before agent dispatch, including channel metadata and staged media paths
 - **`reply_dispatch`** - participate in the final reply-dispatch pipeline
 
 **Sessions and compaction**
