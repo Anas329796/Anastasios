@@ -545,7 +545,10 @@ describe("short-term promotion", () => {
 
       expect(applied.applied).toBe(1);
       const memory = await fs.readFile(path.join(workspaceDir, "MEMORY.md"), "utf-8");
-      expect(memory).toContain('Always use "Happy Together" calendar');
+      const archive = await fs.readFile(applied.archivePath, "utf-8");
+      expect(memory).toContain("Latest promotion archive:");
+      expect(memory).not.toContain('Always use "Happy Together" calendar');
+      expect(archive).toContain('Always use "Happy Together" calendar');
     });
   });
 
@@ -935,10 +938,128 @@ describe("short-term promotion", () => {
       expect(secondApply.reconciledExisting).toBe(1);
 
       const memoryText = await fs.readFile(path.join(workspaceDir, "MEMORY.md"), "utf-8");
-      expect(memoryText.match(/openclaw-memory-promotion:/g)?.length).toBe(1);
+      const archiveText = await fs.readFile(firstApply.archivePath, "utf-8");
+      const archiveTextAfterSecondApply = await fs.readFile(secondApply.archivePath, "utf-8");
+      expect(memoryText).toContain("Promoted From Short-Term Memory");
+      expect(memoryText).toContain("Latest promotion archive:");
+      expect(memoryText).not.toContain("openclaw-memory-promotion:");
+      expect(memoryText).not.toContain("The gateway should stay loopback-only on port 18789.");
+      expect(archiveText.match(/openclaw-memory-promotion:/g)?.length).toBe(1);
       expect(
-        memoryText.match(/The gateway should stay loopback-only on port 18789\./g)?.length,
+        archiveText.match(/The gateway should stay loopback-only on port 18789\./g)?.length,
       ).toBe(1);
+      expect(archiveTextAfterSecondApply.match(/openclaw-memory-promotion:/g)?.length).toBe(1);
+    });
+  });
+
+  it("migrates existing root promotion sections into the archive pointer flow", async () => {
+    await withTempWorkspace(async (workspaceDir) => {
+      await writeDailyMemoryNote(workspaceDir, "2026-04-01", [
+        "The gateway should stay loopback-only on port 18789.",
+      ]);
+      await recordShortTermRecalls({
+        workspaceDir,
+        query: "gateway loopback",
+        results: [
+          {
+            path: "memory/2026-04-01.md",
+            startLine: 1,
+            endLine: 1,
+            score: 0.95,
+            snippet: "The gateway should stay loopback-only on port 18789.",
+            source: "memory",
+          },
+        ],
+      });
+      const ranked = await rankShortTermPromotionCandidates({
+        workspaceDir,
+        minScore: 0,
+        minRecallCount: 0,
+        minUniqueQueries: 0,
+      });
+      const key = ranked[0].key;
+      await fs.writeFile(
+        path.join(workspaceDir, "MEMORY.md"),
+        [
+          "# Long-Term Memory",
+          "",
+          "## Promoted From Short-Term Memory (2026-04-01)",
+          "",
+          `<!-- openclaw-memory-promotion:${key} -->`,
+          "- The gateway should stay loopback-only on port 18789. [score=0.950 recalls=1 avg=0.950 source=memory/2026-04-01.md:1-1]",
+          "",
+          "## Other Section",
+          "",
+          "Keep me.",
+        ].join("\n"),
+        "utf-8",
+      );
+
+      const applied = await applyShortTermPromotions({
+        workspaceDir,
+        candidates: ranked,
+        minScore: 0,
+        minRecallCount: 0,
+        minUniqueQueries: 0,
+        nowMs: Date.parse("2026-04-02T10:00:00.000Z"),
+      });
+
+      expect(applied.appended).toBe(0);
+      expect(applied.reconciledExisting).toBe(1);
+      const memoryText = await fs.readFile(path.join(workspaceDir, "MEMORY.md"), "utf-8");
+      const archiveText = await fs.readFile(applied.archivePath, "utf-8");
+      expect(memoryText).toContain("Latest promotion archive:");
+      expect(memoryText).toContain("## Other Section");
+      expect(memoryText).not.toContain("openclaw-memory-promotion:");
+      expect(archiveText).toContain(`<!-- openclaw-memory-promotion:${key} -->`);
+      expect(archiveText).toContain("The gateway should stay loopback-only on port 18789.");
+    });
+  });
+
+  it("inserts the compact promotion pointer before a final root section", async () => {
+    await withTempWorkspace(async (workspaceDir) => {
+      await writeDailyMemoryNote(workspaceDir, "2026-04-01", [
+        "The gateway should stay loopback-only on port 18789.",
+      ]);
+      await fs.writeFile(
+        path.join(workspaceDir, "MEMORY.md"),
+        ["# Long-Term Memory", "", "## Notes", "", "Keep trailing notes visible."].join("\n"),
+        "utf-8",
+      );
+      await recordShortTermRecalls({
+        workspaceDir,
+        query: "gateway loopback",
+        results: [
+          {
+            path: "memory/2026-04-01.md",
+            startLine: 1,
+            endLine: 1,
+            score: 0.95,
+            snippet: "The gateway should stay loopback-only on port 18789.",
+            source: "memory",
+          },
+        ],
+      });
+      const ranked = await rankShortTermPromotionCandidates({
+        workspaceDir,
+        minScore: 0,
+        minRecallCount: 0,
+        minUniqueQueries: 0,
+      });
+      const applied = await applyShortTermPromotions({
+        workspaceDir,
+        candidates: ranked,
+        minScore: 0,
+        minRecallCount: 0,
+        minUniqueQueries: 0,
+      });
+
+      const memoryText = await fs.readFile(path.join(workspaceDir, "MEMORY.md"), "utf-8");
+      expect(applied.appended).toBe(1);
+      expect(memoryText.indexOf("## Promoted From Short-Term Memory")).toBeLessThan(
+        memoryText.indexOf("## Notes"),
+      );
+      expect(memoryText).toContain("Keep trailing notes visible.");
     });
   });
 
@@ -1251,8 +1372,11 @@ describe("short-term promotion", () => {
       expect(applied.applied).toBe(1);
 
       const memoryText = await fs.readFile(path.join(workspaceDir, "MEMORY.md"), "utf-8");
+      const archiveText = await fs.readFile(applied.archivePath, "utf-8");
       expect(memoryText).toContain("Promoted From Short-Term Memory");
-      expect(memoryText).toContain("memory/2026-04-01.md:10-10");
+      expect(memoryText).toContain("Latest promotion archive:");
+      expect(memoryText).not.toContain("memory/2026-04-01.md:10-10");
+      expect(archiveText).toContain("memory/2026-04-01.md:10-10");
 
       const rankedAfter = await rankShortTermPromotionCandidates({
         workspaceDir,
@@ -1378,7 +1502,10 @@ describe("short-term promotion", () => {
       expect(applied.appliedCandidates[0]?.startLine).toBe(3);
       expect(applied.appliedCandidates[0]?.endLine).toBe(3);
       const memoryText = await fs.readFile(path.join(workspaceDir, "MEMORY.md"), "utf-8");
-      expect(memoryText).toContain("memory/2026-04-01.md:3-3");
+      const archiveText = await fs.readFile(applied.archivePath, "utf-8");
+      expect(memoryText).toContain("Latest promotion archive:");
+      expect(memoryText).not.toContain("memory/2026-04-01.md:3-3");
+      expect(archiveText).toContain("memory/2026-04-01.md:3-3");
     });
   });
 
@@ -1471,7 +1598,10 @@ describe("short-term promotion", () => {
 
       expect(applied.applied).toBe(1);
       const memoryText = await fs.readFile(path.join(workspaceDir, "MEMORY.md"), "utf-8");
-      expect(memoryText).toContain("source=2026-04-01.md:1-1");
+      const archiveText = await fs.readFile(applied.archivePath, "utf-8");
+      expect(memoryText).toContain("Latest promotion archive:");
+      expect(memoryText).not.toContain("source=2026-04-01.md:1-1");
+      expect(archiveText).toContain("source=2026-04-01.md:1-1");
     });
   });
 
@@ -1554,7 +1684,9 @@ describe("short-term promotion", () => {
 
       expect(applied.applied).toBe(1);
       const memoryText = await fs.readFile(path.join(workspaceDir, "MEMORY.md"), "utf-8");
-      expect(memoryText).toContain("Promoted From Short-Term Memory (2026-04-01)");
+      const archiveText = await fs.readFile(applied.archivePath, "utf-8");
+      expect(memoryText).toContain("memory-promoted-short-term-dump-2026-04-01.md");
+      expect(archiveText).toContain("Promoted From Short-Term Memory (2026-04-01)");
     });
   });
 

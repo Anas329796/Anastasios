@@ -91,7 +91,7 @@ export function registerMemoryCli(program: Command) {
           ],
           [
             "openclaw memory promote --apply",
-            "Append top-ranked short-term candidates into MEMORY.md.",
+            "Archive top-ranked short-term candidates while keeping MEMORY.md compact.",
           ],
           [
             'openclaw memory promote-explain "router vlan"',

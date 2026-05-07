@@ -388,7 +388,9 @@ describe("memory cli", () => {
     expect(helpText).toContain('openclaw memory search --query "deployment" --max-results 20');
     expect(helpText).toContain("Limit results for focused troubleshooting.");
     expect(helpText).toContain("openclaw memory promote --apply");
-    expect(helpText).toContain("Append top-ranked short-term candidates into MEMORY.md.");
+    expect(helpText).toContain(
+      "Archive top-ranked short-term candidates while keeping MEMORY.md compact.",
+    );
     expect(helpText).toContain('openclaw memory promote-explain "router vlan"');
     expect(helpText).toContain("Explain why a specific candidate would or would not promote.");
     expect(helpText).toContain("openclaw memory rem-harness --json");
@@ -1626,7 +1628,7 @@ describe("memory cli", () => {
     });
   });
 
-  it("applies top promote candidates into MEMORY.md", async () => {
+  it("archives top promote candidates while keeping MEMORY.md compact", async () => {
     await withTempWorkspace(async (workspaceDir) => {
       await writeDailyMemoryNote(workspaceDir, "2026-04-01", [
         "line 1",
@@ -1679,10 +1681,20 @@ describe("memory cli", () => {
 
       const memoryPath = path.join(workspaceDir, "MEMORY.md");
       const memoryText = await fs.readFile(memoryPath, "utf-8");
+      const archiveRoot = path.join(workspaceDir, "memory", "archived");
+      const now = new Date();
+      const quarterDir = path.join(
+        archiveRoot,
+        `${now.getFullYear()}-Q${Math.floor(now.getMonth() / 3) + 1}`,
+      );
+      const archiveFiles = await fs.readdir(quarterDir);
+      const archiveText = await fs.readFile(path.join(quarterDir, archiveFiles[0]), "utf-8");
       expect(memoryText).toContain("Promoted From Short-Term Memory");
-      expect(memoryText).toContain("openclaw-memory-promotion:");
-      expect(memoryText).toContain("memory/2026-04-01.md:10-10");
-      expectLogged(log, `Processed 1 candidate(s) for ${memoryPath}.`);
+      expect(memoryText).toContain("Latest promotion archive:");
+      expect(memoryText).not.toContain("openclaw-memory-promotion:");
+      expect(archiveText).toContain("openclaw-memory-promotion:");
+      expect(archiveText).toContain("memory/2026-04-01.md:10-10");
+      expectLogged(log, "Archived 1 candidate(s) to");
       expectLogged(log, "appended=1 reconciledExisting=0");
       expect(close).toHaveBeenCalled();
     });
