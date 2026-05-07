@@ -198,8 +198,8 @@ describe("imessage monitor gating + envelope builders", () => {
     expect(ctxPayload.MessageSidFull).toBe("full-message-guid");
   });
 
-  it("honors account-scoped mention-pattern policy", () => {
-    const decision = resolve({
+  it("honors account-scoped mention-pattern policy", async () => {
+    const decision = await resolve({
       message: {
         id: 4,
         chat_id: 42,
