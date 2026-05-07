@@ -326,7 +326,7 @@ export function resolveOpenAIResponsesPayloadPolicy(
     storeMode === "preserve"
       ? undefined
       : storeMode === "disable"
-        ? capabilities.supportsResponsesStoreField
+        ? capabilities.supportsResponsesStoreField && capabilities.usesKnownNativeOpenAIRoute
           ? false
           : undefined
         : capabilities.allowsResponsesStore
