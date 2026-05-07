@@ -205,7 +205,7 @@ export type DiscordThreadBindingsConfig = {
   spawnSessions?: boolean;
   /**
    * Default context mode for native subagents spawned into a bound Discord thread.
-   * Default: "fork".
+   * Default: "isolated".
    */
   defaultSpawnContext?: "isolated" | "fork";
   /**

@@ -180,7 +180,7 @@ export type SessionThreadBindingsConfig = {
   spawnSessions?: boolean;
   /**
    * Default context mode for native subagents spawned into a bound thread.
-   * Default: "fork" so the child starts from the requester transcript.
+   * Default: "isolated" so the child starts with a clean transcript.
    */
   defaultSpawnContext?: "isolated" | "fork";
 };
