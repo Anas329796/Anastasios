@@ -547,6 +547,7 @@ describe("gateway server chat", () => {
       await connectOk(ws);
       const sessionDir = await createSessionDir();
       const originalHome = process.env.HOME;
+      const originalCodexHome = process.env.CODEX_HOME;
       const homeDir = path.join(sessionDir, "home");
       const cliSessionId = "5b8b202c-f6bb-4046-9475-d2f15fd07530";
       const claudeProjectsDir = path.join(homeDir, ".claude", "projects", "workspace");
@@ -585,6 +586,7 @@ describe("gateway server chat", () => {
         "utf-8",
       );
       process.env.HOME = homeDir;
+      delete process.env.CODEX_HOME;
       try {
         await writeSessionStore({
           entries: {
@@ -618,6 +620,11 @@ describe("gateway server chat", () => {
         } else {
           process.env.HOME = originalHome;
         }
+        if (originalCodexHome === undefined) {
+          delete process.env.CODEX_HOME;
+        } else {
+          process.env.CODEX_HOME = originalCodexHome;
+        }
       }
     });
   });
@@ -627,6 +634,7 @@ describe("gateway server chat", () => {
       await connectOk(ws);
       const sessionDir = await createSessionDir();
       const originalHome = process.env.HOME;
+      const originalCodexHome = process.env.CODEX_HOME;
       const homeDir = path.join(sessionDir, "home");
       const claudeSessionId = "5b8b202c-f6bb-4046-9475-d2f15fd07530";
       const codexSessionId = "019d7b7a-6bf8-7fb3-8abb-412fb4107f9f";
@@ -683,6 +691,7 @@ describe("gateway server chat", () => {
         "utf-8",
       );
       process.env.HOME = homeDir;
+      delete process.env.CODEX_HOME;
       try {
         await writeSessionStore({
           entries: {
@@ -721,6 +730,11 @@ describe("gateway server chat", () => {
         } else {
           process.env.HOME = originalHome;
         }
+        if (originalCodexHome === undefined) {
+          delete process.env.CODEX_HOME;
+        } else {
+          process.env.CODEX_HOME = originalCodexHome;
+        }
       }
     });
   });
@@ -730,6 +744,7 @@ describe("gateway server chat", () => {
       await connectOk(ws);
       const sessionDir = await createSessionDir();
       const originalHome = process.env.HOME;
+      const originalCodexHome = process.env.CODEX_HOME;
       const homeDir = path.join(sessionDir, "home");
       const cliSessionId = "019d7b7a-6bf8-7fb3-8abb-412fb4107f9f";
       const codexSessionsDir = path.join(homeDir, ".codex", "sessions", "2026", "04", "11");
@@ -758,6 +773,7 @@ describe("gateway server chat", () => {
         "utf-8",
       );
       process.env.HOME = homeDir;
+      delete process.env.CODEX_HOME;
       try {
         await writeSessionStore({
           entries: {
@@ -809,6 +825,11 @@ describe("gateway server chat", () => {
           delete process.env.HOME;
         } else {
           process.env.HOME = originalHome;
+        }
+        if (originalCodexHome === undefined) {
+          delete process.env.CODEX_HOME;
+        } else {
+          process.env.CODEX_HOME = originalCodexHome;
         }
       }
     });

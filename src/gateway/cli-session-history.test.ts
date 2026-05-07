@@ -15,6 +15,7 @@ import {
 import { sanitizeChatHistoryMessages } from "./server-methods/chat.js";
 
 const ORIGINAL_HOME = process.env.HOME;
+const ORIGINAL_CODEX_HOME = process.env.CODEX_HOME;
 
 function createClaudeHistoryLines(sessionId: string) {
   return [
@@ -183,6 +184,7 @@ async function withCodexSessionsDir<T>(
   await fs.mkdir(sessionsDir, { recursive: true });
   await fs.writeFile(filePath, options?.lines ?? createCodexHistoryLines(sessionId), "utf-8");
   process.env.HOME = homeDir;
+  delete process.env.CODEX_HOME;
   try {
     return await run({ homeDir, sessionId, filePath });
   } finally {
@@ -190,6 +192,11 @@ async function withCodexSessionsDir<T>(
       delete process.env.HOME;
     } else {
       process.env.HOME = ORIGINAL_HOME;
+    }
+    if (ORIGINAL_CODEX_HOME === undefined) {
+      delete process.env.CODEX_HOME;
+    } else {
+      process.env.CODEX_HOME = ORIGINAL_CODEX_HOME;
     }
     await fs.rm(root, { recursive: true, force: true });
   }
@@ -202,6 +209,11 @@ describe("cli session history", () => {
       delete process.env.HOME;
     } else {
       process.env.HOME = ORIGINAL_HOME;
+    }
+    if (ORIGINAL_CODEX_HOME === undefined) {
+      delete process.env.CODEX_HOME;
+    } else {
+      process.env.CODEX_HOME = ORIGINAL_CODEX_HOME;
     }
   });
 
@@ -286,6 +298,33 @@ describe("cli session history", () => {
     });
   });
 
+  it("resolves codex-cli session messages from CODEX_HOME before HOME", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-codex-home-history-"));
+    const homeDir = path.join(root, "home");
+    const codexHome = path.join(root, "custom-codex-home");
+    const sessionId = "019d7b7a-6bf8-7fb3-8abb-412fb4107f9f";
+    const sessionsDir = path.join(codexHome, "sessions", "2026", "04", "11");
+    const filePath = path.join(sessionsDir, `rollout-2026-04-11T15-38-33-${sessionId}.jsonl`);
+    await fs.mkdir(sessionsDir, { recursive: true });
+    await fs.writeFile(filePath, createCodexHistoryLines(sessionId), "utf-8");
+    process.env.HOME = homeDir;
+    process.env.CODEX_HOME = codexHome;
+    try {
+      expect(resolveCodexCliSessionFilePath({ cliSessionId: sessionId })).toBe(filePath);
+      const messages = readCodexCliSessionMessages({ cliSessionId: sessionId });
+      expect(messages).toHaveLength(2);
+      expect(messages[0]).toMatchObject({
+        role: "user",
+        __openclaw: {
+          importedFrom: "codex-cli",
+          cliSessionId: sessionId,
+        },
+      });
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("keeps the final codex reply when commentary shares a timestamp", async () => {
     await withCodexSessionsDir(
       async ({ homeDir, sessionId }) => {
@@ -351,6 +390,7 @@ describe("cli session history", () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-cli-history-merge-"));
     const homeDir = path.join(root, "home");
     const originalHome = process.env.HOME;
+    const originalCodexHome = process.env.CODEX_HOME;
     const claudeSessionId = "5b8b202c-f6bb-4046-9475-d2f15fd07530";
     const codexSessionId = "019d7b7a-6bf8-7fb3-8abb-412fb4107f9f";
     const claudeProjectsDir = path.join(homeDir, ".claude", "projects", "demo-workspace");
@@ -368,6 +408,7 @@ describe("cli session history", () => {
       "utf-8",
     );
     process.env.HOME = homeDir;
+    delete process.env.CODEX_HOME;
     try {
       const messages = augmentChatHistoryWithCliSessionImports({
         entry: {
@@ -405,6 +446,11 @@ describe("cli session history", () => {
       } else {
         process.env.HOME = originalHome;
       }
+      if (originalCodexHome === undefined) {
+        delete process.env.CODEX_HOME;
+      } else {
+        process.env.CODEX_HOME = originalCodexHome;
+      }
       await fs.rm(root, { recursive: true, force: true });
     }
   });
@@ -413,6 +459,7 @@ describe("cli session history", () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-cli-history-scope-"));
     const homeDir = path.join(root, "home");
     const originalHome = process.env.HOME;
+    const originalCodexHome = process.env.CODEX_HOME;
     const claudeSessionId = "5b8b202c-f6bb-4046-9475-d2f15fd07530";
     const codexSessionId = "019d7b7a-6bf8-7fb3-8abb-412fb4107f9f";
     const claudeProjectsDir = path.join(homeDir, ".claude", "projects", "demo-workspace");
@@ -430,6 +477,7 @@ describe("cli session history", () => {
       "utf-8",
     );
     process.env.HOME = homeDir;
+    delete process.env.CODEX_HOME;
     try {
       const messages = augmentChatHistoryWithCliSessionImports({
         entry: {
@@ -462,6 +510,11 @@ describe("cli session history", () => {
         delete process.env.HOME;
       } else {
         process.env.HOME = originalHome;
+      }
+      if (originalCodexHome === undefined) {
+        delete process.env.CODEX_HOME;
+      } else {
+        process.env.CODEX_HOME = originalCodexHome;
       }
       await fs.rm(root, { recursive: true, force: true });
     }
@@ -525,6 +578,7 @@ describe("cli session history", () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-cli-history-suppress-scope-"));
     const homeDir = path.join(root, "home");
     const originalHome = process.env.HOME;
+    const originalCodexHome = process.env.CODEX_HOME;
     const claudeSessionId = "5b8b202c-f6bb-4046-9475-d2f15fd07530";
     const codexSessionId = "019d7b7a-6bf8-7fb3-8abb-412fb4107f9f";
     const claudeProjectsDir = path.join(homeDir, ".claude", "projects", "demo-workspace");
@@ -542,6 +596,7 @@ describe("cli session history", () => {
       "utf-8",
     );
     process.env.HOME = homeDir;
+    delete process.env.CODEX_HOME;
     try {
       const messages = augmentChatHistoryWithCliSessionImports({
         entry: {
@@ -576,6 +631,11 @@ describe("cli session history", () => {
         delete process.env.HOME;
       } else {
         process.env.HOME = originalHome;
+      }
+      if (originalCodexHome === undefined) {
+        delete process.env.CODEX_HOME;
+      } else {
+        process.env.CODEX_HOME = originalCodexHome;
       }
       await fs.rm(root, { recursive: true, force: true });
     }
