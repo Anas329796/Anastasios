@@ -165,9 +165,50 @@ export const handleApproveCommand: CommandHandler = async (params, allowTextComm
     return { shouldContinue: false, reply: { text: parsed.error } };
   }
 
+  // Authorisation must precede any pending-list queries so unauthorized
+  // senders cannot probe approval state or harvest IDs from ambiguity replies.
+  const effectiveAccountId = resolveChannelAccountId({
+    cfg: params.cfg,
+    ctx: params.ctx,
+    command: params.command,
+  });
+  const execApprovalAuthorization = resolveApprovalCommandAuthorization({
+    cfg: params.cfg,
+    channel: params.command.channel,
+    accountId: effectiveAccountId,
+    senderId: params.command.senderId,
+    kind: "exec",
+  });
+  const pluginApprovalAuthorization = resolveApprovalCommandAuthorization({
+    cfg: params.cfg,
+    channel: params.command.channel,
+    accountId: effectiveAccountId,
+    senderId: params.command.senderId,
+    kind: "plugin",
+  });
+  const hasExplicitApprovalAuthorization =
+    (execApprovalAuthorization.explicit && execApprovalAuthorization.authorized) ||
+    (pluginApprovalAuthorization.explicit && pluginApprovalAuthorization.authorized);
+  if (!params.command.isAuthorizedSender && !hasExplicitApprovalAuthorization) {
+    logVerbose(
+      `Ignoring /approve from unauthorized sender: ${params.command.senderId || "<unknown>"}`,
+    );
+    return { shouldContinue: false };
+  }
+
+  const missingScope = requireGatewayClientScope(params, {
+    label: "/approve",
+    allowedScopes: ["operator.approvals", "operator.admin"],
+    missingText: "❌ /approve requires operator.approvals for gateway clients.",
+  });
+  if (missingScope) {
+    return missingScope;
+  }
+
   // If the user typed `/approve <decision>` without an id, resolve to the
   // single most-recent pending approval. Better UX than forcing a
   // copy-paste of a uuid; refuses on ambiguity (multiple pending).
+  // Authorization has already been verified above before querying the list.
   if (parsed.id === IMPLICIT_APPROVAL_ID) {
     let pendingPlugin: Array<{ id: string }> = [];
     try {
@@ -208,8 +249,7 @@ export const handleApproveCommand: CommandHandler = async (params, allowTextComm
         reply: {
           text:
             `❌ Ambiguous /approve — ${candidates.length} pending approvals. ` +
-            `Reply with the explicit id from the prompt: ` +
-            `/approve ${candidates[0].id} ${parsed.decision}`,
+            `Reply with the explicit id from the approval prompt.`,
         },
       };
     }
@@ -217,11 +257,6 @@ export const handleApproveCommand: CommandHandler = async (params, allowTextComm
   }
 
   const isPluginId = parsed.id.startsWith("plugin:");
-  const effectiveAccountId = resolveChannelAccountId({
-    cfg: params.cfg,
-    ctx: params.ctx,
-    command: params.command,
-  });
   const approvalCapability = resolveChannelApprovalCapability(
     getChannelPlugin(params.command.channel),
   );
@@ -236,38 +271,6 @@ export const handleApproveCommand: CommandHandler = async (params, allowTextComm
   }
   if (approveCommandBehavior?.kind === "reply") {
     return { shouldContinue: false, reply: { text: approveCommandBehavior.text } };
-  }
-  const execApprovalAuthorization = resolveApprovalCommandAuthorization({
-    cfg: params.cfg,
-    channel: params.command.channel,
-    accountId: effectiveAccountId,
-    senderId: params.command.senderId,
-    kind: "exec",
-  });
-  const pluginApprovalAuthorization = resolveApprovalCommandAuthorization({
-    cfg: params.cfg,
-    channel: params.command.channel,
-    accountId: effectiveAccountId,
-    senderId: params.command.senderId,
-    kind: "plugin",
-  });
-  const hasExplicitApprovalAuthorization =
-    (execApprovalAuthorization.explicit && execApprovalAuthorization.authorized) ||
-    (pluginApprovalAuthorization.explicit && pluginApprovalAuthorization.authorized);
-  if (!params.command.isAuthorizedSender && !hasExplicitApprovalAuthorization) {
-    logVerbose(
-      `Ignoring /approve from unauthorized sender: ${params.command.senderId || "<unknown>"}`,
-    );
-    return { shouldContinue: false };
-  }
-
-  const missingScope = requireGatewayClientScope(params, {
-    label: "/approve",
-    allowedScopes: ["operator.approvals", "operator.admin"],
-    missingText: "❌ /approve requires operator.approvals for gateway clients.",
-  });
-  if (missingScope) {
-    return missingScope;
   }
 
   const resolvedBy = buildResolvedByLabel(params);
