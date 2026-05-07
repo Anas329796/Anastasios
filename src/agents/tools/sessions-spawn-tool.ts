@@ -341,14 +341,6 @@ export function createSessionsSpawnTool(
 
       if (runtime === "acp") {
         const { isSpawnAcpAcceptedResult, spawnAcpDirect } = await loadAcpSpawnModule();
-        if (Array.isArray(attachments) && attachments.length > 0) {
-          return jsonResult({
-            status: "error",
-            error:
-              "attachments are currently unsupported for runtime=acp; use runtime=subagent or remove attachments",
-            ...roleContext,
-          });
-        }
         const result = await spawnAcpDirect(
           {
             task,
@@ -363,6 +355,7 @@ export function createSessionsSpawnTool(
             thread,
             sandbox,
             streamTo,
+            attachments,
           },
           {
             agentSessionKey: opts?.agentSessionKey,
