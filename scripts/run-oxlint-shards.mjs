@@ -1,25 +1,14 @@
 import { spawn, spawnSync } from "node:child_process";
 import path from "node:path";
+import {
+  acquireLocalHeavyCheckLockSync,
+  getLocalNativeTypecheckRefusalError,
+  prepareLocalHeavyCheckEnvironment,
+  resolveLocalHeavyCheckEnv,
+} from "./lib/local-heavy-check-runtime.mjs";
 
 const extraArgs = process.argv.slice(2);
 const runner = path.resolve("scripts", "run-oxlint.mjs");
-
-const prepareResult = spawnSync(
-  process.execPath,
-  [path.resolve("scripts", "prepare-extension-package-boundary-artifacts.mjs")],
-  {
-    stdio: "inherit",
-    env: process.env,
-  },
-);
-
-if (prepareResult.error) {
-  throw prepareResult.error;
-}
-if ((prepareResult.status ?? 1) !== 0) {
-  process.exit(prepareResult.status ?? 1);
-}
-
 const shards = [
   {
     name: "core",
@@ -34,27 +23,69 @@ const shards = [
     args: ["--tsconfig", "config/tsconfig/oxlint.scripts.json", "scripts"],
   },
 ];
+const env = prepareLocalHeavyCheckEnvironment({
+  cwd: process.cwd(),
+  env: resolveLocalHeavyCheckEnv(process.env),
+});
+const nativeTypecheckRefusalError = getLocalNativeTypecheckRefusalError({
+  args: extraArgs,
+  env,
+  shouldRunHeavyCheck: true,
+  toolName: "sharded type-aware oxlint",
+});
 
-const runSerial = process.env.OPENCLAW_OXLINT_SHARDS_SERIAL === "1";
-const results = runSerial
-  ? await runShardsSerial(shards)
-  : await Promise.all(shards.map((shard) => runShard(shard)));
-process.exitCode = results.find((status) => status !== 0) ?? 0;
+if (nativeTypecheckRefusalError) {
+  console.error(nativeTypecheckRefusalError);
+  process.exitCode = 1;
+} else {
+  const releaseLock = acquireLocalHeavyCheckLockSync({
+    cwd: process.cwd(),
+    env,
+    toolName: "oxlint-shards",
+  });
 
-async function runShardsSerial(entries) {
+  try {
+    const prepareResult = spawnSync(
+      process.execPath,
+      [path.resolve("scripts", "prepare-extension-package-boundary-artifacts.mjs")],
+      {
+        stdio: "inherit",
+        env,
+      },
+    );
+
+    if (prepareResult.error) {
+      throw prepareResult.error;
+    }
+    if ((prepareResult.status ?? 1) !== 0) {
+      process.exitCode = prepareResult.status ?? 1;
+    } else {
+      const runSerial = env.OPENCLAW_OXLINT_SHARDS_SERIAL === "1";
+      const results = runSerial
+        ? await runShardsSerial(shards, env)
+        : await Promise.all(shards.map((shard) => runShard(shard, env)));
+      process.exitCode = results.find((status) => status !== 0) ?? 0;
+    }
+  } finally {
+    releaseLock();
+  }
+}
+
+async function runShardsSerial(entries, parentEnv) {
   const results = [];
   for (const shard of entries) {
-    results.push(await runShard(shard));
+    results.push(await runShard(shard, parentEnv));
   }
   return results;
 }
 
-async function runShard(shard) {
+async function runShard(shard, parentEnv) {
   console.error(`[oxlint:${shard.name}] starting`);
   const child = spawn(process.execPath, [runner, ...shard.args, ...extraArgs], {
     stdio: "inherit",
     env: {
-      ...process.env,
+      ...parentEnv,
+      OPENCLAW_ALLOW_LOCAL_NATIVE_TYPECHECK: "1",
       OPENCLAW_OXLINT_SKIP_LOCK: "1",
       OPENCLAW_OXLINT_SKIP_PREPARE: "1",
     },
