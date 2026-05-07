@@ -287,7 +287,7 @@ function resolveHeartbeatAgents(cfg: OpenClawConfig): HeartbeatAgent[] {
       }
       return { agentId, heartbeat: resolveHeartbeatConfig(cfg, agentId) };
     })
-    .filter((entry): entry is HeartbeatAgent => entry !== null);
+    .filter((entry) => entry !== null) as HeartbeatAgent[];
 }
 
 function resolveHeartbeatConfig(
