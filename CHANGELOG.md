@@ -147,6 +147,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Gateway/session history: recover Discord sender labels from hidden runtime-context rows without exposing those rows in dashboard or history output. Thanks @Squirbie.
 - Compute plugin callback authorization dynamically [AI]. (#78866) Thanks @pgondhi987.
 - fix(active-memory): require admin scope for global toggles [AI]. (#78863) Thanks @pgondhi987.
 - Honor owner enforcement for native commands [AI]. (#78864) Thanks @pgondhi987.
