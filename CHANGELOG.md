@@ -154,6 +154,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Codex/app-server: add `plugins.entries.codex.config.appServer.startupTimeoutMs` (default 120000ms) and stop reusing the per-turn `timeoutMs` budget for app-server startup, so deterministic local startup failures fail at the configured startup ceiling instead of holding the agent lane for the full turn timeout. Thanks @cathrynlavery.
 - Providers: preserve non-OK `text/event-stream` response bodies so provider HTTP errors keep their JSON detail instead of collapsing to generic streaming failures. Fixes #78180.
 - Chat commands: make `/model default` reset the session model override instead of treating it as a literal model name. Fixes #78182.
 - Cron: make rejected `payload.model` errors show the configured `agents.defaults.models` allowlist instead of echoing the rejected model twice. Fixes #79058.

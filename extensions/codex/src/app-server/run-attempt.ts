@@ -360,6 +360,7 @@ export async function runCodexAppServerAttempt(
   params: EmbeddedRunAttemptParams,
   options: {
     pluginConfig?: unknown;
+    startupTimeoutMs?: number;
     startupTimeoutFloorMs?: number;
     nativeHookRelay?: {
       enabled?: boolean;
@@ -603,7 +604,7 @@ export async function runCodexAppServerAttempt(
         : undefined;
     const threadConfig = nativeHookRelayConfig;
     ({ client, thread } = await withCodexStartupTimeout({
-      timeoutMs: params.timeoutMs,
+      timeoutMs: options.startupTimeoutMs ?? appServer.startupTimeoutMs,
       timeoutFloorMs: options.startupTimeoutFloorMs,
       signal: runAbortController.signal,
       operation: async () => {
