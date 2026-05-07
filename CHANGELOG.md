@@ -183,6 +183,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Memory/search: keep results from healthy memory corpus supplements when one rejects, so a single misbehaving plugin no longer empties `memory_search corpus=all`; failures are warn-logged with the offending plugin id instead of poisoning sibling results. Fixes #77897. Thanks @lonexreb.
 - Agents/compaction: keep the recent tail after manual `/compact` when Pi returns an empty or no-op compaction summary, preventing blank checkpoints from replacing the live context.
 - fix(discord): gate user allowlist name resolution [AI]. (#79002) Thanks @pgondhi987.
 - fix(msteams): gate startup user allowlist resolution [AI]. (#79003) Thanks @pgondhi987.
