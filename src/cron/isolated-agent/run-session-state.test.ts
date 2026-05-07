@@ -157,6 +157,33 @@ describe("createPersistCronSessionEntry", () => {
 
     expect(cronSession.store["agent:main:session"]).toBe(cronSession.sessionEntry);
   });
+
+  it("persists under runSessionKey when provided", async () => {
+    const cronSession = makeCronSession();
+    const storedKeys: string[] = [];
+    const updateSessionStore = vi.fn(
+      async (_storePath: string, update: (store: Record<string, SessionEntry>) => void) => {
+        const store: Record<string, SessionEntry> = {};
+        update(store);
+        storedKeys.push(...Object.keys(store));
+      },
+    );
+
+    const persist = createPersistCronSessionEntry({
+      isFastTestEnv: false,
+      cronSession,
+      agentSessionKey: "agent:main:cron:job1",
+      runSessionKey: "agent:main:cron:job1:run:abc123",
+      updateSessionStore,
+    });
+
+    await persist();
+
+    expect(cronSession.store["agent:main:cron:job1"]).toBe(cronSession.sessionEntry);
+    expect(cronSession.store["agent:main:cron:job1:run:abc123"]).toBe(cronSession.sessionEntry);
+    expect(storedKeys).toContain("agent:main:cron:job1");
+    expect(storedKeys).toContain("agent:main:cron:job1:run:abc123");
+  });
 });
 
 async function createTranscriptFile(): Promise<string> {

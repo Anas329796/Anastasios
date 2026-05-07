@@ -42,6 +42,7 @@ export function createPersistCronSessionEntry(params: {
   isFastTestEnv: boolean;
   cronSession: MutableCronSession;
   agentSessionKey: string;
+  runSessionKey?: string;
   updateSessionStore: UpdateSessionStore;
 }): PersistCronSessionEntry {
   return async () => {
@@ -55,8 +56,14 @@ export function createPersistCronSessionEntry(params: {
         ? toNonResumableCronSessionEntry(params.cronSession.sessionEntry)
         : params.cronSession.sessionEntry;
     params.cronSession.store[params.agentSessionKey] = persistedEntry;
+    if (params.runSessionKey && params.runSessionKey !== params.agentSessionKey) {
+      params.cronSession.store[params.runSessionKey] = persistedEntry;
+    }
     await params.updateSessionStore(params.cronSession.storePath, (store) => {
       store[params.agentSessionKey] = persistedEntry;
+      if (params.runSessionKey && params.runSessionKey !== params.agentSessionKey) {
+        store[params.runSessionKey] = persistedEntry;
+      }
     });
   };
 }
