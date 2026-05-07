@@ -733,23 +733,34 @@ Use jobId as the canonical identifier; id is accepted for compatibility. Use con
                 ? resolveSessionAgentId({ sessionKey: opts.agentSessionKey, config: cfg })
                 : undefined;
           const includeDisabled = Boolean(params.includeDisabled);
-          let offset = 0;
           let result: unknown;
-          do {
+          if (!selfRemoveOnlyJobId) {
             result = await callGateway("cron.list", gatewayOpts, {
               includeDisabled,
               agentId: listAgentId,
-              ...(selfRemoveOnlyJobId ? { limit: 200, offset } : {}),
             });
-            if (!selfRemoveOnlyJobId || cronListResultHasJob(result, selfRemoveOnlyJobId)) {
-              break;
+          } else {
+            let offset = 0;
+            let shouldContinue = true;
+            while (shouldContinue) {
+              result = await callGateway("cron.list", gatewayOpts, {
+                includeDisabled,
+                agentId: listAgentId,
+                limit: 200,
+                offset,
+              });
+              if (cronListResultHasJob(result, selfRemoveOnlyJobId)) {
+                shouldContinue = false;
+                continue;
+              }
+              const nextOffset = readCronListNextOffset(result, offset);
+              if (nextOffset === undefined) {
+                shouldContinue = false;
+                continue;
+              }
+              offset = nextOffset;
             }
-            const nextOffset = readCronListNextOffset(result, offset);
-            if (nextOffset === undefined) {
-              break;
-            }
-            offset = nextOffset;
-          } while (true);
+          }
           return jsonResult(
             selfRemoveOnlyJobId ? filterCronListResultToJobId(result, selfRemoveOnlyJobId) : result,
           );
