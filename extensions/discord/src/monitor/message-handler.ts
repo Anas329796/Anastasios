@@ -74,7 +74,7 @@ function shouldStartAcceptedTypingFeedback(ctx: DiscordMessagePreflightContext):
     return false;
   }
   const configuredTypingMode = ctx.cfg.session?.typingMode ?? ctx.cfg.agents?.defaults?.typingMode;
-  return configuredTypingMode !== "never";
+  return configuredTypingMode === undefined || configuredTypingMode === "instant";
 }
 
 function startAcceptedTypingFeedback(params: {

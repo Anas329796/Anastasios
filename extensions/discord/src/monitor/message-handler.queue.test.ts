@@ -290,7 +290,7 @@ describe("createDiscordMessageHandler queue behavior", () => {
   });
 
   it.each(["message", "thinking"] as const)(
-    "starts and carries accepted typing feedback after preflight acceptance for %s mode",
+    "does not prestart accepted typing feedback after preflight acceptance for %s mode",
     async (typingMode) => {
       preflightDiscordMessageMock.mockReset();
       processDiscordMessageMock.mockReset();
@@ -308,9 +308,7 @@ describe("createDiscordMessageHandler queue behavior", () => {
           },
         }),
       );
-      processDiscordMessageMock.mockImplementation(async () => {
-        expect(replyTypingFeedback.onReplyStart).toHaveBeenCalledTimes(1);
-      });
+      processDiscordMessageMock.mockResolvedValue(undefined);
 
       const handler = createDiscordMessageHandler({
         ...createDiscordHandlerParams(),
@@ -322,12 +320,10 @@ describe("createDiscordMessageHandler queue behavior", () => {
 
       await flushQueueWork();
 
-      expect(createReplyTypingFeedback).toHaveBeenCalledWith(
-        expect.objectContaining({ channelId: "dm-1" }),
-      );
-      expect(replyTypingFeedback.onReplyStart).toHaveBeenCalledTimes(1);
+      expect(createReplyTypingFeedback).not.toHaveBeenCalled();
+      expect(replyTypingFeedback.onReplyStart).not.toHaveBeenCalled();
       expect(processDiscordMessageMock).toHaveBeenCalledWith(
-        expect.objectContaining({ replyTypingFeedback }),
+        expect.objectContaining({ replyTypingFeedback: undefined }),
       );
     },
   );
