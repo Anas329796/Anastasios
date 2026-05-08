@@ -64,13 +64,13 @@ describe("formatSystemRunAllowlistMissMessage", () => {
     ).toContain("shell wrappers like sh/bash/zsh -c require approval");
   });
 
-  it("adds Windows shell-wrapper guidance when blocked by cmd.exe policy", () => {
+  it("adds Windows shell-wrapper guidance when blocked by Windows wrapper policy", () => {
     expect(
       formatSystemRunAllowlistMissMessage({
         shellWrapperBlocked: true,
         windowsShellWrapperBlocked: true,
       }),
-    ).toContain("Windows shell wrappers like cmd.exe /c require approval");
+    ).toContain("Windows shell wrappers like cmd.exe /c or powershell/pwsh -Command");
   });
 });
 
@@ -145,6 +145,17 @@ describe("evaluateSystemRunPolicy", () => {
     expect(denied.shellWrapperBlocked).toBe(true);
     expect(denied.windowsShellWrapperBlocked).toBe(true);
     expect(denied.errorMessage).toContain("Windows shell wrappers like cmd.exe /c");
+  });
+
+  it("blocks Windows PowerShell wrappers in allowlist mode", () => {
+    const denied = expectDeniedDecision(
+      evaluateSystemRunPolicy(
+        buildPolicyParams({ isWindows: true, cmdInvocation: false, shellWrapperInvocation: true }),
+      ),
+    );
+    expect(denied.shellWrapperBlocked).toBe(true);
+    expect(denied.windowsShellWrapperBlocked).toBe(true);
+    expect(denied.errorMessage).toContain("powershell/pwsh -Command");
   });
 
   it("does not block Windows cmd.exe invocations without inline shell-wrapper transport", () => {
