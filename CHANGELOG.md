@@ -6,6 +6,7 @@ Docs: https://docs.openclaw.ai
 
 ### Changes
 
+- Gateway/sessions: guard `buildGroupDisplayName` behind an explicit group/channel `chatType` (or parsed group/channel session key) at both `buildGatewaySessionRow` and `resolveSessionListSearchDisplayName` call sites so direct Telegram DMs fall through to `entry.label` / `origin.label` instead of being formatted as a group label, restoring the correct `openclaw-tui` label in the TUI footer and Control UI session dropdown. Fixes #55354. (#79040)
 - Telegram: preserve the channel-specific 10-option poll cap in the unified outbound adapter so over-limit polls are rejected before send. (#78762) Thanks @obviyus.
 - Runtime/install: raise the supported Node 22 floor to `22.16+` so native SQLite query handling can rely on the `node:sqlite` statement metadata API while continuing to recommend Node 24. (#78921)
 - Discord/voice: stream ElevenLabs TTS directly into Discord playback and send ElevenLabs latency optimization as the documented query parameter so spoken replies can start sooner.
