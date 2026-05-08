@@ -395,11 +395,7 @@ export function registerCronEditCommand(cron: Command) {
           // are never executed — the text is only dispatched as a context notification.
           // When --session is not passed, fetch the existing job to check its target.
           let effectiveSessionIsMain = sessionTarget === "main";
-          if (
-            hasSystemEventPatch &&
-            !effectiveSessionIsMain &&
-            typeof opts.session !== "string"
-          ) {
+          if (hasSystemEventPatch && !effectiveSessionIsMain && typeof opts.session !== "string") {
             try {
               const existing = await getExistingJob();
               if (existing?.sessionTarget === "main") {
