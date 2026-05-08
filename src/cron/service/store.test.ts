@@ -369,6 +369,33 @@ describe("cron service store seam coverage", () => {
     );
   });
 
+  it("warns once per malformed persisted row across repeated forceReload cycles", async () => {
+    const { storePath } = await makeStorePath();
+
+    await writeSingleJobStore(storePath, {
+      id: "missing-cron-expr-job",
+      name: "missing cron expr job",
+      enabled: true,
+      schedule: { kind: "cron" },
+      payload: { kind: "systemEvent", text: "tick" },
+      state: {},
+    });
+
+    const warnSpy = vi.spyOn(logger, "warn");
+    const state = createStoreTestState(storePath);
+
+    await ensureLoaded(state, { skipRecompute: true });
+    await ensureLoaded(state, { forceReload: true, skipRecompute: true });
+    await ensureLoaded(state, { forceReload: true, skipRecompute: true });
+
+    const malformedWarns = warnSpy.mock.calls.filter((call) => {
+      const msg = typeof call[1] === "string" ? call[1] : "";
+      return msg.includes("ignoring malformed persisted job");
+    });
+    expect(malformedWarns).toHaveLength(1);
+    warnSpy.mockRestore();
+  });
+
   it("ignores malformed persisted jobs instead of keeping dashboard-breaking rows", async () => {
     const { storePath } = await makeStorePath();
 

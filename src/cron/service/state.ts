@@ -154,6 +154,13 @@ export type CronServiceState = {
    */
   warnedMissingSessionTargetJobIds: Set<string>;
   /**
+   * Job ids (or stable load indexes when id is unavailable) whose malformed
+   * persisted rows already emitted a quarantine warning in this process.
+   * Suppresses repeated warnings across forceReload ticks while the broken row
+   * remains on disk.
+   */
+  warnedMalformedPersistedJobKeys: Set<string>;
+  /**
    * Raw persisted rows that could not be safely hydrated for runtime use.
    * Keep them out of runtime consumers, but merge them back into config writes
    * so normal scheduler persistence does not silently delete user data that
@@ -173,6 +180,7 @@ export function createCronServiceState(deps: CronServiceDeps): CronServiceState 
     op: Promise.resolve(),
     warnedDisabled: false,
     warnedMissingSessionTargetJobIds: new Set<string>(),
+    warnedMalformedPersistedJobKeys: new Set<string>(),
     quarantinedPersistedJobs: [],
     storeLoadedAtMs: null,
     storeFileMtimeMs: null,

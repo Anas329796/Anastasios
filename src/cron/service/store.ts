@@ -125,14 +125,19 @@ export async function ensureLoaded(
       normalized && typeof normalized === "object" ? (normalized as unknown as CronJob) : job;
     if (!isHydratableCronJob(hydrated)) {
       quarantinedPersistedJobs.push(job);
-      state.deps.log.warn(
-        {
-          storePath: state.deps.storePath,
-          jobId: typeof raw.id === "string" ? raw.id : undefined,
-          index,
-        },
-        "cron: ignoring malformed persisted job; run openclaw doctor --fix or edit jobs.json to repair",
-      );
+      const jobId = typeof raw.id === "string" ? raw.id : undefined;
+      const malformedWarnKey = jobId ?? `index:${index}`;
+      if (!state.warnedMalformedPersistedJobKeys.has(malformedWarnKey)) {
+        state.warnedMalformedPersistedJobKeys.add(malformedWarnKey);
+        state.deps.log.warn(
+          {
+            storePath: state.deps.storePath,
+            jobId,
+            index,
+          },
+          "cron: ignoring malformed persisted job; run openclaw doctor --fix or edit jobs.json to repair",
+        );
+      }
       continue;
     }
     jobs.push(hydrated);
