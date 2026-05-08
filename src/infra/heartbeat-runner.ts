@@ -127,6 +127,7 @@ import {
   setHeartbeatsEnabled,
   setHeartbeatWakeHandler,
 } from "./heartbeat-wake.js";
+import { resolveMaintenanceExecutionDecision } from "./maintenance-phase.js";
 import type { OutboundSendDeps } from "./outbound/deliver.js";
 import { deliverOutboundPayloads } from "./outbound/deliver.js";
 import { buildOutboundSessionContext } from "./outbound/session-context.js";
@@ -228,6 +229,14 @@ type HeartbeatAgentState = {
   recentRunStarts: number[];
   /** Set true after a flood-defer is logged to avoid log spam. Reset when a run actually fires. */
   floodLoggedSinceLastRun: boolean;
+  deferredRuns: DeferredHeartbeatRun[];
+};
+
+type DeferredHeartbeatRun = {
+  reason?: string;
+  sessionKey?: string;
+  heartbeat?: HeartbeatConfig;
+  queuedAtMs: number;
 };
 
 type ActiveHoursSchedule = {
@@ -1937,6 +1946,90 @@ export function startHeartbeatRunner(opts: {
   };
   let initialized = false;
   let heartbeatTimeoutOverflowWarned = false;
+  const MAINTENANCE_BLOCKED_REASON = "maintenance-blocked";
+
+  const isMaintenanceAllowedForAgent = (agentId: string, nowMs: number) =>
+    resolveMaintenanceExecutionDecision({
+      cronConfig: state.cfg.cron,
+      userTimezone: state.cfg.agents?.defaults?.userTimezone,
+      nowMs,
+      agentId,
+    }).allowed;
+
+  const enqueueDeferredRun = (
+    agent: HeartbeatAgentState,
+    deferred: Omit<DeferredHeartbeatRun, "queuedAtMs"> & { queuedAtMs?: number },
+  ) => {
+    agent.deferredRuns.push({
+      reason: deferred.reason,
+      sessionKey: deferred.sessionKey,
+      heartbeat: deferred.heartbeat,
+      queuedAtMs: deferred.queuedAtMs ?? Date.now(),
+    });
+  };
+
+  const executeForAgent = async (params: {
+    agent: HeartbeatAgentState;
+    reason?: string;
+    sessionKey?: string;
+    heartbeat?: HeartbeatConfig;
+    source?: HeartbeatWakeSource;
+    intent?: HeartbeatWakeIntent;
+  }): Promise<HeartbeatRunResult> => {
+    try {
+      return await runOnce({
+        cfg: state.cfg,
+        agentId: params.agent.agentId,
+        heartbeat: params.heartbeat ?? params.agent.heartbeat,
+        reason: params.reason,
+        sessionKey: params.sessionKey,
+        source: params.source,
+        intent: params.intent,
+        deps: { runtime: state.runtime },
+      });
+    } catch (err) {
+      const errMsg = formatErrorMessage(err);
+      log.error(`heartbeat runner: runOnce threw unexpectedly: ${errMsg}`, { error: errMsg });
+      return { status: "failed", reason: errMsg };
+    }
+  };
+
+  const replayDeferredRuns = async (
+    agent: HeartbeatAgentState,
+    nowMs: number,
+  ): Promise<{ ran: boolean; blocked: boolean; earlyReturn?: HeartbeatRunResult }> => {
+    let ran = false;
+    while (agent.deferredRuns.length > 0) {
+      if (!isMaintenanceAllowedForAgent(agent.agentId, nowMs)) {
+        return { ran, blocked: true };
+      }
+      const head = agent.deferredRuns[0];
+      if (!head) {
+        break;
+      }
+      const res = await executeForAgent({
+        agent,
+        reason: head.reason ?? "maintenance-replay",
+        sessionKey: head.sessionKey,
+        heartbeat: head.heartbeat,
+      });
+      if (res.status === "skipped" && isRetryableHeartbeatBusySkipReason(res.reason)) {
+        return { ran, blocked: false, earlyReturn: res };
+      }
+      agent.deferredRuns.shift();
+      if (res.status !== "skipped" || res.reason !== "disabled") {
+        recordRunBookkeeping(agent, nowMs);
+        advanceAgentSchedule(agent, nowMs, head.reason);
+      }
+      if (res.status === "ran") {
+        ran = true;
+      }
+      if (res.status === "failed") {
+        return { ran, blocked: false, earlyReturn: res };
+      }
+    }
+    return { ran, blocked: false };
+  };
 
   const resolveNextDue = (
     now: number,
@@ -2035,6 +2128,14 @@ export function startHeartbeatRunner(opts: {
       if (agent.nextDueMs < nextDue) {
         nextDue = agent.nextDueMs;
       }
+      if (agent.deferredRuns.length > 0) {
+        const deferredDue = isMaintenanceAllowedForAgent(agent.agentId, now)
+          ? now
+          : now + Math.min(MAX_SAFE_TIMEOUT_DELAY_MS, 60_000);
+        if (deferredDue < nextDue) {
+          nextDue = deferredDue;
+        }
+      }
     }
     if (!Number.isFinite(nextDue)) {
       return;
@@ -2108,6 +2209,7 @@ export function startHeartbeatRunner(opts: {
         lastRunStartedAtMs: prevState?.lastRunStartedAtMs,
         recentRunStarts: prevState?.recentRunStarts ?? [],
         floodLoggedSinceLastRun: prevState?.floodLoggedSinceLastRun ?? false,
+        deferredRuns: [...(prevState?.deferredRuns ?? [])],
       });
     }
 
@@ -2166,6 +2268,7 @@ export function startHeartbeatRunner(opts: {
     // Track retryable busy skips so we can skip re-arm in finally — the wake
     // layer handles retry for this case (DEFAULT_RETRY_MS = 1 s).
     let retryableBusySkip = false;
+    let maintenanceBlocked = false;
 
     try {
       if (requestedSessionKey || requestedAgentId) {
@@ -2174,76 +2277,102 @@ export function startHeartbeatRunner(opts: {
         if (!targetAgent) {
           return { status: "skipped", reason: "disabled" };
         }
+        if (!isMaintenanceAllowedForAgent(targetAgent.agentId, now)) {
+          maintenanceBlocked = true;
+          enqueueDeferredRun(targetAgent, {
+            reason,
+            sessionKey: requestedSessionKey,
+            heartbeat: resolveRequestedHeartbeat(targetAgent.heartbeat),
+            queuedAtMs: now,
+          });
+          return { status: "skipped", reason: MAINTENANCE_BLOCKED_REASON };
+        }
+        const replay = await replayDeferredRuns(targetAgent, now);
+        ran = ran || replay.ran;
+        if (replay.earlyReturn) {
+          if (
+            replay.earlyReturn.status === "skipped" &&
+            isRetryableHeartbeatBusySkipReason(replay.earlyReturn.reason)
+          ) {
+            retryableBusySkip = true;
+          }
+          return replay.earlyReturn;
+        }
+        if (replay.blocked) {
+          return { status: "skipped", reason: MAINTENANCE_BLOCKED_REASON };
+        }
         const deferral = evaluateWakeDeferral(targetAgent, now, reason, intent);
         if (deferral.defer) {
           return { status: "skipped", reason: deferral.reason };
         }
-        try {
-          const res = await runOnce({
-            cfg: state.cfg,
-            agentId: targetAgent.agentId,
-            heartbeat: resolveRequestedHeartbeat(targetAgent.heartbeat),
-            source: params.source,
-            intent,
-            reason,
-            sessionKey: requestedSessionKey,
-            deps: { runtime: state.runtime },
-          });
-          if (res.status === "skipped" && isRetryableHeartbeatBusySkipReason(res.reason)) {
-            // Retryable busy — do NOT record run bookkeeping. The wake layer
-            // retries the same reason shortly; if we recorded `lastRunStartedAtMs`
-            // here, the retry would falsely defer with `not-due`/`min-spacing`
-            // because the cooldown would treat this skipped attempt as a real run.
-            retryableBusySkip = true;
-            return res;
-          }
-          // Non-retryable outcome (ran, disabled, failed-but-not-busy). Record
-          // bookkeeping so subsequent wakes within the cooldown window defer.
-          recordRunBookkeeping(targetAgent, now);
-          if (res.status !== "skipped" || res.reason !== "disabled") {
-            advanceAgentSchedule(targetAgent, now, reason);
-          }
-          return res.status === "ran" ? { status: "ran", durationMs: Date.now() - startedAt } : res;
-        } catch (err) {
-          const errMsg = formatErrorMessage(err);
-          log.error(`heartbeat runner: targeted runOnce threw unexpectedly: ${errMsg}`, {
-            error: errMsg,
-          });
-          // Throw counts as a non-retryable terminal attempt for cooldown
-          // purposes — record bookkeeping so the wake layer doesn't tight-loop
-          // on the same reason.
+        const res = await executeForAgent({
+          agent: targetAgent,
+          heartbeat: resolveRequestedHeartbeat(targetAgent.heartbeat),
+          reason,
+          sessionKey: requestedSessionKey,
+          source: params.source,
+          intent,
+        });
+        if (res.status === "skipped" && isRetryableHeartbeatBusySkipReason(res.reason)) {
+          retryableBusySkip = true;
+          return res;
+        }
+        if (res.status !== "skipped" || res.reason !== "disabled") {
           recordRunBookkeeping(targetAgent, now);
           advanceAgentSchedule(targetAgent, now, reason);
-          return { status: "failed", reason: errMsg };
         }
+        if (res.status === "ran") {
+          ran = true;
+        }
+        return ran ? { status: "ran", durationMs: Date.now() - startedAt } : res;
       }
 
       for (const agent of state.agents.values()) {
+        const hasDeferredRuns = agent.deferredRuns.length > 0;
+        const dueByInterval = now >= agent.nextDueMs;
+        if (isInterval && !dueByInterval && !hasDeferredRuns) {
+          continue;
+        }
+        if (!isMaintenanceAllowedForAgent(agent.agentId, now)) {
+          maintenanceBlocked = true;
+          if (!isInterval || dueByInterval) {
+            enqueueDeferredRun(agent, { reason, queuedAtMs: now });
+          }
+          if (isInterval && dueByInterval) {
+            advanceAgentSchedule(agent, now, reason);
+          }
+          continue;
+        }
+        if (hasDeferredRuns) {
+          const replay = await replayDeferredRuns(agent, now);
+          ran = ran || replay.ran;
+          if (replay.earlyReturn) {
+            if (
+              replay.earlyReturn.status === "skipped" &&
+              isRetryableHeartbeatBusySkipReason(replay.earlyReturn.reason)
+            ) {
+              retryableBusySkip = true;
+            }
+            return replay.earlyReturn;
+          }
+          if (replay.blocked) {
+            continue;
+          }
+        }
+        if (isInterval && now < agent.nextDueMs) {
+          continue;
+        }
         const deferral = evaluateWakeDeferral(agent, now, reason, intent);
         if (deferral.defer) {
           continue;
         }
 
-        let res: HeartbeatRunResult;
-        try {
-          res = await runOnce({
-            cfg: state.cfg,
-            agentId: agent.agentId,
-            heartbeat: agent.heartbeat,
-            source: params.source,
-            intent,
-            reason,
-            deps: { runtime: state.runtime },
-          });
-        } catch (err) {
-          const errMsg = formatErrorMessage(err);
-          log.error(`heartbeat runner: runOnce threw unexpectedly: ${errMsg}`, { error: errMsg });
-          // Throw counts as a non-retryable terminal attempt — see comment in
-          // targeted branch above.
-          recordRunBookkeeping(agent, now);
-          advanceAgentSchedule(agent, now, reason);
-          continue;
-        }
+        const res = await executeForAgent({
+          agent,
+          reason,
+          source: params.source,
+          intent,
+        });
         if (res.status === "skipped" && isRetryableHeartbeatBusySkipReason(res.reason)) {
           // Do not advance the schedule or record run bookkeeping — the main
           // lane is busy and the wake layer will retry the same reason shortly
@@ -2310,6 +2439,9 @@ export function startHeartbeatRunner(opts: {
 
       if (ran) {
         return { status: "ran", durationMs: Date.now() - startedAt };
+      }
+      if (maintenanceBlocked) {
+        return { status: "skipped", reason: MAINTENANCE_BLOCKED_REASON };
       }
       return { status: "skipped", reason: isInterval ? "not-due" : "disabled" };
     } finally {

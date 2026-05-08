@@ -409,6 +409,11 @@ Model override note:
     webhookToken: "replace-with-dedicated-webhook-token",
     sessionRetention: "24h",
     runLog: { maxBytes: "2mb", keepLines: 2000 },
+    maintenance: {
+      enabled: true,
+      window: { start: "02:00", end: "03:00", timezone: "user" },
+      maintenanceAgents: ["maintenance"],
+    },
   },
 }
 ```
@@ -430,6 +435,9 @@ Disable cron: `cron.enabled: false` or `OPENCLAW_SKIP_CRON=1`.
   </Accordion>
   <Accordion title="Maintenance">
     `cron.sessionRetention` (default `24h`) prunes isolated run-session entries. `cron.runLog.maxBytes` / `cron.runLog.keepLines` auto-prune run-log files.
+
+    `cron.maintenance` is a separate scheduler policy. When enabled, OpenClaw resolves a daily maintenance phase from `window.start`, `window.end`, and `window.timezone`. Agents listed in `maintenanceAgents` can run only during that maintenance window; all other agents are blocked during the window. Blocked cron runs persist deferred counters in job state and replay FIFO when their phase is allowed again. Heartbeat deferrals are held in memory and replayed when the phase allows. `cron status` includes additive maintenance diagnostics so operators can see the current phase and deferred counts.
+
   </Accordion>
 </AccordionGroup>
 
