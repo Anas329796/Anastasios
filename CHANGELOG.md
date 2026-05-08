@@ -174,6 +174,8 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Memory-core/dreaming: raise the Dream Diary narrative subagent timeout default from 60s to 240s and accept `OPENCLAW_DREAMING_NARRATIVE_TIMEOUT_MS` for operator overrides so multi-workspace and slower-host setups stop losing every dreaming phase to a hard 60-second budget. Fixes #76333. (#76342) Thanks @ottodeng.
+- CLI/sessions: prune old unreferenced transcript, compaction checkpoint, and trajectory artifacts during normal `sessions cleanup`, so gateway restart or crash orphans do not accumulate indefinitely outside `sessions.json`. Fixes #77608. Thanks @slideshow-dingo.
 - fix(discord): gate user allowlist name resolution [AI]. (#79002) Thanks @pgondhi987.
 - fix(msteams): gate startup user allowlist resolution [AI]. (#79003) Thanks @pgondhi987.
 - Harden macOS shell wrapper allowlist parsing [AI]. (#78518) Thanks @pgondhi987.
