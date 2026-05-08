@@ -6,6 +6,9 @@ Docs: https://docs.openclaw.ai
 
 ### Changes
 
+- Sessions/cleanup: `openclaw sessions cleanup` now prunes leftover archived transcript files (`<sessionId>.jsonl.deleted.<ts>`, `<sessionId>.jsonl.reset.<ts>`) past their retention windows and removes orphaned compaction checkpoint files (`<sessionId>.checkpoint.<uuid>.jsonl`) for sessions no longer in the index. The JSON summary gains an `archivedFiles` field reporting scanned/removed counts and bytes freed; `--dry-run` reports the same orphan-checkpoint set as `--enforce`. Fixes #75658.
+- Gateway/Windows: bind the default loopback gateway listener only to `127.0.0.1` on Windows so libuv's dual-stack `::1` behavior cannot wedge localhost HTTP requests. (#69701, fixes #69674) Thanks @SARAMALI15792.
+- Plugins/migration: emit catalog-backed install hints when `plugins.entries` or `plugins.allow` references an official external plugin that is not installed, so upgraded configs point operators to `openclaw plugins install <spec>` instead of telling them to remove valid plugin config. (#77483) Thanks @hclsys.
 - Google/Gemini: normalize retired `google/gemini-3-pro-preview` and `google-gemini-cli/gemini-3-pro-preview` selections to `google/gemini-3.1-pro-preview` before they are written to model config.
 - Control UI: read the Quick Settings exec policy badge from `tools.exec.security` instead of the non-schema `agents.defaults.exec.security` path, so configured `full`/`deny` values render accurately. Fixes #78311. Thanks @FriedBack.
 - Control UI/usage: add transcript-backed historical lineage rollups for rotated logical sessions, with current-instance vs historical-lineage scope controls and long-range presets so usage history stays visible after restarts and updates. Fixes #50701. Thanks @dev-gideon-llc and @BunsDev.
