@@ -13,9 +13,11 @@ import {
   normalizeTrustedSafeBinDirs,
   type WritableTrustedSafeBinDir,
 } from "./exec-safe-bin-trust.js";
+import { resolveSafeBuiltins } from "./exec-safe-builtins.js";
 
 type ExecSafeBinConfigScope = {
   safeBins?: string[] | null;
+  safeBuiltins?: string[] | null;
   safeBinProfiles?: SafeBinProfileFixtures | null;
   safeBinTrustedDirs?: string[] | null;
 };
@@ -105,6 +107,7 @@ export function resolveExecSafeBinRuntimePolicy(params: {
   onWarning?: (message: string) => void;
 }): {
   safeBins: Set<string>;
+  safeBuiltins: Set<string>;
   safeBinProfiles: Readonly<Record<string, SafeBinProfile>>;
   trustedSafeBinDirs: ReadonlySet<string>;
   unprofiledSafeBins: string[];
@@ -112,6 +115,9 @@ export function resolveExecSafeBinRuntimePolicy(params: {
   writableTrustedSafeBinDirs: ReadonlyArray<WritableTrustedSafeBinDir>;
 } {
   const safeBins = resolveSafeBins(params.local?.safeBins ?? params.global?.safeBins);
+  const safeBuiltins = resolveSafeBuiltins(
+    params.local?.safeBuiltins ?? params.global?.safeBuiltins,
+  );
   const safeBinProfiles = resolveSafeBinProfiles(
     resolveMergedSafeBinProfileFixtures({
       global: params.global,
@@ -146,6 +152,7 @@ export function resolveExecSafeBinRuntimePolicy(params: {
   }
   return {
     safeBins,
+    safeBuiltins,
     safeBinProfiles,
     trustedSafeBinDirs,
     unprofiledSafeBins,

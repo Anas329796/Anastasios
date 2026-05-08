@@ -383,11 +383,12 @@ async function evaluateSystemRunPolicyPhase(
   const security = approvals.agent.security;
   const ask = approvals.agent.ask;
   const autoAllowSkills = approvals.agent.autoAllowSkills;
-  const { safeBins, safeBinProfiles, trustedSafeBinDirs } = resolveExecSafeBinRuntimePolicy({
-    global: cfg.tools?.exec,
-    local: agentExec,
-    onWarning: warnWritableTrustedDirOnce,
-  });
+  const { safeBins, safeBuiltins, safeBinProfiles, trustedSafeBinDirs } =
+    resolveExecSafeBinRuntimePolicy({
+      global: cfg.tools?.exec,
+      local: agentExec,
+      onWarning: warnWritableTrustedDirOnce,
+    });
   const bins = autoAllowSkills ? await opts.skillBins.current() : [];
   let { analysisOk, allowlistMatches, allowlistSatisfied, segments, segmentAllowlistEntries } =
     evaluateSystemRunAllowlist({
@@ -396,6 +397,7 @@ async function evaluateSystemRunPolicyPhase(
       approvals,
       security,
       safeBins,
+      safeBuiltins,
       safeBinProfiles,
       trustedSafeBinDirs,
       cwd: parsed.cwd,

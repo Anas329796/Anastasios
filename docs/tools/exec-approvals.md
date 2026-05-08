@@ -363,9 +363,9 @@ skill bin list. Disable this if you want strict manual allowlists.
 
 ## Safe bins and approval forwarding
 
-For safe bins (the stdin-only fast-path), interpreter binding details, and
-how to forward approval prompts to Slack/Discord/Telegram (or run them as
-native approval clients), see
+For safe bins (the stdin-only fast-path), shell builtins, interpreter binding
+details, and how to forward approval prompts to Slack/Discord/Telegram (or run
+them as native approval clients), see
 [Exec approvals - advanced](/tools/exec-approvals-advanced).
 
 ## Control UI editing
