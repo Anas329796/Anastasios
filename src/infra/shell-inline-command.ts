@@ -21,18 +21,19 @@ const POSIX_SHELL_OPTIONS_WITH_SEPARATE_VALUES = new Set([
   "+o",
 ]);
 
-function countSeparateValueOptionChars(optionChars: string): number {
+function isCombinedCommandFlag(token: string): boolean {
+  return parseCombinedCommandFlag(token) !== null;
+}
+
+function countSeparateValueOptionChars(token: string): number {
   let count = 0;
-  for (const char of optionChars) {
+  for (let index = 1; index < token.length; index += 1) {
+    const char = token[index];
     if (char === "o" || char === "O") {
       count += 1;
     }
   }
   return count;
-}
-
-function isCombinedCommandFlag(token: string): boolean {
-  return parseCombinedCommandFlag(token) !== null;
 }
 
 function parseCombinedCommandFlag(
@@ -52,7 +53,7 @@ function parseCombinedCommandFlag(
   }
   return {
     attachedCommand: null,
-    separateValueCount: countSeparateValueOptionChars(optionChars),
+    separateValueCount: countSeparateValueOptionChars(token),
   };
 }
 
@@ -65,7 +66,7 @@ function combinedSeparateValueOptionCount(token: string): number {
   ) {
     return 0;
   }
-  return countSeparateValueOptionChars(token.slice(1));
+  return countSeparateValueOptionChars(token);
 }
 
 function consumesSeparateValue(token: string): boolean {
@@ -80,8 +81,17 @@ function isPosixShortOption(token: string, option: string): boolean {
   if (token.length < 2 || token[0] !== "-" || token[1] === "-") {
     return false;
   }
-  const optionChars = new Set(token.slice(1));
-  return !optionChars.has("-") && optionChars.has(option);
+  let hasOption = false;
+  for (let index = 1; index < token.length; index += 1) {
+    const char = token[index];
+    if (char === "-") {
+      return false;
+    }
+    if (char === option) {
+      hasOption = true;
+    }
+  }
+  return hasOption;
 }
 
 function advancePosixInlineOptionScan(token: string): number {
