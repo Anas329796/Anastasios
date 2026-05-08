@@ -697,15 +697,15 @@ describe("runHeartbeatOnce", () => {
     ...(options?.getReplyFromConfig ? { getReplyFromConfig: options.getReplyFromConfig } : null),
   });
 
-  it("skips when agent heartbeat is not enabled", async () => {
+  it("skips when agent heartbeat is explicitly disabled (every=0m)", async () => {
     const cfg: OpenClawConfig = {
       agents: {
         defaults: { heartbeat: { every: "30m" } },
-        list: [{ id: "main" }, { id: "ops", heartbeat: { every: "1h" } }],
+        list: [{ id: "main" }, { id: "ops", heartbeat: { every: "0m" } }],
       },
     };
 
-    const res = await runHeartbeatOnce({ cfg, agentId: "main" });
+    const res = await runHeartbeatOnce({ cfg, agentId: "ops" });
     expect(res.status).toBe("skipped");
     if (res.status === "skipped") {
       expect(res.reason).toBe("disabled");

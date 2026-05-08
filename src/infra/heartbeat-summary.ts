@@ -26,20 +26,32 @@ const DEFAULT_HEARTBEAT_TARGET = "none";
 
 export function isHeartbeatEnabledForAgent(cfg: OpenClawConfig, agentId?: string): boolean {
   const resolvedAgentId = normalizeAgentId(agentId ?? resolveDefaultAgentId(cfg));
-  const list = cfg.agents?.list ?? [];
-  const agentEntry = list.find((entry) => normalizeAgentId(entry?.id) === resolvedAgentId);
+  const defaults = cfg.agents?.defaults?.heartbeat;
+  const overridesRaw = resolveAgentConfig(cfg, resolvedAgentId)?.heartbeat;
+  const overrides = overridesRaw && Object.keys(overridesRaw).length > 0 ? overridesRaw : undefined;
 
-  // If this agent has an explicit heartbeat config (even disabled), honor it.
-  if (agentEntry && "heartbeat" in agentEntry) {
-    return Boolean(agentEntry.heartbeat?.every);
+  // Neither exists → legacy: only default agent gets a heartbeat
+  if (!defaults && !overrides) {
+    return resolvedAgentId === resolveDefaultAgentId(cfg);
   }
 
-  // Otherwise fall back to the global default.
-  if (cfg.agents?.defaults?.heartbeat) {
+  // Merge and evaluate effective every
+  const merged = { ...defaults, ...overrides };
+  const rawEvery = merged?.every;
+  if (rawEvery === undefined) {
+    // No every specified anywhere, but heartbeat config exists
     return true;
   }
 
-  return resolvedAgentId === resolveDefaultAgentId(cfg);
+  const trimmed = normalizeOptionalString(rawEvery) ?? "";
+  if (!trimmed) {
+    return false;
+  }
+  try {
+    return parseDurationMs(trimmed, { defaultUnit: "m" }) > 0;
+  } catch {
+    return false;
+  }
 }
 
 export function resolveHeartbeatIntervalMs(
