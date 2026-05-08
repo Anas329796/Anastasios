@@ -220,6 +220,7 @@ const METHOD_SCOPE_GROUPS: Record<OperatorScope, readonly string[]> = {
     "agents.files.set",
     "update.status",
     "gateway.restart.request",
+    "plugin.approval.resolveVerified",
   ],
   [TALK_SECRETS_SCOPE]: [],
 };

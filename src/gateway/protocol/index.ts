@@ -198,6 +198,8 @@ import {
   type PluginsSessionActionResult,
   PluginsSessionActionParamsSchema,
   PluginsSessionActionResultSchema,
+  type PluginApprovalResolveVerifiedParams,
+  PluginApprovalResolveVerifiedParamsSchema,
   type PluginsUiDescriptorsParams,
   PluginsUiDescriptorsParamsSchema,
   ErrorCodes,
@@ -718,6 +720,8 @@ export const validatePluginApprovalRequestParams = ajv.compile<PluginApprovalReq
 export const validatePluginApprovalResolveParams = ajv.compile<PluginApprovalResolveParams>(
   PluginApprovalResolveParamsSchema,
 );
+export const validatePluginApprovalResolveVerifiedParams =
+  ajv.compile<PluginApprovalResolveVerifiedParams>(PluginApprovalResolveVerifiedParamsSchema);
 export const validatePluginsUiDescriptorsParams = ajv.compile<PluginsUiDescriptorsParams>(
   PluginsUiDescriptorsParamsSchema,
 );
