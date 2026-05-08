@@ -58,7 +58,7 @@ describe("createOpenAICompletionsToolsCompatWrapper", () => {
         id: "chat-only-model",
         baseUrl: "https://example.invalid/v1",
         compat: { supportsTools: false },
-      } as Parameters<typeof wrapped>[0],
+      } as unknown as Parameters<typeof wrapped>[0],
       { messages: [] },
       {},
     );
