@@ -23,6 +23,7 @@ const DEFAULT_MAX_CHARS = 2000;
 const DEFAULT_MAX_LINES = 17;
 const FENCE_RE = /^( {0,3})(`{3,}|~{3,})(.*)$/;
 const BLOCKQUOTE_RE = /^(\s*(?:>\s*)+)/;
+const CJK_PUNCTUATION_BREAK_AFTER_RE = /[、。，．！？；：）］｝〉》」』】〕〗〙]/u;
 
 function countLines(text: string) {
   if (!text) {
@@ -68,6 +69,49 @@ function closeFenceIfNeeded(text: string, openFence: OpenFence | null) {
   return `${text}${closeLine}`;
 }
 
+function isHighSurrogate(code: number) {
+  return code >= 0xd800 && code <= 0xdbff;
+}
+
+function isLowSurrogate(code: number) {
+  return code >= 0xdc00 && code <= 0xdfff;
+}
+
+function clampToCodePointBoundary(text: string, index: number) {
+  const boundary = Math.min(Math.max(0, index), text.length);
+  if (boundary <= 0 || boundary >= text.length) {
+    return boundary;
+  }
+  const previous = text.charCodeAt(boundary - 1);
+  const next = text.charCodeAt(boundary);
+  if (isHighSurrogate(previous) && isLowSurrogate(next)) {
+    return boundary > 1 ? boundary - 1 : boundary + 1;
+  }
+  return boundary;
+}
+
+function findWhitespaceBreak(window: string) {
+  for (let i = window.length - 1; i >= 0; i--) {
+    if (/\s/.test(window[i])) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+function findCjkPunctuationBreak(window: string) {
+  for (let end = window.length; end > 0; ) {
+    const code = window.charCodeAt(end - 1);
+    const start = isLowSurrogate(code) && end > 1 ? end - 2 : end - 1;
+    const char = window.slice(start, end);
+    if (start > 0 && CJK_PUNCTUATION_BREAK_AFTER_RE.test(char)) {
+      return end;
+    }
+    end = start;
+  }
+  return -1;
+}
+
 function splitLongLine(
   line: string,
   maxChars: number,
@@ -81,23 +125,20 @@ function splitLongLine(
   let remaining = line;
   while (remaining.length > limit) {
     if (opts.preserveWhitespace) {
-      out.push(remaining.slice(0, limit));
-      remaining = remaining.slice(limit);
+      const breakIdx = clampToCodePointBoundary(remaining, limit);
+      out.push(remaining.slice(0, breakIdx));
+      remaining = remaining.slice(breakIdx);
       continue;
     }
     const window = remaining.slice(0, limit);
-    let breakIdx = -1;
-    for (let i = window.length - 1; i >= 0; i--) {
-      if (/\s/.test(window[i])) {
-        breakIdx = i;
-        break;
-      }
+    let breakIdx = findWhitespaceBreak(window);
+    if (breakIdx <= 0) {
+      breakIdx = findCjkPunctuationBreak(window);
     }
     if (breakIdx <= 0) {
-      breakIdx = limit;
+      breakIdx = clampToCodePointBoundary(remaining, limit);
     }
     out.push(remaining.slice(0, breakIdx));
-    // Keep the separator for the next segment so words don't get glued together.
     remaining = remaining.slice(breakIdx);
   }
   if (remaining.length) {
@@ -106,10 +147,6 @@ function splitLongLine(
   return out;
 }
 
-/**
- * Chunks outbound Discord text by both character count and (soft) line count,
- * while keeping fenced code blocks balanced across chunks.
- */
 export function chunkDiscordText(text: string, opts: ChunkDiscordTextOpts = {}): string[] {
   const maxChars = Math.max(1, Math.floor(opts.maxChars ?? DEFAULT_MAX_CHARS));
   const maxLines = Math.max(1, Math.floor(opts.maxLines ?? DEFAULT_MAX_LINES));
@@ -248,10 +285,6 @@ export function chunkDiscordTextWithMode(
   return chunks;
 }
 
-// Keep italics intact for reasoning payloads that are wrapped once with `_…_`.
-// When Discord chunking splits the message, we close italics at the end of
-// each chunk and reopen at the start of the next so every chunk renders
-// consistently.
 function rebalanceReasoningItalics(source: string, chunks: string[]): string[] {
   if (chunks.length <= 1) {
     return chunks;
@@ -268,7 +301,6 @@ function rebalanceReasoningItalics(source: string, chunks: string[]): string[] {
     const isLast = i === adjusted.length - 1;
     const current = adjusted[i];
 
-    // Ensure current chunk closes italics so Discord renders it italicized.
     const needsClosing = !current.trimEnd().endsWith("_");
     if (needsClosing) {
       adjusted[i] = `${current}_`;
@@ -278,7 +310,6 @@ function rebalanceReasoningItalics(source: string, chunks: string[]): string[] {
       break;
     }
 
-    // Re-open italics on the next chunk if needed.
     const next = adjusted[i + 1];
     const leadingWhitespaceLen = next.length - next.trimStart().length;
     const leadingWhitespace = next.slice(0, leadingWhitespaceLen);
