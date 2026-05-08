@@ -77,6 +77,72 @@ describe("runCronIsolatedAgentTurn — fallback time budget", () => {
     }
   });
 
+  it("uses agents.defaults.timeoutSeconds for fallback budget when job timeoutSeconds is unset", async () => {
+    const { resolveAgentTimeoutMs } = await import("./run.runtime.js");
+    vi.mocked(resolveAgentTimeoutMs).mockReturnValue(5_000);
+
+    let secondAttemptGate:
+      | {
+          type: "stop";
+          reason?: string | null;
+          error?: string;
+        }
+      | undefined = undefined;
+    const nowMs = Date.parse("2026-03-23T12:00:00.000Z");
+    const dateNowSpy = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+
+    runWithModelFallbackMock.mockImplementationOnce(async (params) => {
+      expect(params.beforeAttempt).toBeTypeOf("function");
+
+      secondAttemptGate = await params.beforeAttempt?.({
+        candidate: { provider: "openai-codex", model: "gpt-5.4" },
+        attempt: 2,
+        total: 2,
+        previousAttempts: [
+          {
+            provider: "anthropic",
+            model: "claude-opus-4-6",
+            error: "Request was aborted.",
+            reason: "unknown",
+          },
+        ],
+        isPrimary: false,
+        requestedModelMatched: false,
+        fallbackConfigured: true,
+      });
+
+      return {
+        result: {
+          payloads: [{ text: "done" }],
+          meta: { agentMeta: { usage: { input: 10, output: 20 } } },
+        },
+        provider: "anthropic",
+        model: "claude-opus-4-6",
+        attempts: [],
+      };
+    });
+
+    try {
+      const result = await runCronIsolatedAgentTurn(
+        makeIsolatedAgentTurnParams({
+          cfg: { agents: { defaults: { timeoutSeconds: 5 } } },
+          deadlineAtMs: nowMs + 10_000,
+          job: makeIsolatedAgentTurnJob({
+            payload: { kind: "agentTurn", message: "test" },
+          }),
+        }),
+      );
+
+      expect(result.status).toBe("ok");
+      expect(resolveAgentTimeoutMs).toHaveBeenCalledWith(
+        expect.objectContaining({ overrideSeconds: undefined }),
+      );
+      expect(secondAttemptGate).toBeUndefined();
+    } finally {
+      dateNowSpy.mockRestore();
+    }
+  });
+
   it("stops new fallback attempts when the per-attempt budget no longer fits", async () => {
     let secondAttemptGate:
       | {
