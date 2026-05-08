@@ -51,7 +51,7 @@ describe("cron.run maintenance gating", () => {
       defaultAgentId: "main",
       userTimezone: "UTC",
       enqueueSystemEvent: vi.fn(),
-      requestHeartbeatNow: vi.fn(),
+      requestHeartbeat: vi.fn(),
       runIsolatedAgentJob,
     });
 

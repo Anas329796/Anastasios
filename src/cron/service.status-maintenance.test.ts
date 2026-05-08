@@ -55,7 +55,7 @@ describe("cron.status maintenance diagnostics", () => {
       defaultAgentId: "main",
       userTimezone: "UTC",
       enqueueSystemEvent: vi.fn(),
-      requestHeartbeatNow: vi.fn(),
+      requestHeartbeat: vi.fn(),
       runIsolatedAgentJob: vi.fn(async () => ({ status: "ok" as const, summary: "ok" })),
     });
 

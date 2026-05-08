@@ -108,7 +108,7 @@ describe("cron maintenance window scheduler", () => {
       defaultAgentId: "main",
       userTimezone: "UTC",
       enqueueSystemEvent: vi.fn(),
-      requestHeartbeatNow: vi.fn(),
+      requestHeartbeat: vi.fn(),
       runIsolatedAgentJob,
     });
 
@@ -173,7 +173,7 @@ describe("cron maintenance window scheduler", () => {
       defaultAgentId: "main",
       userTimezone: "UTC",
       enqueueSystemEvent: vi.fn(),
-      requestHeartbeatNow: vi.fn(),
+      requestHeartbeat: vi.fn(),
       runIsolatedAgentJob,
     });
 
@@ -225,7 +225,7 @@ describe("cron maintenance window scheduler", () => {
       defaultAgentId: "main",
       userTimezone: "UTC",
       enqueueSystemEvent: vi.fn(),
-      requestHeartbeatNow: vi.fn(),
+      requestHeartbeat: vi.fn(),
       runIsolatedAgentJob,
     });
 
@@ -275,7 +275,7 @@ describe("cron maintenance window scheduler", () => {
       defaultAgentId: "main",
       userTimezone: "UTC",
       enqueueSystemEvent: vi.fn(),
-      requestHeartbeatNow: vi.fn(),
+      requestHeartbeat: vi.fn(),
       runIsolatedAgentJob,
     });
 
