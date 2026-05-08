@@ -52,9 +52,14 @@ describe("resolveSafeBuiltins", () => {
 
   it("returns the configured set when entries are provided", () => {
     const result = resolveSafeBuiltins([...DEFAULT_SAFE_BUILTINS]);
-    expect(result.has("cd")).toBe(true);
     expect(result.has("pwd")).toBe(true);
-    expect(result.has("export")).toBe(true);
+    expect(result.has(":")).toBe(true);
+    expect(result.has("true")).toBe(true);
+    expect(result.has("false")).toBe(true);
+    // cd/export/unset are not in the default set (state-mutating; opt-in via explicit config)
+    expect(result.has("cd")).toBe(false);
+    expect(result.has("export")).toBe(false);
+    expect(result.has("unset")).toBe(false);
   });
 });
 
@@ -67,7 +72,7 @@ describe("isSafeBuiltinSegment", () => {
     }
     expect(
       isSafeBuiltinSegment({
-        segment: builtinSegment(["cd", "/etc"]),
+        segment: builtinSegment(["pwd"]),
         safeBuiltins,
         platform: "linux",
       }),
@@ -122,7 +127,9 @@ describe("evaluateShellAllowlist with safeBuiltins (regression for #46056)", () 
     return;
   }
 
-  const safeBuiltins = resolveSafeBuiltins([...DEFAULT_SAFE_BUILTINS]);
+  // Use an explicit set that includes `cd` — state-mutating builtins are opt-in via
+  // config and not in DEFAULT_SAFE_BUILTINS, but the feature must still work when opted in.
+  const safeBuiltins = resolveSafeBuiltins([":", "cd", "export", "false", "pwd", "true"]);
   // Glob-style pattern; matches git wherever PATH resolves it (`/usr/bin/git`,
   // `/opt/homebrew/bin/git`, etc.) without depending on host filesystem layout.
   const gitAllowlist = [{ pattern: "**/git" }] as Parameters<

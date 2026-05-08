@@ -1,23 +1,20 @@
 import { isWindowsPlatform, type ExecCommandSegment } from "./exec-approvals-analysis.js";
 import { resolveExecutionTargetResolution } from "./exec-command-resolution.js";
 
-// POSIX shell builtins that cannot execute external code on their own. These are safe to
+// POSIX shell builtins that cannot execute external code on their own and do not mutate
+// shell state (cwd or env) that the allowlist evaluator observes. These are safe to
 // auto-allow when the user has opted in via `tools.exec.safeBuiltins`:
-//   cd, pwd        — directory navigation
 //   :, true, false — no-ops / status returns
-//   export, unset  — environment variable mutation (scope is the surrounding shell chain)
+//   pwd            — reads cwd, does not change it
 //
-// Notably excluded: echo, printf, eval, source, .  (eval/source/. evaluate code; echo and
-// printf differ across shells and are often available as /usr/bin/echo via safeBins).
-export const DEFAULT_SAFE_BUILTINS: readonly string[] = [
-  ":",
-  "cd",
-  "export",
-  "false",
-  "pwd",
-  "true",
-  "unset",
-];
+// Notably excluded from this default set:
+//   cd, export, unset — these mutate cwd/env before later segments run; the allowlist
+//     evaluator resolves each segment against the original cwd/env, so auto-allowing them
+//     can approve a different executable than the one the shell eventually runs. Users who
+//     understand this trade-off can add them explicitly via config.
+//   echo, printf, eval, source, . — eval/source/. evaluate code; echo/printf differ across
+//     shells and are often available as /usr/bin/echo via safeBins.
+export const DEFAULT_SAFE_BUILTINS: readonly string[] = [":", "false", "pwd", "true"];
 
 export function normalizeSafeBuiltins(entries?: readonly string[]): Set<string> {
   if (!Array.isArray(entries)) {

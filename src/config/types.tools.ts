@@ -264,6 +264,13 @@ export type ExecToolConfig = {
   /** Safe stdin-only binaries that can run without allowlist entries. */
   safeBins?: string[];
   /**
+   * POSIX shell builtins to auto-allow in exec allowlist mode. Off by default.
+   * Stateless builtins (`:`, `true`, `false`, `pwd`) are safe; state-mutating ones
+   * (`cd`, `export`, `unset`) can be added explicitly if the trade-off is understood.
+   * Use `DEFAULT_SAFE_BUILTINS` from the SDK as a starting point, or list entries manually.
+   */
+  safeBuiltins?: string[];
+  /**
    * Require explicit approval for interpreter inline-eval forms (`python -c`, `node -e`, etc.).
    * Prevents silent allowlist reuse and allow-always persistence for those forms.
    */
