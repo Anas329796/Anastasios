@@ -46,6 +46,20 @@ export type DiagnosticUsageEvent = DiagnosticBaseEvent & {
   durationMs?: number;
 };
 
+export type DiagnosticFailoverEvent = DiagnosticBaseEvent & {
+  type: "model.failover";
+  sessionId?: string;
+  sessionKey?: string;
+  lane?: string;
+  fromProvider?: string;
+  fromModel?: string;
+  toProvider?: string;
+  toModel?: string;
+  reason: string;
+  cascadeDepth?: number;
+  suspended?: boolean;
+};
+
 export type DiagnosticWebhookReceivedEvent = DiagnosticBaseEvent & {
   type: "webhook.received";
   channel: string;
@@ -657,7 +671,8 @@ export type DiagnosticEventPayload =
   | DiagnosticMemoryPressureEvent
   | DiagnosticPayloadLargeEvent
   | DiagnosticLogRecordEvent
-  | DiagnosticTelemetryExporterEvent;
+  | DiagnosticTelemetryExporterEvent
+  | DiagnosticFailoverEvent;
 
 export type DiagnosticEventInput = DiagnosticEventPayload extends infer Event
   ? Event extends DiagnosticEventPayload
@@ -909,6 +924,13 @@ export function emitDiagnosticEvent(event: DiagnosticEventInput) {
 
 export function emitTrustedDiagnosticEvent(event: DiagnosticEventInput) {
   emitDiagnosticEventWithTrust(event, true);
+}
+
+export function emitFailoverEvent(event: Omit<DiagnosticFailoverEvent, "seq" | "ts" | "type">) {
+  emitTrustedDiagnosticEvent({
+    type: "model.failover",
+    ...event,
+  });
 }
 
 export function onInternalDiagnosticEvent(listener: DiagnosticEventListener): () => void {
