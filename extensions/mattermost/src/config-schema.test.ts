@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import { MattermostConfigSchema } from "./config-schema-core.js";
+import type { MattermostConfig } from "./types.js";
 
 describe("MattermostConfigSchema", () => {
   it("accepts SecretRef botToken at top-level", () => {
@@ -70,6 +71,12 @@ describe("MattermostConfigSchema", () => {
       },
     });
     expect(result.success).toBe(true);
+  });
+
+  it("keeps groups type aligned with strict schema entries", () => {
+    expectTypeOf<NonNullable<MattermostConfig["groups"]>[string]>().toEqualTypeOf<
+      { requireMention?: boolean } | undefined
+    >();
   });
 
   it("accepts legacy compatibility fields used by older Mattermost configs", () => {

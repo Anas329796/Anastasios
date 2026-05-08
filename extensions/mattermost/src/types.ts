@@ -14,15 +14,9 @@ type MattermostNetworkConfig = {
   dangerouslyAllowPrivateNetwork?: boolean;
 };
 
-export type MattermostLegacyGroupConfig = {
-  enabled?: boolean;
-  allowFrom?: Array<string | number>;
+export type MattermostGroupConfig = {
   requireMention?: boolean;
-  systemPrompt?: string;
-  skills?: string[];
-  tools?: unknown;
-  toolsBySender?: Record<string, unknown>;
-} & Record<string, unknown>;
+};
 
 export type MattermostAccountConfig = {
   /** Optional display name for this account (used in CLI/UI lists). */
@@ -61,8 +55,8 @@ export type MattermostAccountConfig = {
   groupAllowFrom?: Array<string | number>;
   /** Group message policy (allowlist/open/disabled). */
   groupPolicy?: GroupPolicy;
-  /** Legacy group-specific overrides kept for backward compatibility. */
-  groups?: Record<string, MattermostLegacyGroupConfig>;
+  /** Per-group configuration (keyed by Mattermost channel ID or "*" for default). */
+  groups?: Record<string, MattermostGroupConfig>;
   /** Legacy per-channel override map kept for backward compatibility. */
   channelOverrides?: Record<string, Record<string, unknown>>;
   /** Legacy session policy field kept for backward compatibility. */
