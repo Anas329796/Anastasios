@@ -134,6 +134,6 @@ describe("channel config actions", () => {
     expect(host.configFormDirty).toBe(true);
     expect(host.configForm).toEqual({ gateway: { mode: "local" } });
     expect(host.configSnapshot?.config).toEqual({ gateway: { mode: "remote" } });
-    expect(request.mock.calls.some(([method]) => method === "channels.status")).toBe(false);
+    expect(request.mock.calls.map(([method]) => method)).not.toContain("channels.status");
   });
 });

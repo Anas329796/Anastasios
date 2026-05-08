@@ -19,8 +19,8 @@ Each ACP session spawn is tracked as a [background task](/automation/tasks).
 
 <Note>
 **ACP is the external-harness path, not the default Codex path.** The
-native Codex app-server plugin owns `/codex ...` controls and the
-`agentRuntime.id: "codex"` embedded runtime; ACP owns
+native Codex app-server plugin owns `/codex ...` controls and the default
+`openai/gpt-*` embedded runtime for agent turns; ACP owns
 `/acp ...` controls and `sessions_spawn({ runtime: "acp" })` sessions.
 
 If you want Codex or Claude Code to connect as an external MCP client
@@ -184,8 +184,8 @@ Quick `/acp` flow from chat:
 
   </Accordion>
   <Accordion title="Model / provider / runtime selection cheat sheet">
-    - `openai-codex/*` - PI Codex OAuth/subscription route.
-    - `openai/*` plus `agentRuntime.id: "codex"` - native Codex app-server embedded runtime.
+    - `openai-codex/*` - legacy Codex OAuth/subscription model route repaired by doctor.
+    - `openai/*` - native Codex app-server embedded runtime for OpenAI agent turns.
     - `/codex ...` - native Codex conversation control.
     - `/acp ...` or `runtime: "acp"` - explicit ACP/acpx control.
 
@@ -336,7 +336,6 @@ top-level `bindings[]` entries.
 
 - **Discord channel/thread:** `match.channel="discord"` + `match.peer.id="<channelOrThreadId>"`
 - **Telegram forum topic:** `match.channel="telegram"` + `match.peer.id="<chatId>:topic:<topicId>"`
-- **BlueBubbles DM/group:** `match.channel="bluebubbles"` + `match.peer.id="<handle|chat_id:*|chat_guid:*|chat_identifier:*>"`. Prefer `chat_id:*` or `chat_identifier:*` for stable group bindings.
 - **iMessage DM/group:** `match.channel="imessage"` + `match.peer.id="<handle|chat_id:*|chat_guid:*|chat_identifier:*>"`. Prefer `chat_id:*` for stable group bindings.
 
 </ParamField>

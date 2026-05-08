@@ -7,7 +7,7 @@ import { createContext, Script } from "node:vm";
 import { validateJsonSchemaValue, type JsonSchemaObject } from "openclaw/plugin-sdk/config-schema";
 import type { RealtimeTranscriptionProviderPlugin } from "openclaw/plugin-sdk/realtime-transcription";
 import type { RealtimeVoiceProviderPlugin } from "openclaw/plugin-sdk/realtime-voice";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import plugin, { __testing as googleMeetPluginTesting } from "./index.js";
 import {
   extractGoogleMeetUriFromCalendarEvent,
@@ -345,9 +345,16 @@ describe("google-meet plugin", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
     chromeTransportTesting.setDepsForTest(null);
     googleMeetPluginTesting.setCallGatewayFromCliForTests();
     googleMeetPluginTesting.setPlatformForTests();
+  });
+
+  afterAll(() => {
+    vi.doUnmock("openclaw/plugin-sdk/ssrf-runtime");
+    vi.doUnmock("./src/voice-call-gateway.js");
+    vi.resetModules();
   });
 
   it("defaults to chrome agent mode with safe read-only tools", () => {
@@ -1094,7 +1101,10 @@ describe("google-meet plugin", () => {
       "/drive/v3/files/doc-1/export",
       "/drive/v3/files/doc-2/export",
     ]);
-    expect(driveCalls.every((url) => url.searchParams.get("mimeType") === "text/plain")).toBe(true);
+    expect(driveCalls.map((url) => url.searchParams.get("mimeType"))).toEqual([
+      "text/plain",
+      "text/plain",
+    ]);
   });
 
   it("fetches only the latest Meet conference record for a meeting", async () => {
@@ -1855,9 +1865,9 @@ describe("google-meet plugin", () => {
           }),
         ]),
       );
-      expect(result.details.checks?.some((check) => check.id === "chrome-local-audio-device")).toBe(
-        false,
-      );
+      expect(
+        result.details.checks?.filter((check) => check.id === "chrome-local-audio-device"),
+      ).toEqual([]);
       expect(runCommandWithTimeout).not.toHaveBeenCalled();
     } finally {
       Object.defineProperty(process, "platform", { value: originalPlatform });
@@ -4064,7 +4074,7 @@ describe("google-meet plugin", () => {
     const provider: RealtimeVoiceProviderPlugin = {
       id: "openai",
       label: "OpenAI",
-      defaultModel: "gpt-realtime-1.5",
+      defaultModel: "gpt-realtime-2",
       autoSelectOrder: 1,
       resolveConfig: ({ rawConfig }) => rawConfig,
       isConfigured: () => true,
@@ -4295,7 +4305,7 @@ describe("google-meet plugin", () => {
     const provider: RealtimeVoiceProviderPlugin = {
       id: "openai",
       label: "OpenAI",
-      defaultModel: "gpt-realtime-1.5",
+      defaultModel: "gpt-realtime-2",
       autoSelectOrder: 1,
       resolveConfig: ({ rawConfig }) => rawConfig,
       isConfigured: () => true,

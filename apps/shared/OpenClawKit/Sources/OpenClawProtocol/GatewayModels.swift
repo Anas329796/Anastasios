@@ -2,7 +2,7 @@
 // swiftlint:disable file_length
 import Foundation
 
-public let GATEWAY_PROTOCOL_VERSION = 3
+public let GATEWAY_PROTOCOL_VERSION = 4
 
 public enum ErrorCode: String, Codable, Sendable {
     case notLinked = "NOT_LINKED"
@@ -98,7 +98,7 @@ public struct HelloOk: Codable, Sendable {
     public let server: [String: AnyCodable]
     public let features: [String: AnyCodable]
     public let snapshot: Snapshot
-    public let canvashosturl: String?
+    public let pluginsurfaceurls: [String: AnyCodable]?
     public let auth: [String: AnyCodable]
     public let policy: [String: AnyCodable]
 
@@ -108,7 +108,7 @@ public struct HelloOk: Codable, Sendable {
         server: [String: AnyCodable],
         features: [String: AnyCodable],
         snapshot: Snapshot,
-        canvashosturl: String?,
+        pluginsurfaceurls: [String: AnyCodable]?,
         auth: [String: AnyCodable],
         policy: [String: AnyCodable])
     {
@@ -117,7 +117,7 @@ public struct HelloOk: Codable, Sendable {
         self.server = server
         self.features = features
         self.snapshot = snapshot
-        self.canvashosturl = canvashosturl
+        self.pluginsurfaceurls = pluginsurfaceurls
         self.auth = auth
         self.policy = policy
     }
@@ -128,7 +128,7 @@ public struct HelloOk: Codable, Sendable {
         case server
         case features
         case snapshot
-        case canvashosturl = "canvasHostUrl"
+        case pluginsurfaceurls = "pluginSurfaceUrls"
         case auth
         case policy
     }
@@ -1517,6 +1517,7 @@ public struct SessionsListParams: Codable, Sendable {
     public let activeminutes: Int?
     public let includeglobal: Bool?
     public let includeunknown: Bool?
+    public let configuredagentsonly: Bool?
     public let includederivedtitles: Bool?
     public let includelastmessage: Bool?
     public let label: String?
@@ -1529,6 +1530,7 @@ public struct SessionsListParams: Codable, Sendable {
         activeminutes: Int?,
         includeglobal: Bool?,
         includeunknown: Bool?,
+        configuredagentsonly: Bool?,
         includederivedtitles: Bool?,
         includelastmessage: Bool?,
         label: String?,
@@ -1540,6 +1542,7 @@ public struct SessionsListParams: Codable, Sendable {
         self.activeminutes = activeminutes
         self.includeglobal = includeglobal
         self.includeunknown = includeunknown
+        self.configuredagentsonly = configuredagentsonly
         self.includederivedtitles = includederivedtitles
         self.includelastmessage = includelastmessage
         self.label = label
@@ -1553,6 +1556,7 @@ public struct SessionsListParams: Codable, Sendable {
         case activeminutes = "activeMinutes"
         case includeglobal = "includeGlobal"
         case includeunknown = "includeUnknown"
+        case configuredagentsonly = "configuredAgentsOnly"
         case includederivedtitles = "includeDerivedTitles"
         case includelastmessage = "includeLastMessage"
         case label
@@ -2239,6 +2243,9 @@ public struct SessionsUsageParams: Codable, Sendable {
     public let startdate: String?
     public let enddate: String?
     public let mode: AnyCodable?
+    public let range: AnyCodable?
+    public let groupby: AnyCodable?
+    public let includehistorical: Bool?
     public let utcoffset: String?
     public let limit: Int?
     public let includecontextweight: Bool?
@@ -2248,6 +2255,9 @@ public struct SessionsUsageParams: Codable, Sendable {
         startdate: String?,
         enddate: String?,
         mode: AnyCodable?,
+        range: AnyCodable?,
+        groupby: AnyCodable?,
+        includehistorical: Bool?,
         utcoffset: String?,
         limit: Int?,
         includecontextweight: Bool?)
@@ -2256,6 +2266,9 @@ public struct SessionsUsageParams: Codable, Sendable {
         self.startdate = startdate
         self.enddate = enddate
         self.mode = mode
+        self.range = range
+        self.groupby = groupby
+        self.includehistorical = includehistorical
         self.utcoffset = utcoffset
         self.limit = limit
         self.includecontextweight = includecontextweight
@@ -2266,6 +2279,9 @@ public struct SessionsUsageParams: Codable, Sendable {
         case startdate = "startDate"
         case enddate = "endDate"
         case mode
+        case range
+        case groupby = "groupBy"
+        case includehistorical = "includeHistorical"
         case utcoffset = "utcOffset"
         case limit
         case includecontextweight = "includeContextWeight"
@@ -5128,6 +5144,7 @@ public struct ExecApprovalRequestParams: Codable, Sendable {
     public let security: AnyCodable?
     public let ask: AnyCodable?
     public let warningtext: AnyCodable?
+    public let commandspans: [[String: AnyCodable]]?
     public let agentid: AnyCodable?
     public let resolvedpath: AnyCodable?
     public let sessionkey: AnyCodable?
@@ -5150,6 +5167,7 @@ public struct ExecApprovalRequestParams: Codable, Sendable {
         security: AnyCodable?,
         ask: AnyCodable?,
         warningtext: AnyCodable?,
+        commandspans: [[String: AnyCodable]]?,
         agentid: AnyCodable?,
         resolvedpath: AnyCodable?,
         sessionkey: AnyCodable?,
@@ -5171,6 +5189,7 @@ public struct ExecApprovalRequestParams: Codable, Sendable {
         self.security = security
         self.ask = ask
         self.warningtext = warningtext
+        self.commandspans = commandspans
         self.agentid = agentid
         self.resolvedpath = resolvedpath
         self.sessionkey = sessionkey
@@ -5194,6 +5213,7 @@ public struct ExecApprovalRequestParams: Codable, Sendable {
         case security
         case ask
         case warningtext = "warningText"
+        case commandspans = "commandSpans"
         case agentid = "agentId"
         case resolvedpath = "resolvedPath"
         case sessionkey = "sessionKey"
