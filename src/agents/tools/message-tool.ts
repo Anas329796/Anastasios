@@ -73,9 +73,19 @@ function stripFormattedReasoningMessage(text: string): string {
   return lines.slice(index).join("\n").trim();
 }
 
+function normalizeEscapedLineBreaksForVisibleText(text: string): string {
+  if (!text.includes("\\")) {
+    return text;
+  }
+  // The send path turns literal "\n" sequences into line breaks later; match
+  // that before privacy stripping so escaped delimiter lines cannot bypass it.
+  return text.replace(/\\r\\n|\\n|\\r/g, "\n");
+}
+
 function sanitizeUserVisibleToolText(text: string, bootPrompt: string | undefined): string {
+  const normalized = normalizeEscapedLineBreaksForVisibleText(text);
   return stripBootEchoFromOutboundText(
-    stripInternalRuntimeContext(stripFormattedReasoningMessage(text)),
+    stripInternalRuntimeContext(stripFormattedReasoningMessage(normalized)),
     bootPrompt,
   );
 }
