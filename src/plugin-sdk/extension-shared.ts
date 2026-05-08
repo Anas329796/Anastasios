@@ -1,6 +1,7 @@
 import type { z } from "zod";
 import type { OpenClawConfig } from "../config/config.js";
 import { hasEnvHttpProxyConfigured } from "../infra/net/proxy-env.js";
+import { resolveActiveManagedProxyTlsOptions } from "../infra/net/proxy/managed-proxy-undici.js";
 import { resolveDefaultSecretProviderAlias } from "../secrets/ref-contract.js";
 import { runPassiveAccountLifecycle } from "./channel-lifecycle.core.js";
 import { createLoggerBackedRuntime } from "./runtime-logger.js";
@@ -244,8 +245,10 @@ export async function resolveAmbientNodeProxyAgent<TAgent>(params?: {
   }
   try {
     const ProxyAgent = await loadProxyAgentConstructor();
+    const proxyTls = resolveActiveManagedProxyTlsOptions();
+    const proxyAgentOptions = proxyTls?.ca ? { ca: proxyTls.ca } : undefined;
     params?.onUsingProxy?.();
-    return new ProxyAgent() as TAgent;
+    return new ProxyAgent(proxyAgentOptions) as TAgent;
   } catch (error) {
     params?.onError?.(error);
     return undefined;

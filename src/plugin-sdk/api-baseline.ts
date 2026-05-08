@@ -97,11 +97,14 @@ function normalizeDeclarationImportSpecifier(repoRoot: string, value: string): s
   return relative.split(path.sep).join(path.posix.sep);
 }
 
-function normalizeDeclarationText(repoRoot: string, value: string): string {
-  return value.replaceAll(/import\("([^"]+)"\)/g, (match, specifier: string) => {
-    const normalized = normalizeDeclarationImportSpecifier(repoRoot, specifier);
-    return normalized === specifier ? match : `import("${normalized}")`;
-  });
+export function normalizePluginSdkApiDeclarationText(repoRoot: string, value: string): string {
+  return value.replaceAll(
+    /import\("([^"]+)"((?:\s*,[^)]*)?)\)/g,
+    (match, specifier: string, suffix: string) => {
+      const normalized = normalizeDeclarationImportSpecifier(repoRoot, specifier);
+      return normalized === specifier ? match : `import("${normalized}"${suffix})`;
+    },
+  );
 }
 
 function createCompilerContext(repoRoot: string) {
@@ -222,7 +225,7 @@ function printNode(
     if (signatures.length === 0) {
       return `export function ${declaration.name?.text ?? "anonymous"}();`;
     }
-    return normalizeDeclarationText(
+    return normalizePluginSdkApiDeclarationText(
       repoRoot,
       signatures
         .map(
@@ -240,7 +243,7 @@ function printNode(
       declaration.parent && (ts.getCombinedNodeFlags(declaration.parent) & ts.NodeFlags.Const) !== 0
         ? "const"
         : "let";
-    return normalizeDeclarationText(
+    return normalizePluginSdkApiDeclarationText(
       repoRoot,
       `export ${prefix} ${name}: ${checker.typeToString(type, declaration, ts.TypeFormatFlags.NoTruncation)};`,
     );
@@ -264,7 +267,7 @@ function printNode(
 
   if (ts.isTypeAliasDeclaration(declaration)) {
     const type = checker.getTypeAtLocation(declaration);
-    const rendered = normalizeDeclarationText(
+    const rendered = normalizePluginSdkApiDeclarationText(
       repoRoot,
       `export type ${declaration.name.text} = ${checker.typeToString(
         type,
@@ -284,7 +287,7 @@ function printNode(
   if (!text) {
     return null;
   }
-  const normalizedText = normalizeDeclarationText(repoRoot, text);
+  const normalizedText = normalizePluginSdkApiDeclarationText(repoRoot, text);
   return normalizedText.length > 1200
     ? `${normalizedText.slice(0, 1175).trimEnd()}\n/* truncated; see source */`
     : normalizedText;

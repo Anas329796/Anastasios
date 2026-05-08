@@ -5,6 +5,11 @@ import {
   retainSafeHeadersForCrossOriginRedirectHeaders,
 } from "./fetch-guard.js";
 import {
+  _resetActiveManagedProxyStateForTests,
+  registerActiveManagedProxyUrl,
+  stopActiveManagedProxyRegistration,
+} from "./proxy/active-proxy-state.js";
+import {
   ensureGlobalUndiciStreamTimeouts,
   resetGlobalUndiciStreamTimeoutsForTests,
 } from "./undici-global-dispatcher.js";
@@ -208,6 +213,7 @@ describe("fetchWithSsrFGuard hardening", () => {
     isWSL2SyncMock.mockClear();
     logWarnMock.mockClear();
     resetGlobalUndiciStreamTimeoutsForTests();
+    _resetActiveManagedProxyStateForTests();
     Reflect.deleteProperty(globalThis as object, TEST_UNDICI_RUNTIME_DEPS_KEY);
   });
 
@@ -1087,6 +1093,39 @@ describe("fetchWithSsrFGuard hardening", () => {
       mode: GUARDED_FETCH_MODE.STRICT,
       expectEnvProxy: true,
     });
+  });
+
+  it("adds managed proxy CA trust to guarded fetch env proxy dispatchers", async () => {
+    clearProxyEnv();
+    vi.stubEnv("OPENCLAW_PROXY_ACTIVE", "1");
+    vi.stubEnv("HTTPS_PROXY", "https://proxy.example:8443");
+    const registration = registerActiveManagedProxyUrl(new URL("https://proxy.example:8443"), {
+      proxyTls: { ca: "guarded-managed-proxy-ca" },
+    });
+    (globalThis as Record<string, unknown>)[TEST_UNDICI_RUNTIME_DEPS_KEY] = {
+      Agent: agentCtor,
+      EnvHttpProxyAgent: envHttpProxyAgentCtor,
+      ProxyAgent: proxyAgentCtor,
+      fetch: vi.fn(async () => okResponse()),
+    };
+
+    try {
+      const result = await fetchWithSsrFGuard({
+        url: "https://public.example/resource",
+        fetchImpl: vi.fn(async () => okResponse()),
+        lookupFn: createPublicLookup(),
+        mode: GUARDED_FETCH_MODE.STRICT,
+      });
+
+      expect(envHttpProxyAgentCtor).toHaveBeenCalledWith(
+        expect.objectContaining({
+          proxyTls: expect.objectContaining({ ca: "guarded-managed-proxy-ca" }),
+        }),
+      );
+      await result.release();
+    } finally {
+      stopActiveManagedProxyRegistration(registration);
+    }
   });
 
   it("routes through env proxy when trusted proxy mode is explicitly enabled", async () => {

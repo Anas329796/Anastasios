@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@slack/web-api", () => {
@@ -22,12 +25,21 @@ let resolveSlackWriteClientOptions: typeof import("./client.js").resolveSlackWri
 let SLACK_DEFAULT_RETRY_OPTIONS: typeof import("./client.js").SLACK_DEFAULT_RETRY_OPTIONS;
 let SLACK_WRITE_RETRY_OPTIONS: typeof import("./client.js").SLACK_WRITE_RETRY_OPTIONS;
 let WebClient: ReturnType<typeof vi.fn>;
+const tempDirs: string[] = [];
 
 function requireAgent<T extends { agent?: unknown }>(options: T): NonNullable<T["agent"]> {
   if (!options.agent) {
     throw new Error("expected proxy agent");
   }
   return options.agent as NonNullable<T["agent"]>;
+}
+
+function writeTempCa(contents: string): string {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "openclaw-slack-proxy-ca-"));
+  tempDirs.push(dir);
+  const caFile = path.join(dir, "proxy-ca.pem");
+  writeFileSync(caFile, contents, "utf8");
+  return caFile;
 }
 
 beforeAll(async () => {
@@ -153,6 +165,8 @@ describe("slack proxy agent", () => {
     "http_proxy",
     "NO_PROXY",
     "no_proxy",
+    "OPENCLAW_PROXY_ACTIVE",
+    "OPENCLAW_PROXY_CA_FILE",
   ];
 
   beforeEach(() => {
@@ -162,6 +176,9 @@ describe("slack proxy agent", () => {
   });
 
   afterEach(() => {
+    for (const dir of tempDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
     for (const key of PROXY_KEYS) {
       if (originalEnv[key] !== undefined) {
         process.env[key] = originalEnv[key];
@@ -177,6 +194,18 @@ describe("slack proxy agent", () => {
     const agent = requireAgent(options);
 
     expect(agent.constructor.name).toBe("HttpsProxyAgent");
+  });
+
+  it("adds managed proxy CA trust to Slack env proxy agents", () => {
+    const caFile = writeTempCa("slack-managed-proxy-ca");
+    process.env.HTTPS_PROXY = "https://proxy.example.com:8443";
+    process.env.OPENCLAW_PROXY_ACTIVE = "1";
+    process.env.OPENCLAW_PROXY_CA_FILE = caFile;
+
+    const options = resolveSlackWebClientOptions();
+    const agent = requireAgent(options) as { connectOpts?: { ca?: unknown } };
+
+    expect(agent.connectOpts?.ca).toBe("slack-managed-proxy-ca");
   });
 
   it("falls back to HTTP_PROXY when HTTPS_PROXY is not set", () => {

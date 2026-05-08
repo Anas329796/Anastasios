@@ -111,6 +111,7 @@ describe("proxy cli runtime", () => {
 
     await runProxyValidateCommand({
       proxyUrl: "http://override.example:3128",
+      proxyCaFile: "./ca.pem",
       allowedUrls: ["https://allowed.example/"],
       deniedUrls: ["http://127.0.0.1/"],
       apnsReachability: true,
@@ -126,6 +127,7 @@ describe("proxy cli runtime", () => {
       },
       env: process.env,
       proxyUrlOverride: "http://override.example:3128",
+      proxyCaFileOverride: "./ca.pem",
       allowedUrls: ["https://allowed.example/"],
       deniedUrls: ["http://127.0.0.1/"],
       apnsReachability: true,
@@ -278,7 +280,7 @@ describe("proxy cli runtime", () => {
         "Problems\n" +
         "  - proxyUrl must use http://\n\n" +
         "Next steps\n" +
-        "  Fix proxy.proxyUrl, OPENCLAW_PROXY_URL, or --proxy-url so it uses a reachable http:// proxy.\n",
+        "  Fix proxy.proxyUrl, OPENCLAW_PROXY_URL, or --proxy-url so it uses a reachable http:// or https:// proxy.\n",
     );
   });
 

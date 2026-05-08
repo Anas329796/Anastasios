@@ -1,4 +1,5 @@
 import { hasEnvHttpProxyAgentConfigured, resolveEnvHttpProxyAgentOptions } from "./proxy-env.js";
+import { addActiveManagedProxyTlsOptions } from "./proxy/managed-proxy-undici.js";
 import {
   createUndiciAutoSelectFamilyConnectOptions,
   resolveUndiciAutoSelectFamily,
@@ -93,7 +94,9 @@ export function ensureGlobalUndiciEnvProxyDispatcher(): void {
     return;
   }
   try {
-    setGlobalDispatcher(new EnvHttpProxyAgent(resolveEnvHttpProxyAgentOptions()));
+    setGlobalDispatcher(
+      new EnvHttpProxyAgent(addActiveManagedProxyTlsOptions(resolveEnvHttpProxyAgentOptions())),
+    );
     lastAppliedProxyBootstrap = true;
   } catch {
     // Best-effort bootstrap only.
@@ -116,7 +119,7 @@ function applyGlobalDispatcherStreamTimeouts(params: {
   try {
     if (kind === "env-proxy") {
       const proxyOptions = {
-        ...resolveEnvHttpProxyAgentOptions(),
+        ...addActiveManagedProxyTlsOptions(resolveEnvHttpProxyAgentOptions()),
         bodyTimeout: timeoutMs,
         headersTimeout: timeoutMs,
         ...(connect ? { connect } : {}),
@@ -201,7 +204,7 @@ export function forceResetGlobalDispatcher(): void {
   lastAppliedProxyBootstrap = false;
   try {
     const { EnvHttpProxyAgent, setGlobalDispatcher } = loadUndiciGlobalDispatcherDeps();
-    const proxyOptions = resolveEnvHttpProxyAgentOptions();
+    const proxyOptions = addActiveManagedProxyTlsOptions(resolveEnvHttpProxyAgentOptions());
     setGlobalDispatcher(
       new EnvHttpProxyAgent(
         proxyOptions as ConstructorParameters<UndiciGlobalDispatcherDeps["EnvHttpProxyAgent"]>[0],

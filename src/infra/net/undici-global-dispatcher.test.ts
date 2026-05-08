@@ -78,6 +78,11 @@ vi.mock("../wsl.js", () => ({
 
 import { isWSL2Sync } from "../wsl.js";
 import { hasEnvHttpProxyAgentConfigured, resolveEnvHttpProxyAgentOptions } from "./proxy-env.js";
+import {
+  _resetActiveManagedProxyStateForTests,
+  registerActiveManagedProxyUrl,
+  stopActiveManagedProxyRegistration,
+} from "./proxy/active-proxy-state.js";
 let DEFAULT_UNDICI_STREAM_TIMEOUT_MS: typeof import("./undici-global-dispatcher.js").DEFAULT_UNDICI_STREAM_TIMEOUT_MS;
 let ensureGlobalUndiciDispatcherStreamTimeouts: typeof import("./undici-global-dispatcher.js").ensureGlobalUndiciDispatcherStreamTimeouts;
 let ensureGlobalUndiciEnvProxyDispatcher: typeof import("./undici-global-dispatcher.js").ensureGlobalUndiciEnvProxyDispatcher;
@@ -102,6 +107,7 @@ describe("ensureGlobalUndiciStreamTimeouts", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetGlobalUndiciStreamTimeoutsForTests();
+    _resetActiveManagedProxyStateForTests();
     setCurrentDispatcher(new Agent());
     getDefaultAutoSelectFamily.mockReturnValue(undefined);
     vi.mocked(hasEnvHttpProxyAgentConfigured).mockReturnValue(false);
@@ -374,6 +380,7 @@ describe("forceResetGlobalDispatcher", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetGlobalUndiciStreamTimeoutsForTests();
+    _resetActiveManagedProxyStateForTests();
     vi.mocked(hasEnvHttpProxyAgentConfigured).mockReturnValue(false);
     vi.mocked(resolveEnvHttpProxyAgentOptions).mockReturnValue(undefined);
   });
@@ -436,6 +443,27 @@ describe("forceResetGlobalDispatcher", () => {
       httpProxy: "http://proxy-all.example:3128",
       httpsProxy: "http://proxy-all.example:3128",
     });
+  });
+
+  it("adds active managed proxy CA trust when resetting env proxy dispatcher", () => {
+    const registration = registerActiveManagedProxyUrl(new URL("https://proxy.example:8443"), {
+      proxyTls: { ca: "managed-proxy-ca" },
+    });
+    vi.mocked(hasEnvHttpProxyAgentConfigured).mockReturnValue(true);
+    vi.mocked(resolveEnvHttpProxyAgentOptions).mockReturnValue({
+      httpProxy: "https://proxy.example:8443",
+      httpsProxy: "https://proxy.example:8443",
+    });
+
+    forceResetGlobalDispatcher();
+
+    expect(setGlobalDispatcher).toHaveBeenCalledTimes(1);
+    expect((getCurrentDispatcher() as { options?: Record<string, unknown> }).options).toEqual({
+      httpProxy: "https://proxy.example:8443",
+      httpsProxy: "https://proxy.example:8443",
+      proxyTls: { ca: "managed-proxy-ca" },
+    });
+    stopActiveManagedProxyRegistration(registration);
   });
 });
 

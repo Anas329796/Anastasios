@@ -147,6 +147,7 @@ describe("openHttpConnectTunnel", () => {
 
     await openHttpConnectTunnel({
       proxyUrl: new URL("https://proxy.example:8443"),
+      proxyTls: { ca: "proxy-ca" },
       targetHost: "api.sandbox.push.apple.com",
       targetPort: 443,
     });
@@ -156,6 +157,7 @@ describe("openHttpConnectTunnel", () => {
       port: 8443,
       servername: "proxy.example",
       ALPNProtocols: ["http/1.1"],
+      ca: "proxy-ca",
     });
     expect(tlsConnectSpy).toHaveBeenLastCalledWith({
       socket: proxySocket,

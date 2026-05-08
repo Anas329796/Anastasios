@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { resolveFetch } from "openclaw/plugin-sdk/fetch-runtime";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -103,6 +106,7 @@ vi.mock("openclaw/plugin-sdk/runtime-env", () => ({
 let resolveTelegramFetch: typeof import("./fetch.js").resolveTelegramFetch;
 let resolveTelegramApiBase: typeof import("./fetch.js").resolveTelegramApiBase;
 let resolveTelegramTransport: typeof import("./fetch.js").resolveTelegramTransport;
+const tempDirs: string[] = [];
 
 type TelegramDispatcherPolicy = NonNullable<
   ReturnType<typeof resolveTelegramTransport>["dispatcherAttempts"]
@@ -126,6 +130,8 @@ beforeEach(() => {
     "https_proxy",
     "NO_PROXY",
     "no_proxy",
+    "OPENCLAW_PROXY_ACTIVE",
+    "OPENCLAW_PROXY_CA_FILE",
     "OPENCLAW_PROXY_URL",
   ]) {
     vi.stubEnv(key, "");
@@ -138,6 +144,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  for (const dir of tempDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
   vi.unstubAllEnvs();
 });
 
@@ -177,6 +186,14 @@ function buildFetchFallbackError(code: string) {
   return Object.assign(new TypeError("fetch failed"), {
     cause: connectErr,
   });
+}
+
+function writeTempCa(contents: string): string {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "openclaw-telegram-proxy-ca-"));
+  tempDirs.push(dir);
+  const caFile = path.join(dir, "proxy-ca.pem");
+  writeFileSync(caFile, contents, "utf8");
+  return caFile;
 }
 
 const STICKY_IPV4_FALLBACK_NETWORK = {
@@ -414,6 +431,32 @@ describe("resolveTelegramFetch", () => {
     expect(dispatcher?.options?.proxyTls).toEqual(
       expect.objectContaining({
         autoSelectFamily: false,
+        autoSelectFamilyAttemptTimeout: 300,
+      }),
+    );
+  });
+
+  it("adds managed proxy CA trust to Telegram env proxy dispatchers", async () => {
+    const caFile = writeTempCa("telegram-managed-proxy-ca");
+    vi.stubEnv("https_proxy", "https://proxy.example:8443");
+    vi.stubEnv("OPENCLAW_PROXY_ACTIVE", "1");
+    vi.stubEnv("OPENCLAW_PROXY_CA_FILE", caFile);
+    undiciFetch.mockResolvedValue({ ok: true } as Response);
+
+    const resolved = resolveTelegramFetchOrThrow(undefined, {
+      network: {
+        autoSelectFamily: true,
+        dnsResultOrder: "ipv4first",
+      },
+    });
+
+    await resolved("https://api.telegram.org/botx/getMe");
+
+    const dispatcher = getDispatcherFromUndiciCall(1);
+    expect(dispatcher?.options?.proxyTls).toEqual(
+      expect.objectContaining({
+        ca: "telegram-managed-proxy-ca",
+        autoSelectFamily: true,
         autoSelectFamilyAttemptTimeout: 300,
       }),
     );

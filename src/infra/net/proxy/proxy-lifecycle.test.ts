@@ -1,6 +1,21 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import https from "node:https";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const { ProxyAgent, proxyAgentCtor } = vi.hoisted(() => {
+  const proxyAgentCtor = vi.fn();
+  class ProxyAgent {
+    static lastCreated: ProxyAgent | undefined;
+    constructor(public readonly options?: Record<string, unknown>) {
+      ProxyAgent.lastCreated = this;
+      proxyAgentCtor(options);
+    }
+  }
+  return { ProxyAgent, proxyAgentCtor };
+});
 
 vi.mock("../undici-global-dispatcher.js", () => ({
   forceResetGlobalDispatcher: vi.fn(),
@@ -9,6 +24,10 @@ vi.mock("../undici-global-dispatcher.js", () => ({
 vi.mock("global-agent", () => ({
   bootstrap: vi.fn(),
   createGlobalProxyAgent: vi.fn(),
+}));
+
+vi.mock("proxy-agent", () => ({
+  ProxyAgent,
 }));
 
 vi.mock("../../../logger.js", () => ({
@@ -20,8 +39,10 @@ import { bootstrap as bootstrapGlobalAgent } from "global-agent";
 import { logInfo, logWarn } from "../../../logger.js";
 import { forceResetGlobalDispatcher } from "../undici-global-dispatcher.js";
 import { _resetActiveManagedProxyStateForTests } from "./active-proxy-state.js";
+import { getActiveManagedProxyTlsOptions } from "./active-proxy-state.js";
 import {
   _resetGlobalAgentBootstrapForTests,
+  ensureInheritedManagedProxyRoutingActive,
   registerManagedProxyGatewayLoopbackNoProxy,
   startProxy,
   stopProxy,
@@ -68,6 +89,7 @@ describe("startProxy", () => {
     "GLOBAL_AGENT_NO_PROXY",
     "OPENCLAW_PROXY_ACTIVE",
     "OPENCLAW_PROXY_LOOPBACK_MODE",
+    "OPENCLAW_PROXY_CA_FILE",
     "OPENCLAW_PROXY_URL",
   ];
   const originalHttpRequest = http.request;
@@ -76,6 +98,7 @@ describe("startProxy", () => {
   const originalHttpsRequest = https.request;
   const originalHttpsGet = https.get;
   const originalHttpsGlobalAgent = https.globalAgent;
+  const tempDirs: string[] = [];
 
   beforeEach(() => {
     for (const key of envKeysToClean) {
@@ -84,6 +107,8 @@ describe("startProxy", () => {
     }
     mockForceResetGlobalDispatcher.mockReset();
     mockBootstrapGlobalAgent.mockReset();
+    proxyAgentCtor.mockClear();
+    ProxyAgent.lastCreated = undefined;
     mockBootstrapGlobalAgent.mockImplementation(() => {
       const env = process.env as Record<string, string | undefined>;
       const namespace = env["GLOBAL_AGENT_ENVIRONMENT_VARIABLE_NAMESPACE"] ?? "GLOBAL_AGENT_";
@@ -104,7 +129,18 @@ describe("startProxy", () => {
     https.request = originalHttpsRequest;
     https.get = originalHttpsGet;
     https.globalAgent = originalHttpsGlobalAgent;
+    for (const dir of tempDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
+
+  function writeTempCa(contents = "proxy-ca"): string {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "openclaw-proxy-lifecycle-ca-"));
+    tempDirs.push(dir);
+    const caFile = path.join(dir, "proxy-ca.pem");
+    writeFileSync(caFile, contents, "utf8");
+    return caFile;
+  }
 
   afterEach(() => {
     for (const key of envKeysToClean) {
@@ -187,13 +223,107 @@ describe("startProxy", () => {
     expect(process.env["HTTP_PROXY"]).toBe("http://127.0.0.1:3129");
   });
 
-  it("throws for HTTPS proxy URLs from OPENCLAW_PROXY_URL", async () => {
+  it("uses HTTPS proxy URLs from OPENCLAW_PROXY_URL", async () => {
     process.env["OPENCLAW_PROXY_URL"] = "https://127.0.0.1:3128";
 
-    await expect(startProxy({ enabled: true })).rejects.toThrow("http:// forward proxy");
+    const handle = await startProxy({ enabled: true });
 
-    expect(process.env["HTTP_PROXY"]).toBeUndefined();
-    expect(mockLogWarn).not.toHaveBeenCalled();
+    expect(handle?.proxyUrl).toBe("https://127.0.0.1:3128");
+    expect(process.env["HTTP_PROXY"]).toBe("https://127.0.0.1:3128");
+  });
+
+  it("loads configured proxy CA files into active managed proxy state", async () => {
+    const caFile = writeTempCa("active-proxy-ca");
+
+    const handle = await startProxy({
+      enabled: true,
+      proxyUrl: "https://127.0.0.1:3128",
+      tls: { caFile },
+    });
+
+    expect(getActiveManagedProxyTlsOptions()).toEqual({ ca: "active-proxy-ca" });
+    await stopProxy(handle);
+  });
+
+  it("uses a managed node proxy agent for HTTPS proxy URLs with CA trust", async () => {
+    const caFile = writeTempCa("https-proxy-ca");
+
+    const handle = await startProxy({
+      enabled: true,
+      proxyUrl: "https://user:pass@proxy.example:8443",
+      tls: { caFile },
+    });
+
+    expect(mockBootstrapGlobalAgent).not.toHaveBeenCalled();
+    expect(proxyAgentCtor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ca: "https-proxy-ca",
+        getProxyForUrl: expect.any(Function),
+        httpAgent: expect.any(http.Agent),
+        httpsAgent: expect.any(https.Agent),
+      }),
+    );
+    expect(http.globalAgent).toBe(ProxyAgent.lastCreated);
+    expect(https.globalAgent).toBe(ProxyAgent.lastCreated);
+
+    const getProxyForUrl = ProxyAgent.lastCreated?.options?.getProxyForUrl;
+    expect(getProxyForUrl).toBeTypeOf("function");
+    expect((getProxyForUrl as (targetUrl: string) => string)("https://api.example.com/v1")).toBe(
+      "https://user:pass@proxy.example:8443",
+    );
+
+    await stopProxy(handle);
+  });
+
+  it("exports proxy CA file paths for inherited child routing", async () => {
+    const caFile = writeTempCa("exported-proxy-ca");
+
+    const handle = await startProxy({
+      enabled: true,
+      proxyUrl: "https://proxy.example:8443",
+      tls: { caFile },
+    });
+
+    expect(process.env["OPENCLAW_PROXY_CA_FILE"]).toBe(caFile);
+
+    await stopProxy(handle);
+
+    expect(process.env["OPENCLAW_PROXY_CA_FILE"]).toBeUndefined();
+  });
+
+  it("loads inherited HTTPS proxy CA trust for child routing", () => {
+    const caFile = writeTempCa("inherited-https-proxy-ca");
+    process.env["OPENCLAW_PROXY_ACTIVE"] = "1";
+    process.env["GLOBAL_AGENT_HTTP_PROXY"] = "https://proxy.example:8443";
+    process.env["OPENCLAW_PROXY_CA_FILE"] = caFile;
+    mockForceResetGlobalDispatcher.mockImplementationOnce(() => {
+      expect(getActiveManagedProxyTlsOptions()).toEqual({ ca: "inherited-https-proxy-ca" });
+    });
+
+    ensureInheritedManagedProxyRoutingActive();
+
+    expect(mockBootstrapGlobalAgent).not.toHaveBeenCalled();
+    expect(proxyAgentCtor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ca: "inherited-https-proxy-ca",
+      }),
+    );
+    expect(mockForceResetGlobalDispatcher).toHaveBeenCalledOnce();
+  });
+
+  it("registers proxy CA trust before resetting the undici dispatcher", async () => {
+    const caFile = writeTempCa("undici-proxy-ca");
+    mockForceResetGlobalDispatcher.mockImplementationOnce(() => {
+      expect(getActiveManagedProxyTlsOptions()).toEqual({ ca: "undici-proxy-ca" });
+    });
+
+    const handle = await startProxy({
+      enabled: true,
+      proxyUrl: "https://proxy.example:8443",
+      tls: { caFile },
+    });
+
+    await stopProxy(handle);
   });
 
   it("sets both undici and global-agent proxy env vars", async () => {

@@ -145,6 +145,30 @@ describe("listBundledChannelCatalogEntries", () => {
     expect(entries.map((entry) => entry.id)).toEqual(expect.arrayContaining(["qqbot", "telegram"]));
   });
 
+  it("loads the tracked source official catalog when dist output is absent", () => {
+    const root = seedRoot("bcr-source-official-");
+    writeJsonFile(path.join(root, "scripts", "lib", "official-external-channel-catalog.json"), {
+      entries: [
+        {
+          name: "@vendor/source-only",
+          openclaw: {
+            channel: {
+              id: "source-official",
+              label: "Source Official",
+              docsPath: "/channels/source-official",
+              blurb: "tracked source catalog entry",
+            },
+          },
+        },
+      ],
+    });
+    useBundledPluginsDir(undefined);
+
+    const entries = listBundledChannelCatalogEntries();
+
+    expect(entries.map((entry) => entry.id)).toContain("source-official");
+  });
+
   it("falls back to dist/channel-catalog.json when the resolver returns undefined", () => {
     // OPENCLAW_DISABLE_BUNDLED_PLUGINS, missing bundled tree, or an unresolvable
     // package root all surface as undefined from resolveBundledPluginsDir. In

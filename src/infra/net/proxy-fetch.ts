@@ -1,7 +1,7 @@
 import { logWarn } from "../../logger.js";
 import { formatErrorMessage } from "../errors.js";
 import { normalizeHeadersInitForFetch } from "../fetch-headers.js";
-import { resolveEnvHttpProxyAgentOptions } from "./proxy-env.js";
+import { resolveManagedEnvHttpProxyAgentOptions } from "./proxy/managed-proxy-undici.js";
 import { loadUndiciRuntimeDeps, type UndiciRuntimeDeps } from "./undici-runtime.js";
 
 export const PROXY_FETCH_PROXY_URL = Symbol.for("openclaw.proxyFetch.proxyUrl");
@@ -113,7 +113,7 @@ export function getProxyUrlFromFetch(fetchImpl?: typeof fetch): string | undefin
 export function resolveProxyFetchFromEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): typeof fetch | undefined {
-  const proxyOptions = resolveEnvHttpProxyAgentOptions(env);
+  const proxyOptions = resolveManagedEnvHttpProxyAgentOptions(env);
   if (!proxyOptions) {
     return undefined;
   }

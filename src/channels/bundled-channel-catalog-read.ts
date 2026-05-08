@@ -20,6 +20,11 @@ type BundledChannelCatalogEntry = {
 };
 
 const OFFICIAL_CHANNEL_CATALOG_RELATIVE_PATH = path.join("dist", "channel-catalog.json");
+const SOURCE_OFFICIAL_CHANNEL_CATALOG_RELATIVE_PATH = path.join(
+  "scripts",
+  "lib",
+  "official-external-channel-catalog.json",
+);
 const officialCatalogFileCache = new Map<string, ChannelCatalogEntryLike[] | null>();
 
 function listPackageRoots(): string[] {
@@ -39,27 +44,32 @@ function readBundledExtensionCatalogEntriesSync(): PluginPackageChannel[] {
 
 function readOfficialCatalogFileSync(): ChannelCatalogEntryLike[] {
   for (const packageRoot of listPackageRoots()) {
-    const candidate = path.join(packageRoot, OFFICIAL_CHANNEL_CATALOG_RELATIVE_PATH);
-    const cached = officialCatalogFileCache.get(candidate);
-    if (cached !== undefined) {
-      if (cached) {
-        return cached;
+    const candidates = [
+      path.join(packageRoot, SOURCE_OFFICIAL_CHANNEL_CATALOG_RELATIVE_PATH),
+      path.join(packageRoot, OFFICIAL_CHANNEL_CATALOG_RELATIVE_PATH),
+    ];
+    for (const candidate of candidates) {
+      const cached = officialCatalogFileCache.get(candidate);
+      if (cached !== undefined) {
+        if (cached) {
+          return cached;
+        }
+        continue;
       }
-      continue;
-    }
-    if (!fs.existsSync(candidate)) {
+      if (!fs.existsSync(candidate)) {
+        officialCatalogFileCache.set(candidate, null);
+        continue;
+      }
+      const payload = tryReadJsonSync<{ entries?: unknown }>(candidate);
+      if (payload) {
+        const entries = Array.isArray(payload.entries)
+          ? (payload.entries as ChannelCatalogEntryLike[])
+          : [];
+        officialCatalogFileCache.set(candidate, entries);
+        return entries;
+      }
       officialCatalogFileCache.set(candidate, null);
-      continue;
     }
-    const payload = tryReadJsonSync<{ entries?: unknown }>(candidate);
-    if (payload) {
-      const entries = Array.isArray(payload.entries)
-        ? (payload.entries as ChannelCatalogEntryLike[])
-        : [];
-      officialCatalogFileCache.set(candidate, entries);
-      return entries;
-    }
-    officialCatalogFileCache.set(candidate, null);
   }
   return [];
 }
