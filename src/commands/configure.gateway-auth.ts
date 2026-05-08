@@ -183,7 +183,7 @@ export async function promptAuthConfig(
       allowKeep: true,
       ignoreAllowlist: true,
       includeProviderPluginSetups,
-      loadCatalog: false,
+      loadCatalog: includeProviderPluginSetups,
       preferredProvider,
       workspaceDir: resolveDefaultAgentWorkspaceDir(),
       runtime,
