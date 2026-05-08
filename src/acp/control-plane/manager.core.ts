@@ -72,7 +72,11 @@ import {
   resolveRuntimeIdleTtlMs,
   resolveSessionLaneTaskTimeoutMs,
 } from "./manager.utils.js";
-import { CachedRuntimeState, RuntimeCache } from "./runtime-cache.js";
+import {
+  type CachedRuntimeState,
+  type ClosingRuntimeCacheEntry,
+  RuntimeCache,
+} from "./runtime-cache.js";
 import {
   inferRuntimeOptionPatchFromConfigOption,
   mergeRuntimeOptions,
@@ -165,6 +169,7 @@ type BackgroundTaskContext = {
 type SessionActorOperationFence = {
   actorKey: string;
   stale: boolean;
+  signal: AbortSignal;
 };
 
 export class AcpSessionManager {
@@ -276,7 +281,7 @@ export class AcpSessionManager {
         const becameResolved = await this.withSessionActor({
           cfg: params.cfg,
           sessionKey: session.sessionKey,
-          op: async () => {
+          op: async (signal) => {
             const resolution = this.resolveSession({
               cfg: params.cfg,
               sessionKey: session.sessionKey,
@@ -288,6 +293,7 @@ export class AcpSessionManager {
               cfg: params.cfg,
               sessionKey: session.sessionKey,
               meta: resolution.meta,
+              signal,
             });
             const reconciled = await this.reconcileRuntimeSessionIdentifiers({
               cfg: params.cfg,
@@ -296,6 +302,7 @@ export class AcpSessionManager {
               handle,
               meta,
               failOnStatusError: false,
+              signal,
             });
             return !isSessionIdentityPending(resolveSessionIdentityFromMeta(reconciled.meta));
           },
@@ -331,8 +338,9 @@ export class AcpSessionManager {
     return await this.withSessionActor({
       cfg: input.cfg,
       sessionKey,
+      signal: input.signal,
       timeoutCode: "ACP_SESSION_INIT_FAILED",
-      op: async () => {
+      op: async (signal) => {
         const backend = this.deps.requireRuntimeBackend(input.backendId || input.cfg.acp?.backend);
         const runtime = backend.runtime;
         const initialRuntimeOptions = validateRuntimeOptionPatch({
@@ -356,6 +364,7 @@ export class AcpSessionManager {
               ...(requestedModel ? { model: requestedModel } : {}),
               ...(requestedThinking ? { thinking: requestedThinking } : {}),
               cwd: requestedCwd,
+              signal,
             }),
           fallbackCode: "ACP_SESSION_INIT_FAILED",
           fallbackMessage: "Could not initialize ACP session runtime.",
@@ -412,6 +421,7 @@ export class AcpSessionManager {
             .close({
               handle,
               reason: "init-meta-failed",
+              ...(signal.aborted ? {} : { signal }),
             })
             .catch((closeError) => {
               logVerbose(
@@ -452,8 +462,8 @@ export class AcpSessionManager {
       cfg: params.cfg,
       sessionKey,
       signal: params.signal,
-      op: async () => {
-        this.throwIfAborted(params.signal);
+      op: async (signal) => {
+        this.throwIfAborted(signal);
         const resolution = this.resolveSession({
           cfg: params.cfg,
           sessionKey,
@@ -467,6 +477,7 @@ export class AcpSessionManager {
           cfg: params.cfg,
           sessionKey,
           meta: resolvedMeta,
+          signal,
         });
         let handle = ensuredHandle;
         let meta = ensuredMeta;
@@ -475,12 +486,12 @@ export class AcpSessionManager {
         if (runtime.getStatus) {
           runtimeStatus = await withAcpRuntimeErrorBoundary({
             run: async () => {
-              this.throwIfAborted(params.signal);
+              this.throwIfAborted(signal);
               const status = await runtime.getStatus!({
                 handle,
-                ...(params.signal ? { signal: params.signal } : {}),
+                signal,
               });
-              this.throwIfAborted(params.signal);
+              this.throwIfAborted(signal);
               return status;
             },
             fallbackCode: "ACP_TURN_FAILED",
@@ -495,6 +506,7 @@ export class AcpSessionManager {
           meta,
           runtimeStatus,
           failOnStatusError: true,
+          signal,
         }));
         const identity = resolveSessionIdentityFromMeta(meta);
         return {
@@ -529,7 +541,7 @@ export class AcpSessionManager {
     return await this.withSessionActor({
       cfg: params.cfg,
       sessionKey,
-      op: async () => {
+      op: async (signal) => {
         const resolution = this.resolveSession({
           cfg: params.cfg,
           sessionKey,
@@ -539,6 +551,7 @@ export class AcpSessionManager {
           cfg: params.cfg,
           sessionKey,
           meta: resolvedMeta,
+          signal,
         });
         const capabilities = await this.resolveRuntimeCapabilities({ runtime, handle });
         if (!capabilities.controls.includes("session/set_mode") || !runtime.setMode) {
@@ -707,7 +720,7 @@ export class AcpSessionManager {
     return await this.withSessionActor({
       cfg: params.cfg,
       sessionKey,
-      op: async () => {
+      op: async (signal) => {
         const resolution = this.resolveSession({
           cfg: params.cfg,
           sessionKey,
@@ -717,19 +730,19 @@ export class AcpSessionManager {
           cfg: params.cfg,
           sessionKey,
           meta: resolvedMeta,
+          signal,
         });
         await withAcpRuntimeErrorBoundary({
           run: async () =>
-            await runtime.close({
+            await this.closeRuntimeHandle({
+              sessionKey,
+              runtime,
               handle,
               reason: "reset-runtime-options",
+              signal,
             }),
           fallbackCode: "ACP_TURN_FAILED",
           fallbackMessage: "Could not reset ACP runtime options.",
-        });
-        this.clearCachedRuntimeStateIfHandleMatches({
-          sessionKey,
-          handle,
         });
         await this.persistRuntimeOptions({
           cfg: params.cfg,
@@ -754,7 +767,7 @@ export class AcpSessionManager {
       cfg: input.cfg,
       sessionKey,
       signal: input.signal,
-      op: async () => {
+      op: async (signal) => {
         const turnStartedAt = Date.now();
         const actorKey = normalizeActorKey(sessionKey);
         const taskContext =
@@ -791,6 +804,7 @@ export class AcpSessionManager {
               cfg: input.cfg,
               sessionKey,
               meta: resolvedMeta,
+              signal,
             });
             runtime = ensured.runtime;
             handle = ensured.handle;
@@ -813,10 +827,10 @@ export class AcpSessionManager {
             onCallerAbort = () => {
               internalAbortController?.abort();
             };
-            if (input.signal?.aborted) {
+            if (signal.aborted) {
               internalAbortController.abort();
-            } else if (input.signal) {
-              input.signal.addEventListener("abort", onCallerAbort, { once: true });
+            } else {
+              signal.addEventListener("abort", onCallerAbort, { once: true });
             }
 
             activeTurn = {
@@ -828,8 +842,8 @@ export class AcpSessionManager {
             activeTurnStarted = true;
 
             const combinedSignal =
-              input.signal && typeof AbortSignal.any === "function"
-                ? AbortSignal.any([input.signal, internalAbortController.signal])
+              typeof AbortSignal.any === "function"
+                ? AbortSignal.any([signal, internalAbortController.signal])
                 : internalAbortController.signal;
             const eventGate = { open: true };
             const turnPromise = consumeAcpTurnStream({
@@ -963,8 +977,8 @@ export class AcpSessionManager {
             });
             throw acpError;
           } finally {
-            if (input.signal && onCallerAbort) {
-              input.signal.removeEventListener("abort", onCallerAbort);
+            if (onCallerAbort) {
+              signal.removeEventListener("abort", onCallerAbort);
             }
             if (activeTurn && this.activeTurnBySession.get(actorKey) === activeTurn) {
               this.activeTurnBySession.delete(actorKey);
@@ -984,6 +998,7 @@ export class AcpSessionManager {
                 handle,
                 meta,
                 failOnStatusError: false,
+                signal,
               }));
             }
             if (
@@ -996,19 +1011,17 @@ export class AcpSessionManager {
               meta.mode === "oneshot"
             ) {
               try {
-                await runtime.close({
+                await this.closeRuntimeHandle({
+                  sessionKey,
+                  runtime,
                   handle,
                   reason: "oneshot-complete",
+                  signal,
                 });
               } catch (error) {
                 logVerbose(
                   `acp-manager: ACP oneshot close failed for ${sessionKey}: ${String(error)}`,
                 );
-              } finally {
-                this.clearCachedRuntimeStateIfHandleMatches({
-                  sessionKey,
-                  handle,
-                });
               }
             }
           }
@@ -1124,7 +1137,9 @@ export class AcpSessionManager {
     if (params.mode !== "oneshot") {
       return;
     }
-    const closePromise = params.activeTurn.runtime.close({
+    const closePromise = this.closeRuntimeHandle({
+      sessionKey: params.sessionKey,
+      runtime: params.activeTurn.runtime,
       handle: params.activeTurn.handle,
       reason: ACP_TURN_TIMEOUT_REASON,
     });
@@ -1134,18 +1149,8 @@ export class AcpSessionManager {
       promise: closePromise,
     });
     if (cancelFinished && closeFinished) {
-      this.clearCachedRuntimeStateIfHandleMatches({
-        sessionKey: params.sessionKey,
-        handle: params.activeTurn.handle,
-      });
       return;
     }
-    void Promise.allSettled([params.activeTurn.cancelPromise, closePromise]).then(() => {
-      this.clearCachedRuntimeStateIfHandleMatches({
-        sessionKey: params.sessionKey,
-        handle: params.activeTurn.handle,
-      });
-    });
   }
 
   private async awaitCleanupWithGrace(params: {
@@ -1209,6 +1214,7 @@ export class AcpSessionManager {
     cfg: OpenClawConfig;
     sessionKey: string;
     reason?: string;
+    signal?: AbortSignal;
   }): Promise<void> {
     const sessionKey = canonicalizeAcpSessionKey(params);
     if (!sessionKey) {
@@ -1223,6 +1229,7 @@ export class AcpSessionManager {
         activeTurn.cancelPromise = activeTurn.runtime.cancel({
           handle: activeTurn.handle,
           reason: params.reason,
+          ...(params.signal ? { signal: params.signal } : {}),
         });
       }
       await withAcpRuntimeErrorBoundary({
@@ -1236,7 +1243,8 @@ export class AcpSessionManager {
     await this.withSessionActor({
       cfg: params.cfg,
       sessionKey,
-      op: async () => {
+      signal: params.signal,
+      op: async (signal) => {
         const resolution = this.resolveSession({
           cfg: params.cfg,
           sessionKey,
@@ -1246,6 +1254,7 @@ export class AcpSessionManager {
           cfg: params.cfg,
           sessionKey,
           meta: resolvedMeta,
+          signal,
         });
         try {
           await withAcpRuntimeErrorBoundary({
@@ -1253,6 +1262,7 @@ export class AcpSessionManager {
               await runtime.cancel({
                 handle,
                 reason: params.reason,
+                signal,
               }),
             fallbackCode: "ACP_TURN_FAILED",
             fallbackMessage: "ACP cancel failed before completion.",
@@ -1293,7 +1303,8 @@ export class AcpSessionManager {
     return await this.withSessionActor({
       cfg: input.cfg,
       sessionKey,
-      op: async () => {
+      signal: input.signal,
+      op: async (signal) => {
         const resolution = this.resolveSession({
           cfg: input.cfg,
           sessionKey,
@@ -1339,22 +1350,22 @@ export class AcpSessionManager {
               cfg: input.cfg,
               sessionKey,
               meta,
+              signal,
             });
             await withAcpRuntimeErrorBoundary({
               run: async () =>
-                await ensuredRuntime.close({
+                await this.closeRuntimeHandle({
+                  sessionKey,
+                  runtime: ensuredRuntime,
                   handle,
                   reason: input.reason,
                   discardPersistentState: input.discardPersistentState,
+                  signal,
                 }),
               fallbackCode: "ACP_TURN_FAILED",
               fallbackMessage: "ACP close failed before completion.",
             });
             runtimeClosed = true;
-            this.clearCachedRuntimeStateIfHandleMatches({
-              sessionKey,
-              handle,
-            });
           } catch (error) {
             const acpError = toAcpRuntimeError({
               error,
@@ -1434,6 +1445,7 @@ export class AcpSessionManager {
     cfg: OpenClawConfig;
     sessionKey: string;
     meta: SessionAcpMeta;
+    signal?: AbortSignal;
   }): Promise<{ runtime: AcpRuntime; handle: AcpRuntimeHandle; meta: SessionAcpMeta }> {
     const agent =
       normalizeText(params.meta.agent) || resolveAcpAgentFromSessionKey(params.sessionKey, "main");
@@ -1463,6 +1475,7 @@ export class AcpSessionManager {
           sessionKey: params.sessionKey,
           runtime: cached.runtime,
           handle: cached.handle,
+          signal: params.signal,
         }))
       ) {
         return {
@@ -1501,6 +1514,7 @@ export class AcpSessionManager {
             ...(model ? { model } : {}),
             ...(thinking ? { thinking } : {}),
             cwd,
+            ...(params.signal ? { signal: params.signal } : {}),
           }),
         fallbackCode: "ACP_SESSION_INIT_FAILED",
         fallbackMessage: "Could not initialize ACP session runtime.",
@@ -1622,6 +1636,7 @@ export class AcpSessionManager {
     sessionKey: string;
     runtime: AcpRuntime;
     handle: AcpRuntimeHandle;
+    signal?: AbortSignal;
   }): Promise<boolean> {
     if (!params.runtime.getStatus) {
       return true;
@@ -1629,6 +1644,7 @@ export class AcpSessionManager {
     try {
       const status = await params.runtime.getStatus({
         handle: params.handle,
+        ...(params.signal ? { signal: params.signal } : {}),
       });
       if (this.isRuntimeStatusUnavailable(status)) {
         this.clearCachedRuntimeState(params.sessionKey);
@@ -1918,7 +1934,7 @@ export class AcpSessionManager {
       try {
         await this.actorQueue.run(
           candidate.actorKey,
-          async () => {
+          async (queueContext) => {
             if (this.activeTurnBySession.has(candidate.actorKey)) {
               return;
             }
@@ -1931,19 +1947,15 @@ export class AcpSessionManager {
               return;
             }
             try {
-              await cached.runtime.close({
+              await this.closeRuntimeHandle({
+                sessionKey: cached.handle.sessionKey,
+                runtime: cached.runtime,
                 handle: cached.handle,
                 reason: "idle-evicted",
+                signal: queueContext.signal,
               });
-              if (
-                this.clearCachedRuntimeStateIfHandleMatches({
-                  sessionKey: cached.handle.sessionKey,
-                  handle: cached.handle,
-                })
-              ) {
-                this.evictedRuntimeCount += 1;
-                this.lastEvictedAt = Date.now();
-              }
+              this.evictedRuntimeCount += 1;
+              this.lastEvictedAt = Date.now();
             } catch (error) {
               logVerbose(
                 `acp-manager: idle eviction close failed for ${candidate.state.handle.sessionKey}: ${String(error)}`,
@@ -2036,6 +2048,7 @@ export class AcpSessionManager {
     meta: SessionAcpMeta;
     runtimeStatus?: AcpRuntimeStatus;
     failOnStatusError: boolean;
+    signal?: AbortSignal;
   }): Promise<{
     handle: AcpRuntimeHandle;
     meta: SessionAcpMeta;
@@ -2085,7 +2098,7 @@ export class AcpSessionManager {
   private async withSessionActor<T>(params: {
     cfg: OpenClawConfig;
     sessionKey: string;
-    op: () => Promise<T>;
+    op: (signal: AbortSignal) => Promise<T>;
     signal?: AbortSignal;
     timeoutCode?: AcpRuntimeError["code"];
   }): Promise<T> {
@@ -2093,22 +2106,36 @@ export class AcpSessionManager {
     this.throwIfAborted(params.signal);
 
     let actorStarted = false;
-    const fence: SessionActorOperationFence = {
-      actorKey,
-      stale: false,
-    };
+    let activeFence: SessionActorOperationFence | null = null;
     const queued = this.actorQueue.run(
       actorKey,
-      () =>
-        this.sessionActorOperationScope.run(fence, async () => {
-          actorStarted = true;
-          this.throwIfAborted(params.signal);
-          return await params.op();
-        }),
+      async (taskContext) => {
+        const operationSignal = this.createCombinedAbortSignal([taskContext.signal, params.signal]);
+        const fence: SessionActorOperationFence = {
+          actorKey,
+          stale: false,
+          signal: operationSignal.signal,
+        };
+        activeFence = fence;
+        try {
+          return await this.sessionActorOperationScope.run(fence, async () => {
+            actorStarted = true;
+            this.throwIfAborted(operationSignal.signal);
+            return await params.op(operationSignal.signal);
+          });
+        } finally {
+          operationSignal.cleanup();
+          if (activeFence === fence) {
+            activeFence = null;
+          }
+        }
+      },
       {
         timeoutMs: resolveSessionLaneTaskTimeoutMs(params.cfg),
         onTimeout: () => {
-          fence.stale = true;
+          if (activeFence) {
+            activeFence.stale = true;
+          }
           this.cancelActiveTurnAfterLaneTimeout(actorKey);
         },
       },
@@ -2160,9 +2187,12 @@ export class AcpSessionManager {
       });
     } catch (error) {
       if (error instanceof SessionActorQueueTimeoutError) {
+        logVerbose(
+          `acp-manager: session lane task timed out after ${error.timeoutMs}ms for ${error.actorKey}`,
+        );
         throw new AcpRuntimeError(
           params.timeoutCode ?? "ACP_TURN_FAILED",
-          `ACP session lane task timed out after ${error.timeoutMs}ms for ${params.sessionKey}.`,
+          "ACP session operation timed out. Please retry.",
           { cause: error },
         );
       }
@@ -2173,6 +2203,45 @@ export class AcpSessionManager {
   private isStaleActorOperation(actorKey: string): boolean {
     const fence = this.sessionActorOperationScope.getStore();
     return fence?.actorKey === actorKey && fence.stale;
+  }
+
+  private createCombinedAbortSignal(signals: readonly (AbortSignal | undefined)[]): {
+    signal: AbortSignal;
+    cleanup: () => void;
+  } {
+    const activeSignals = signals.filter((signal): signal is AbortSignal => !!signal);
+    if (activeSignals.length === 0) {
+      return {
+        signal: new AbortController().signal,
+        cleanup: () => {},
+      };
+    }
+    if (activeSignals.length === 1) {
+      return {
+        signal: activeSignals[0],
+        cleanup: () => {},
+      };
+    }
+
+    const controller = new AbortController();
+    const onAbort = () => {
+      controller.abort();
+    };
+    for (const signal of activeSignals) {
+      if (signal.aborted) {
+        controller.abort();
+        break;
+      }
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+    return {
+      signal: controller.signal,
+      cleanup: () => {
+        for (const signal of activeSignals) {
+          signal.removeEventListener("abort", onAbort);
+        }
+      },
+    };
   }
 
   private isStaleSessionActorOperation(sessionKey: string): boolean {
@@ -2234,10 +2303,68 @@ export class AcpSessionManager {
     this.runtimeCache.clear(normalizeActorKey(sessionKey));
   }
 
+  private markCachedRuntimeStateClosingIfHandleMatches(params: {
+    sessionKey: string;
+    handle: AcpRuntimeHandle;
+  }): ClosingRuntimeCacheEntry | null {
+    if (this.isStaleSessionActorOperation(params.sessionKey)) {
+      return null;
+    }
+    const actorKey = normalizeActorKey(params.sessionKey);
+    const cached = this.runtimeCache.peek(actorKey);
+    if (!cached || !this.runtimeHandlesMatch(cached.handle, params.handle)) {
+      return null;
+    }
+    return this.runtimeCache.markClosing(actorKey);
+  }
+
+  private async closeRuntimeHandle(params: {
+    sessionKey: string;
+    runtime: AcpRuntime;
+    handle: AcpRuntimeHandle;
+    reason: string;
+    discardPersistentState?: boolean;
+    signal?: AbortSignal;
+  }): Promise<void> {
+    if (this.isStaleSessionActorOperation(params.sessionKey)) {
+      return;
+    }
+    const closing = this.markCachedRuntimeStateClosingIfHandleMatches({
+      sessionKey: params.sessionKey,
+      handle: params.handle,
+    });
+    try {
+      await params.runtime.close({
+        handle: params.handle,
+        reason: params.reason,
+        ...(params.discardPersistentState !== undefined
+          ? { discardPersistentState: params.discardPersistentState }
+          : {}),
+        ...(params.signal ? { signal: params.signal } : {}),
+      });
+      if (!this.runtimeCache.clearClosing(closing)) {
+        this.clearCachedRuntimeStateIfHandleMatches({
+          sessionKey: params.sessionKey,
+          handle: params.handle,
+        });
+      }
+    } catch (error) {
+      if (this.isStaleSessionActorOperation(params.sessionKey)) {
+        this.runtimeCache.clearClosing(closing);
+      } else {
+        this.runtimeCache.restoreClosing(closing);
+      }
+      throw error;
+    }
+  }
+
   private clearCachedRuntimeStateIfHandleMatches(params: {
     sessionKey: string;
     handle: AcpRuntimeHandle;
   }): boolean {
+    if (this.isStaleSessionActorOperation(params.sessionKey)) {
+      return false;
+    }
     const actorKey = normalizeActorKey(params.sessionKey);
     const cached = this.runtimeCache.peek(actorKey);
     if (!cached || !this.runtimeHandlesMatch(cached.handle, params.handle)) {
