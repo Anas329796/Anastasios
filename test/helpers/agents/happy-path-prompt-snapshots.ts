@@ -234,6 +234,11 @@ function readFixture(pathFromRepoRoot: string): string {
   return fs.readFileSync(path.resolve(pathFromRepoRoot), "utf8");
 }
 
+/** Stable path separators for committed prompt snapshot artifacts (Windows uses `\\`). */
+function posixRelative(from: string, to: string): string {
+  return path.relative(from, to).replaceAll("\\", "/");
+}
+
 function approximateTokens(value: string): number {
   return Math.ceil(value.length / 4);
 }
@@ -785,11 +790,11 @@ function renderReadme(scenarios: PromptScenario[]): string {
     "",
     "Codex model prompt fixtures:",
     "",
-    `- ${path.relative(
+    `- ${posixRelative(
       CODEX_RUNTIME_HAPPY_PATH_PROMPT_SNAPSHOT_DIR,
       CODEX_MODEL_PROMPT_FIXTURE_PATH,
     )}`,
-    `- ${path.relative(
+    `- ${posixRelative(
       CODEX_RUNTIME_HAPPY_PATH_PROMPT_SNAPSHOT_DIR,
       CODEX_MODEL_PROMPT_SOURCE_PATH,
     )}`,
