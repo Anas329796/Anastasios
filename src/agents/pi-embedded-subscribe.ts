@@ -529,7 +529,9 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     if (!params.onToolResult) {
       return;
     }
-    const { text: cleanedText, mediaUrls } = parseReplyDirectives(message);
+    const { text: cleanedText, mediaUrls } = parseReplyDirectives(message, {
+      mediaDirectives: "strip",
+    });
     const filteredMediaUrls = filterToolResultMediaUrls(
       toolName,
       mediaUrls ?? [],

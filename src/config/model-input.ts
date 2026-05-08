@@ -1,5 +1,3 @@
-import { normalizeProviderId } from "../agents/provider-id.js";
-import { normalizeGooglePreviewModelId } from "../plugin-sdk/provider-model-id-normalize.js";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
@@ -14,6 +12,15 @@ type AgentModelListLike = {
 };
 
 const GOOGLE_CONFIG_MODEL_PROVIDERS = new Set(["google", "google-gemini-cli", "google-vertex"]);
+const GOOGLE_CONFIG_MODEL_ALIASES = new Map([
+  ["gemini-3-pro", "gemini-3.1-pro-preview"],
+  ["gemini-3-pro-preview", "gemini-3.1-pro-preview"],
+  ["gemini-3.1-pro", "gemini-3.1-pro-preview"],
+  ["gemini-3-flash", "gemini-3-flash-preview"],
+  ["gemini-3.1-flash", "gemini-3-flash-preview"],
+  ["gemini-3.1-flash-preview", "gemini-3-flash-preview"],
+  ["gemini-3.1-flash-lite", "gemini-3.1-flash-lite-preview"],
+]);
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -33,6 +40,10 @@ function modelKeyForConfig(provider: string, model: string): string {
   )
     ? modelId
     : `${providerId}/${modelId}`;
+}
+
+function normalizeGoogleConfigModelId(model: string): string {
+  return GOOGLE_CONFIG_MODEL_ALIASES.get(normalizeLowercaseStringOrEmpty(model)) ?? model;
 }
 
 export function resolveAgentModelPrimaryValue(model?: AgentModelConfig): string | undefined {
@@ -75,12 +86,12 @@ export function normalizeAgentModelRefForConfig(model: string): string {
     return trimmed;
   }
 
-  const provider = normalizeProviderId(trimmed.slice(0, slash));
+  const provider = normalizeLowercaseStringOrEmpty(trimmed.slice(0, slash));
   if (!GOOGLE_CONFIG_MODEL_PROVIDERS.has(provider)) {
     return trimmed;
   }
 
-  const normalizedModel = normalizeGooglePreviewModelId(trimmed.slice(slash + 1));
+  const normalizedModel = normalizeGoogleConfigModelId(trimmed.slice(slash + 1));
   return modelKeyForConfig(provider, normalizedModel);
 }
 
