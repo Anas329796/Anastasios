@@ -160,7 +160,6 @@ export const PROMPT_INJECTION_HOOK_NAMES = [
   "agent_turn_prepare",
   "before_prompt_build",
   "before_agent_start",
-  "before_assemble",
   "heartbeat_prompt_contribution",
 ] as const satisfies readonly PluginHookName[];
 
@@ -175,6 +174,7 @@ export const CONVERSATION_HOOK_NAMES = [
   "llm_input",
   "llm_output",
   "before_agent_finalize",
+  "before_assemble",
   "after_assemble",
   "agent_end",
 ] as const satisfies readonly PluginHookName[];

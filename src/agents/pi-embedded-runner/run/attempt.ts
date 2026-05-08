@@ -2595,7 +2595,9 @@ export async function runEmbeddedAttempt(
           prePromptMessageCount = activeSession.messages.length;
 
           // Run before_assemble hook to allow plugins to modify the message list.
-          if (hookRunner && hookAgentId) {
+          // Skip in raw model mode — raw probes bypass normal context assembly and should
+          // not be intercepted by conversation-mutating hooks (Codex P2c).
+          if (!isRawModelRun && hookRunner && hookAgentId) {
             const beforeAssembleResult = await hookRunner
               .runBeforeAssemble(
                 {
@@ -2873,7 +2875,8 @@ export async function runEmbeddedAttempt(
             });
             // Run after_assemble hook to allow plugins to observe the
             // final context before it is sent to the LLM.
-            if (hookRunner && hookAgentId) {
+            // Skip in raw model mode — raw probes bypass normal context assembly (Codex P2c).
+            if (!isRawModelRun && hookRunner && hookAgentId) {
               hookRunner
                 .runAfterAssemble(
                   {
