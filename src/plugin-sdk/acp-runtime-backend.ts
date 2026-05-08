@@ -38,17 +38,16 @@ function loadDispatchAcpRuntime() {
 }
 
 function hasExplicitCommandCandidate(ctx: PluginHookReplyDispatchEvent["ctx"]): boolean {
-  const commandBody = normalizeOptionalString(ctx.CommandBody);
-  if (commandBody) {
-    return true;
+  for (const value of [ctx.BodyForCommands, ctx.CommandBody]) {
+    const normalized = normalizeOptionalString(value);
+    if (!normalized) {
+      continue;
+    }
+    if (normalized.startsWith("!") || normalized.startsWith("/")) {
+      return true;
+    }
   }
-
-  const normalized = normalizeOptionalString(ctx.BodyForCommands);
-  if (!normalized) {
-    return false;
-  }
-
-  return normalized.startsWith("!") || normalized.startsWith("/");
+  return false;
 }
 
 export async function tryDispatchAcpReplyHook(
