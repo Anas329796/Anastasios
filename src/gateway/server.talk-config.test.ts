@@ -85,7 +85,7 @@ async function createFreshOperatorDevice(scopes: string[], nonce: string) {
 
 async function connectOperator(ws: GatewaySocket, scopes: string[]) {
   const nonce = await readConnectChallengeNonce(ws);
-  expect(nonce).toEqual(expect.any(String));
+  expect(nonce).toBeTypeOf("string");
   expect(String(nonce).length).toBeGreaterThan(0);
   await connectOk(ws, {
     token: "secret",
@@ -325,7 +325,7 @@ describe("gateway talk.config", () => {
     });
   });
 
-  it("does not throw when SecretRef apiKey flows through a strict provider resolver", async () => {
+  it("redacts SecretRef apiKey after strict provider resolver accepts it", async () => {
     // Regression for #72496: ElevenLabs/OpenAI speech providers call the strict
     // normalizeResolvedSecretInputString helper inside resolveTalkConfig. The
     // discovery path used to hand them the raw source config (with the SecretRef
