@@ -1213,6 +1213,15 @@ Current builds no longer include the TCP bridge. Nodes connect over the Gateway 
       maxBytes: "2mb", // default 2_000_000 bytes
       keepLines: 2000, // default 2000
     },
+    maintenance: {
+      enabled: true,
+      window: {
+        start: "02:00", // daily HH:MM, inclusive
+        end: "03:00", // daily HH:MM, exclusive; 24:00 allowed
+        timezone: "user", // "user", "local", or IANA timezone id
+      },
+      maintenanceAgents: ["maintenance"],
+    },
   },
 }
 ```
@@ -1222,6 +1231,10 @@ Current builds no longer include the TCP bridge. Nodes connect over the Gateway 
 - `runLog.keepLines`: newest lines retained when run-log pruning is triggered. Default: `2000`.
 - `webhookToken`: bearer token used for cron webhook POST delivery (`delivery.mode = "webhook"`), if omitted no auth header is sent.
 - `webhook`: deprecated legacy fallback webhook URL (http/https) used only for stored jobs that still have `notify: true`.
+- `maintenance.enabled`: enables daily maintenance-window role isolation for cron and heartbeat schedulers.
+- `maintenance.window.start` / `maintenance.window.end`: daily maintenance window in `HH:MM` 24-hour time. Start is inclusive; end is exclusive. `24:00` is valid only for `end`.
+- `maintenance.window.timezone`: timezone used to resolve the daily window. Use `"user"`, `"local"`, or an IANA timezone id. Default behavior follows user timezone resolution.
+- `maintenance.maintenanceAgents`: explicit agent ids allowed only during maintenance. Non-maintenance agents are blocked during the maintenance phase; maintenance agents are blocked during normal phase. Blocked cron runs persist deferred counters and replay FIFO when allowed. Heartbeat deferrals are in-memory and replay when allowed.
 
 ### `cron.retry`
 
