@@ -225,6 +225,14 @@ describe("memory cli", () => {
     return captureHelpOutput(memoryCommand);
   }
 
+  function getMemorySubcommandHelpText(name: string) {
+    const program = new Command();
+    registerMemoryCli(program);
+    const memoryCommand = program.commands.find((command) => command.name() === "memory");
+    const subcommand = memoryCommand?.commands.find((command) => command.name() === name);
+    return captureHelpOutput(subcommand);
+  }
+
   async function withQmdIndexDb(content: string, run: (dbPath: string) => Promise<void>) {
     const dbPath = path.join(qmdFixtureRoot, `case-${qmdCaseId++}.sqlite`);
     await fs.writeFile(dbPath, content, "utf-8");
@@ -397,6 +405,18 @@ describe("memory cli", () => {
     expect(helpText).toContain(
       "Preview REM reflections, candidate truths, and deep promotion output.",
     );
+  });
+
+  it("documents archive-first promote subcommand help", () => {
+    const helpText = getMemorySubcommandHelpText("promote");
+
+    expect(helpText).toContain(
+      "Rank short-term recalls and optionally archive top entries outside compact",
+    );
+    expect(helpText).toContain("MEMORY.md");
+    expect(helpText).toContain("--apply");
+    expect(helpText).toContain("Archive selected candidates and keep MEMORY.md");
+    expect(helpText).toContain("compact (default: false)");
   });
 
   it("prints vector error when unavailable", async () => {
