@@ -595,6 +595,9 @@ export type CronJobState = {
   lastDeliveryStatus?: CronDeliveryStatus;
   lastDeliveryError?: string;
   lastFailureAlertAtMs?: number;
+  deferredMaintenanceRuns?: number;
+  firstDeferredMaintenanceAtMs?: number;
+  lastDeferredMaintenanceAtMs?: number;
 };
 
 export type CronJob = CronJobBase<
@@ -612,6 +615,14 @@ export type CronStatus = {
   enabled: boolean;
   jobs: number;
   nextWakeAtMs?: number | null;
+  maintenance?: {
+    enabled: boolean;
+    phase: "normal" | "maintenance";
+    window: { start: string; end: string; timezone: string } | null;
+    maintenanceAgents: string[];
+    deferredJobs: number;
+    deferredRuns: number;
+  };
 };
 
 export type CronRunLogEntry = {
