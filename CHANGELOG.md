@@ -184,6 +184,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Auth: resolve per-entry `apiKey` profile ID references (`"provider:name"`) in `resolveApiKeyForProvider` so a provider entry like `openrouter-minimax.apiKey: "openrouter:key-b"` resolves the actual stored credential instead of using the profile ID string as a literal bearer token. Fixes #67423.
 - Cron/agents: recognize same-target `edit`↔`write` recovery in `isSameToolMutationAction`, so a successful `write` to a path clears an earlier failed `edit` on the same path. Stops cron from reporting fatal failures when an agent self-heals across `edit` and `write`, while preserving same-tool fingerprint matching, blocking different-target writes, and excluding tools (including `apply_patch`) whose real call args do not produce a stable `path` fingerprint segment. Fixes #79024. Thanks @RenzoMXD.
 - Agents/compaction: keep the recent tail after manual `/compact` when Pi returns an empty or no-op compaction summary, preventing blank checkpoints from replacing the live context.
 - fix(discord): gate user allowlist name resolution [AI]. (#79002) Thanks @pgondhi987.
