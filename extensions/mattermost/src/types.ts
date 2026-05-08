@@ -56,7 +56,7 @@ export type MattermostAccountConfig = {
   /** Group message policy (allowlist/open/disabled). */
   groupPolicy?: GroupPolicy;
   /** Per-group configuration (keyed by Mattermost channel ID or "*" for default). */
-  groups?: Record<string, MattermostGroupConfig>;
+  groups?: Record<string, MattermostGroupConfig | undefined>;
   /** Legacy per-channel override map kept for backward compatibility. */
   channelOverrides?: Record<string, Record<string, unknown>>;
   /** Legacy session policy field kept for backward compatibility. */
