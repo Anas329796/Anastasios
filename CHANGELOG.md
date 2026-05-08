@@ -160,6 +160,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- WhatsApp: drain pending outbound deliveries on a 30s periodic timer in addition to the reconnect handler, so messages enqueued while the provider is already connected no longer wait for the next reconnect to send. (#79083)
 - Gateway/watch: leave `OPENCLAW_TRACE_SYNC_IO` disabled by default in `pnpm gateway:watch:raw` so watch mode avoids noisy Node sync-I/O stack traces unless explicitly requested.
 - Providers: preserve non-OK `text/event-stream` response bodies so provider HTTP errors keep their JSON detail instead of collapsing to generic streaming failures. Fixes #78180.
 - Gateway/auth: make explicit `trusted-proxy` mode fail closed instead of accepting local password fallback credentials after trusted-proxy identity checks fail. Fixes #78684.
