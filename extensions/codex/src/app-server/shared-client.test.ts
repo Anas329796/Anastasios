@@ -37,6 +37,7 @@ let listCodexAppServerModels: typeof import("./models.js").listCodexAppServerMod
 let clearSharedCodexAppServerClient: typeof import("./shared-client.js").clearSharedCodexAppServerClient;
 let clearSharedCodexAppServerClientIfCurrent: typeof import("./shared-client.js").clearSharedCodexAppServerClientIfCurrent;
 let createIsolatedCodexAppServerClient: typeof import("./shared-client.js").createIsolatedCodexAppServerClient;
+let getSharedCodexAppServerClient: typeof import("./shared-client.js").getSharedCodexAppServerClient;
 let resetSharedCodexAppServerClientForTests: typeof import("./shared-client.js").resetSharedCodexAppServerClientForTests;
 
 async function sendInitializeResult(
@@ -61,6 +62,7 @@ describe("shared Codex app-server client", () => {
       clearSharedCodexAppServerClient,
       clearSharedCodexAppServerClientIfCurrent,
       createIsolatedCodexAppServerClient,
+      getSharedCodexAppServerClient,
       resetSharedCodexAppServerClientForTests,
     } = await import("./shared-client.js"));
   });
@@ -249,7 +251,41 @@ describe("shared Codex app-server client", () => {
     );
   });
 
-  it("restarts the shared client when the bridged auth token changes", async () => {
+  it("keeps separate warm shared clients for different agent dirs", async () => {
+    const first = createClientHarness();
+    const second = createClientHarness();
+    const startSpy = vi
+      .spyOn(CodexAppServerClient, "start")
+      .mockReturnValueOnce(first.client)
+      .mockReturnValueOnce(second.client);
+
+    const firstClient = getSharedCodexAppServerClient({
+      timeoutMs: 1000,
+      agentDir: "/tmp/openclaw-agent-main",
+    });
+    await sendInitializeResult(first, "openclaw/0.125.0 (macOS; test)");
+    await expect(firstClient).resolves.toBe(first.client);
+
+    const secondClient = getSharedCodexAppServerClient({
+      timeoutMs: 1000,
+      agentDir: "/tmp/openclaw-agent-ops",
+    });
+    await sendInitializeResult(second, "openclaw/0.125.0 (macOS; test)");
+    await expect(secondClient).resolves.toBe(second.client);
+
+    await expect(
+      getSharedCodexAppServerClient({
+        timeoutMs: 1000,
+        agentDir: "/tmp/openclaw-agent-main",
+      }),
+    ).resolves.toBe(first.client);
+
+    expect(startSpy).toHaveBeenCalledTimes(2);
+    expect(first.process.stdin.destroyed).toBe(false);
+    expect(second.process.stdin.destroyed).toBe(false);
+  });
+
+  it("starts a distinct shared client when the bridged auth token changes", async () => {
     const first = createClientHarness();
     const second = createClientHarness();
     const startSpy = vi
@@ -288,7 +324,8 @@ describe("shared Codex app-server client", () => {
     await expect(secondList).resolves.toEqual({ models: [] });
 
     expect(startSpy).toHaveBeenCalledTimes(2);
-    expect(first.process.stdin.destroyed).toBe(true);
+    expect(first.process.stdin.destroyed).toBe(false);
+    expect(second.process.stdin.destroyed).toBe(false);
   });
 
   it("does not let a superseded shared-client failure tear down the newer client", async () => {

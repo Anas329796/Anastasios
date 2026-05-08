@@ -14,9 +14,12 @@ import { resolveManagedCodexAppServerStartOptions } from "./managed-binary.js";
 import { withTimeout } from "./timeout.js";
 
 type SharedCodexAppServerClientState = {
+  entries: Map<string, SharedCodexAppServerClientEntry>;
+};
+
+type SharedCodexAppServerClientEntry = {
   client?: CodexAppServerClient;
   promise?: Promise<CodexAppServerClient>;
-  key?: string;
 };
 
 const SHARED_CODEX_APP_SERVER_CLIENT_STATE = Symbol.for("openclaw.codexAppServerClientState");
@@ -25,8 +28,26 @@ function getSharedCodexAppServerClientState(): SharedCodexAppServerClientState {
   const globalState = globalThis as typeof globalThis & {
     [SHARED_CODEX_APP_SERVER_CLIENT_STATE]?: SharedCodexAppServerClientState;
   };
-  globalState[SHARED_CODEX_APP_SERVER_CLIENT_STATE] ??= {};
+  globalState[SHARED_CODEX_APP_SERVER_CLIENT_STATE] ??= { entries: new Map() };
   return globalState[SHARED_CODEX_APP_SERVER_CLIENT_STATE];
+}
+
+function deleteSharedEntryIfCurrent(
+  state: SharedCodexAppServerClientState,
+  key: string,
+  entry: SharedCodexAppServerClientEntry,
+): boolean {
+  if (state.entries.get(key) !== entry) {
+    return false;
+  }
+  state.entries.delete(key);
+  return true;
+}
+
+function isCodexAppServerClient(
+  client: CodexAppServerClient | undefined,
+): client is CodexAppServerClient {
+  return client !== undefined;
 }
 
 export async function getSharedCodexAppServerClient(options?: {
@@ -56,15 +77,16 @@ export async function getSharedCodexAppServerClient(options?: {
     authProfileId,
     agentDir,
   });
-  if (state.key && state.key !== key) {
-    clearSharedCodexAppServerClient();
+  let entry = state.entries.get(key);
+  if (!entry) {
+    entry = {};
+    state.entries.set(key, entry);
   }
-  state.key = key;
   const sharedPromise =
-    state.promise ??
-    (state.promise = (async () => {
+    entry.promise ??
+    (entry.promise = (async () => {
       const client = CodexAppServerClient.start(startOptions);
-      state.client = client;
+      entry.client = client;
       client.addCloseHandler(clearSharedClientIfCurrent);
       try {
         await client.initialize();
@@ -90,8 +112,8 @@ export async function getSharedCodexAppServerClient(options?: {
       "codex app-server initialize timed out",
     );
   } catch (error) {
-    if (state.promise === sharedPromise && state.key === key) {
-      clearSharedCodexAppServerClient();
+    if (entry.promise === sharedPromise && deleteSharedEntryIfCurrent(state, key, entry)) {
+      entry.client?.close();
     }
     throw error;
   }
@@ -140,18 +162,18 @@ export async function createIsolatedCodexAppServerClient(options?: {
 
 export function resetSharedCodexAppServerClientForTests(): void {
   const state = getSharedCodexAppServerClientState();
-  state.client = undefined;
-  state.promise = undefined;
-  state.key = undefined;
+  state.entries.clear();
 }
 
 export function clearSharedCodexAppServerClient(): void {
   const state = getSharedCodexAppServerClientState();
-  const client = state.client;
-  state.client = undefined;
-  state.promise = undefined;
-  state.key = undefined;
-  client?.close();
+  const clients = [...state.entries.values()]
+    .map((entry) => entry.client)
+    .filter(isCodexAppServerClient);
+  state.entries.clear();
+  for (const client of clients) {
+    client.close();
+  }
 }
 
 export function clearSharedCodexAppServerClientIfCurrent(
@@ -161,14 +183,15 @@ export function clearSharedCodexAppServerClientIfCurrent(
     return false;
   }
   const state = getSharedCodexAppServerClientState();
-  if (state.client !== client) {
-    return false;
+  for (const [key, entry] of state.entries) {
+    if (entry.client !== client) {
+      continue;
+    }
+    state.entries.delete(key);
+    client.close();
+    return true;
   }
-  state.client = undefined;
-  state.promise = undefined;
-  state.key = undefined;
-  client.close();
-  return true;
+  return false;
 }
 
 export async function clearSharedCodexAppServerClientAndWait(options?: {
@@ -176,19 +199,19 @@ export async function clearSharedCodexAppServerClientAndWait(options?: {
   forceKillDelayMs?: number;
 }): Promise<void> {
   const state = getSharedCodexAppServerClientState();
-  const client = state.client;
-  state.client = undefined;
-  state.promise = undefined;
-  state.key = undefined;
-  await client?.closeAndWait(options);
+  const clients = [...state.entries.values()]
+    .map((entry) => entry.client)
+    .filter(isCodexAppServerClient);
+  state.entries.clear();
+  await Promise.all(clients.map((client) => client.closeAndWait(options)));
 }
 
 function clearSharedClientIfCurrent(client: CodexAppServerClient): void {
   const state = getSharedCodexAppServerClientState();
-  if (state.client !== client) {
-    return;
+  for (const [key, entry] of state.entries) {
+    if (entry.client === client) {
+      state.entries.delete(key);
+      return;
+    }
   }
-  state.client = undefined;
-  state.promise = undefined;
-  state.key = undefined;
 }
