@@ -21,6 +21,7 @@ import { statRegularFileSync } from "openclaw/plugin-sdk/security-runtime";
 import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtime";
 import { resolveFeishuAccount } from "./accounts.js";
 import { createFeishuCardInteractionEnvelope } from "./card-interaction.js";
+import { isCardTableLimitError } from "./card-error.js";
 import { createFeishuClient } from "./client.js";
 import { cleanupAmbientCommentTypingReaction } from "./comment-reaction.js";
 import { parseFeishuCommentTarget } from "./comment-target.js";
@@ -456,6 +457,11 @@ async function sendOutboundText(params: {
   to: string;
   text: string;
   replyToMessageId?: string;
+  threadId?: string | number | null;
+  /** Explicit reply-in-thread flag; overrides auto-detection */
+  replyInThread?: boolean;
+  /** Skip card rendering and send plain text directly */
+  forcePlainText?: boolean;
   accountId?: string;
 }) {
   const { cfg, to, text, accountId, replyToMessageId } = params;
@@ -473,11 +479,33 @@ async function sendOutboundText(params: {
   const account = resolveFeishuAccount({ cfg, accountId });
   const renderMode = account.config?.renderMode ?? "auto";
 
-  if (renderMode === "card" || (renderMode === "auto" && shouldUseCard(text))) {
-    return sendMarkdownCardFeishu({ cfg, to, text, accountId, replyToMessageId });
+  const shouldRenderCard =
+    !params.forcePlainText &&
+    (renderMode === "card" || (renderMode === "auto" && shouldUseCard(text)));
+
+  if (shouldRenderCard) {
+    try {
+      const cardResult = await sendMarkdownCardFeishu({ cfg, to, text, accountId, replyToMessageId });
+      return cardResult;
+    } catch (err) {
+      if (!isCardTableLimitError(err)) {
+        throw err;
+      }
+      console.warn("[feishu] card table limit hit (230099/11310), falling back to plain text");
+    }
   }
 
-  return sendMessageFeishu({ cfg, to, text, accountId, replyToMessageId });
+  // Use explicit flag when provided; otherwise detect from original params
+  const shouldReplyInThread = params.replyInThread ?? (params.threadId != null && !replyToMessageId);
+  const resolvedReplyTo = resolveReplyToMessageId({ replyToId: replyToMessageId, threadId: params.threadId });
+  return sendMessageFeishu({
+    cfg,
+    to,
+    text,
+    accountId,
+    replyToMessageId: resolvedReplyTo,
+    replyInThread: shouldReplyInThread,
+  });
 }
 
 export const feishuOutbound: ChannelOutboundAdapter = {
@@ -624,15 +652,25 @@ export const feishuOutbound: ChannelOutboundAdapter = {
               template: "blue" as const,
             }
           : undefined;
-        return await sendStructuredCardFeishu({
-          cfg,
-          to,
-          text,
-          replyToMessageId,
-          replyInThread: threadId != null && !replyToId,
-          accountId: accountId ?? undefined,
-          header: header?.title ? header : undefined,
-        });
+        try {
+          const structuredResult = await sendStructuredCardFeishu({
+            cfg,
+            to,
+            text,
+            replyToMessageId,
+            replyInThread: threadId != null && !replyToId,
+            accountId: accountId ?? undefined,
+            header: header?.title ? header : undefined,
+          });
+          return structuredResult;
+        } catch (err) {
+          if (!isCardTableLimitError(err)) {
+            throw err;
+          }
+          console.warn(
+            "[feishu] structured card table limit hit (230099/11310), falling back to plain text",
+          );
+        }
       }
       return await sendOutboundText({
         cfg,
@@ -640,6 +678,9 @@ export const feishuOutbound: ChannelOutboundAdapter = {
         text,
         accountId: accountId ?? undefined,
         replyToMessageId,
+        threadId,
+        replyInThread: threadId != null && !replyToId,
+        forcePlainText: true,
       });
     },
     sendMedia: async ({
@@ -655,6 +696,7 @@ export const feishuOutbound: ChannelOutboundAdapter = {
     }) => {
       const replyToMessageId = resolveReplyToMessageId({ replyToId, threadId });
       const commentTarget = parseFeishuCommentTarget(to);
+      const replyInThread = threadId != null && !replyToId;
       if (commentTarget) {
         const commentText = [text?.trim(), mediaUrl?.trim()].filter(Boolean).join("\n\n");
         return await sendOutboundText({
@@ -663,6 +705,8 @@ export const feishuOutbound: ChannelOutboundAdapter = {
           text: commentText || mediaUrl || text || "",
           accountId: accountId ?? undefined,
           replyToMessageId,
+          threadId,
+          replyInThread,
         });
       }
 
@@ -681,6 +725,8 @@ export const feishuOutbound: ChannelOutboundAdapter = {
           text,
           accountId: accountId ?? undefined,
           replyToMessageId,
+          threadId,
+          replyInThread,
         });
       }
 
@@ -695,6 +741,7 @@ export const feishuOutbound: ChannelOutboundAdapter = {
             mediaLocalRoots,
             replyToMessageId,
             ...(audioAsVoice === true ? { audioAsVoice: true } : {}),
+            replyInThread,
           });
           if (result.voiceIntentDegradedToFile && text?.trim()) {
             await sendOutboundText({
@@ -717,6 +764,8 @@ export const feishuOutbound: ChannelOutboundAdapter = {
             text: fallbackText,
             accountId: accountId ?? undefined,
             replyToMessageId,
+            threadId,
+            replyInThread,
           });
         }
       }
@@ -728,6 +777,8 @@ export const feishuOutbound: ChannelOutboundAdapter = {
         text: text ?? "",
         accountId: accountId ?? undefined,
         replyToMessageId,
+        threadId,
+        replyInThread,
       });
     },
   }),
