@@ -5,6 +5,10 @@ import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { moveMemoryIndexFiles, runMemoryAtomicReindex } from "./manager-atomic-reindex.js";
 
+async function expectPathMissing(targetPath: string): Promise<void> {
+  await expect(fs.access(targetPath)).rejects.toMatchObject({ code: "ENOENT" });
+}
+
 describe("memory manager atomic reindex", () => {
   let fixtureRoot = "";
   let caseId = 0;
@@ -41,7 +45,7 @@ describe("memory manager atomic reindex", () => {
     ).rejects.toThrow("embedding failure");
 
     expect(readChunkMarker(indexPath)).toBe("before");
-    await expect(fs.access(tempIndexPath)).rejects.toThrow();
+    await expectPathMissing(tempIndexPath);
   });
 
   it("replaces the old index after a successful temp reindex", async () => {
@@ -55,7 +59,7 @@ describe("memory manager atomic reindex", () => {
     });
 
     expect(readChunkMarker(indexPath)).toBe("after");
-    await expect(fs.access(tempIndexPath)).rejects.toThrow();
+    await expectPathMissing(tempIndexPath);
   });
 
   it("retries transient rename failures during index swaps", async () => {

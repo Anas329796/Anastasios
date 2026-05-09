@@ -1064,6 +1064,8 @@ export const agentHandlers: GatewayRequestHandlers = {
         groupChannel: resolvedGroupChannel,
         space: resolvedGroupSpace,
         ...(pluginOwnerId ? { pluginOwnerId } : {}),
+        sessionFile:
+          entry?.sessionId && entry.sessionId !== sessionId ? undefined : entry?.sessionFile,
         cliSessionIds: entry?.cliSessionIds,
         cliSessionBindings: entry?.cliSessionBindings,
         claudeCliSessionId: entry?.claudeCliSessionId,
@@ -1282,6 +1284,13 @@ export const agentHandlers: GatewayRequestHandlers = {
         typeof client?.connect?.device?.id === "string" ? client.connect.device.id : undefined,
       kind: "agent",
     });
+    if (!activeRunAbort.registered && context.chatAbortControllers.has(runId)) {
+      respond(true, { runId, status: "in_flight" as const }, undefined, {
+        cached: true,
+        runId,
+      });
+      return;
+    }
 
     const accepted = {
       runId,
