@@ -55,6 +55,7 @@ import {
   type AcpManagerObservabilitySnapshot,
   type AcpRunTurnInput,
   type AcpSessionManagerDeps,
+  type AcpTurnEndHookContext,
   type AcpSessionResolution,
   type AcpSessionRuntimeOptions,
   type AcpSessionStatus,
@@ -792,10 +793,11 @@ export class AcpSessionManager {
                   `All ACP backends failed (${backendAttempts.length}): ${failedBackends}`,
                 )
               : error;
-          this.recordTurnCompletion({
+          await this.recordTurnCompletion({
             sessionKey,
             startedAt: turnStartedAt,
             errorCode: errorToRecord.code,
+            beforeHook: input.onBeforeTurnEndHook,
           });
           if (taskContext) {
             this.markBackgroundTaskTerminal(taskContext.runId, {
@@ -959,9 +961,10 @@ export class AcpSessionManager {
                   "ACP turn ended without a terminal done event.",
                 );
               }
-              this.recordTurnCompletion({
+              await this.recordTurnCompletion({
                 sessionKey,
                 startedAt: turnStartedAt,
+                beforeHook: input.onBeforeTurnEndHook,
               });
               if (taskContext) {
                 const terminalResult = resolveBackgroundTaskTerminalResult(taskProgressSummary);
@@ -1011,7 +1014,10 @@ export class AcpSessionManager {
                 sawOutput: sawTurnOutput,
               };
               backendAttempts.push(backendAttempt);
-              if (!isFailoverWorthyBackendError(backendAttempt) || !shouldAttemptFailover(backendIdx)) {
+              if (
+                !isFailoverWorthyBackendError(backendAttempt) ||
+                !shouldAttemptFailover(backendIdx)
+              ) {
                 await recordBackendFailure(acpError);
               }
               break;
@@ -1022,13 +1028,7 @@ export class AcpSessionManager {
               if (activeTurn && this.activeTurnBySession.get(actorKey) === activeTurn) {
                 this.activeTurnBySession.delete(actorKey);
               }
-              if (
-                !retryFreshHandle &&
-                !skipPostTurnCleanup &&
-                runtime &&
-                handle &&
-                meta
-              ) {
+              if (!retryFreshHandle && !skipPostTurnCleanup && runtime && handle && meta) {
                 ({ handle, meta } = await this.reconcileRuntimeSessionIdentifiers({
                   cfg: input.cfg,
                   sessionKey,
@@ -1766,10 +1766,11 @@ export class AcpSessionManager {
     }
   }
 
-  private recordTurnCompletion(params: {
+  private async recordTurnCompletion(params: {
     sessionKey: string;
     startedAt: number;
     errorCode?: AcpRuntimeError["code"];
+    beforeHook?: (context: AcpTurnEndHookContext) => Promise<void> | void;
   }) {
     const durationMs = Math.max(0, Date.now() - params.startedAt);
     this.turnLatencyStats.totalMs += durationMs;
@@ -1780,15 +1781,34 @@ export class AcpSessionManager {
     } else {
       this.turnLatencyStats.completed += 1;
     }
+    const context = {
+      sessionKey: params.sessionKey,
+      success: !params.errorCode,
+      durationMs,
+      ...(params.errorCode ? { errorCode: params.errorCode } : {}),
+    } satisfies AcpTurnEndHookContext;
+    try {
+      await params.beforeHook?.(context);
+    } catch (error) {
+      logVerbose(
+        `acp-manager: before agent:turn:end hook callback failed for ${params.sessionKey}: ${formatErrorMessage(
+          error,
+        )}`,
+      );
+    }
+    this.emitTurnEndHook(context);
+  }
+
+  private emitTurnEndHook(context: AcpTurnEndHookContext): void {
     fireAndForgetBoundedHook(
       () =>
         triggerInternalHook(
-          createInternalHookEvent("agent", "turn:end", params.sessionKey, {
-            sessionKey: params.sessionKey,
-            success: !params.errorCode,
-            durationMs,
-            ...(params.errorCode ? { errorCode: params.errorCode } : {}),
-          } satisfies AgentTurnEndHookContext),
+          createInternalHookEvent(
+            "agent",
+            "turn:end",
+            context.sessionKey,
+            context satisfies AgentTurnEndHookContext,
+          ),
         ),
       "agent:turn:end internal hook failed",
     );

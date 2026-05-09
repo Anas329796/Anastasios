@@ -119,7 +119,7 @@ Each event includes: `type`, `action`, `sessionKey`, `timestamp`, `messages` (pu
 
 **Message events** (`message:sent`): `context.to`, `context.content`, `context.success`, `context.channelId`.
 
-**Agent events** (`agent:turn:end`): `context.sessionKey`, `context.success`, `context.durationMs`, and `context.errorCode` when the turn failed.
+**Agent events** (`agent:turn:end`): `context.sessionKey`, `context.success`, `context.durationMs`, and `context.errorCode` when the turn failed. For ACP turns, this fires after the runtime emits the terminal turn event and the manager has awaited event delivery callbacks, but before the ACP session state is switched back to `idle`/`error` and before post-turn runtime cleanup. When OpenClaw dispatch mirrors an ACP turn into the session transcript, that transcript write is flushed before the hook fires, so memory hooks can use `context.sessionKey` to load the completed turn from persisted state. The event does not embed transcript text.
 
 **Message events** (`message:transcribed`): `context.transcript`, `context.from`, `context.channelId`, `context.mediaPath`.
 
