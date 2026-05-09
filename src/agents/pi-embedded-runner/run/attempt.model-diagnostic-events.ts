@@ -109,7 +109,9 @@ function observeResponseChunk(
  * Handles both OpenAI chat completion delta format and responses API format.
  */
 function extractTextFromChunk(chunk: unknown): string | undefined {
-  if (typeof chunk !== "object" || chunk === null) return undefined;
+  if (typeof chunk !== "object" || chunk === null) {
+    return undefined;
+  }
   const obj = chunk as Record<string, unknown>;
 
   // OpenAI chat completion stream format: { choices: [{ delta: { content: "..." } }] }
@@ -118,7 +120,9 @@ function extractTextFromChunk(chunk: unknown): string | undefined {
     const delta = (choices[0] as Record<string, unknown>)?.delta;
     if (typeof delta === "object" && delta !== null) {
       const content = (delta as Record<string, unknown>).content;
-      if (typeof content === "string" && content.length > 0) return content;
+      if (typeof content === "string" && content.length > 0) {
+        return content;
+      }
     }
   }
 
@@ -141,7 +145,9 @@ function extractTextFromChunk(chunk: unknown): string | undefined {
  * Returns an array of message content strings for content capture.
  */
 function extractInputMessages(model: unknown): string[] {
-  if (typeof model !== "object" || model === null) return [];
+  if (typeof model !== "object" || model === null) {
+    return [];
+  }
   const obj = model as Record<string, unknown>;
   const messages: string[] = [];
 
@@ -200,7 +206,9 @@ function extractInputMessages(model: unknown): string[] {
  * and responses API format ({ output: [{ content: [{ text }] }] }).
  */
 function extractOutputFromResult(result: unknown): string[] {
-  if (typeof result !== "object" || result === null) return [];
+  if (typeof result !== "object" || result === null) {
+    return [];
+  }
   const obj = result as Record<string, unknown>;
   const messages: string[] = [];
 
