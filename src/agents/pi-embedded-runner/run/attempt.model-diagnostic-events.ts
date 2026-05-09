@@ -65,6 +65,7 @@ type ModelCallObservationState = {
   requestPayloadBytes?: number;
   responseStreamBytes: number;
   timeToFirstByteMs?: number;
+  outputTextChunks: string[];
 };
 
 const MODEL_CALL_STREAM_RETURN_TIMEOUT_MS = 1000;
@@ -96,6 +97,101 @@ function observeResponseChunk(
   if (bytes !== undefined) {
     state.responseStreamBytes += bytes;
   }
+  // Collect output text chunks for content capture
+  const text = extractTextFromChunk(chunk);
+  if (text) {
+    state.outputTextChunks.push(text);
+  }
+}
+
+/**
+ * Extract text content from a streamed response chunk.
+ * Handles both OpenAI chat completion delta format and responses API format.
+ */
+function extractTextFromChunk(chunk: unknown): string | undefined {
+  if (typeof chunk !== "object" || chunk === null) return undefined;
+  const obj = chunk as Record<string, unknown>;
+
+  // OpenAI chat completion stream format: { choices: [{ delta: { content: "..." } }] }
+  const choices = obj.choices;
+  if (Array.isArray(choices) && choices.length > 0) {
+    const delta = (choices[0] as Record<string, unknown>)?.delta;
+    if (typeof delta === "object" && delta !== null) {
+      const content = (delta as Record<string, unknown>).content;
+      if (typeof content === "string" && content.length > 0) return content;
+    }
+  }
+
+  // OpenAI responses API stream format: { type: "response.output_text.delta", delta: "..." }
+  if (
+    obj.type === "response.output_text.delta" &&
+    typeof obj.delta === "string" &&
+    obj.delta.length > 0
+  ) {
+    return obj.delta;
+  }
+
+  return undefined;
+}
+
+/**
+ * Extract input message texts from a model request payload.
+ * Handles OpenAI chat completions format ({ messages: [...] })
+ * and responses API format ({ input: [...] }).
+ * Returns an array of message content strings for content capture.
+ */
+function extractInputMessages(model: unknown): string[] {
+  if (typeof model !== "object" || model === null) return [];
+  const obj = model as Record<string, unknown>;
+  const messages: string[] = [];
+
+  // OpenAI chat completions: { messages: [{ role, content }] }
+  const chatMessages = obj.messages;
+  if (Array.isArray(chatMessages)) {
+    for (const msg of chatMessages) {
+      if (typeof msg === "object" && msg !== null) {
+        const content = (msg as Record<string, unknown>).content;
+        if (typeof content === "string" && content.length > 0) {
+          messages.push(content);
+        } else if (Array.isArray(content)) {
+          // Multimodal content: extract text parts
+          for (const part of content) {
+            if (
+              typeof part === "object" &&
+              part !== null &&
+              (part as Record<string, unknown>).type === "text"
+            ) {
+              const text = (part as Record<string, unknown>).text;
+              if (typeof text === "string" && text.length > 0) {
+                messages.push(text);
+              }
+            }
+          }
+        }
+      }
+    }
+    return messages;
+  }
+
+  // OpenAI responses API: { input: [{ role, content }] } or { input: "string" }
+  const input = obj.input;
+  if (typeof input === "string" && input.length > 0) {
+    messages.push(input);
+    return messages;
+  }
+  if (Array.isArray(input)) {
+    for (const item of input) {
+      if (typeof item === "object" && item !== null) {
+        const content = (item as Record<string, unknown>).content;
+        if (typeof content === "string" && content.length > 0) {
+          messages.push(content);
+        }
+      }
+    }
+    return messages;
+  }
+
+  return messages;
 }
 
 function modelCallSizeTimingFields(state: ModelCallObservationState): ModelCallSizeTimingFields {
@@ -255,6 +351,9 @@ function emitModelCallCompleted(
     ...eventBase,
     durationMs,
     ...sizeTimingFields,
+    ...(state.outputTextChunks.length > 0
+      ? { outputMessages: [state.outputTextChunks.join("")] }
+      : {}),
   });
   dispatchModelCallEndedHook(eventBase, {
     durationMs,
@@ -453,26 +552,33 @@ export function wrapStreamFnWithDiagnosticModelCallEvents(
     const callId = ctx.nextCallId();
     const trace = freezeDiagnosticTraceContext(createChildDiagnosticTraceContext(ctx.trace));
     const eventBase = baseModelCallEvent(ctx, callId, trace);
-    emitModelCallStarted(eventBase);
+    // Extract input messages from the model request payload for content capture
+    const inputMessages = extractInputMessages(model);
+    const eventBaseWithContent: ModelCallEventBase = {
+      ...eventBase,
+      ...(inputMessages.length > 0 ? { inputMessages } : {}),
+    };
+
+    emitModelCallStarted(eventBaseWithContent);
     ctx.onStarted?.();
     const startedAt = Date.now();
-    const state: ModelCallObservationState = { responseStreamBytes: 0 };
+    const state: ModelCallObservationState = { responseStreamBytes: 0, outputTextChunks: [] };
     const propagatedOptions = withDiagnosticTraceparentHeader(options, trace, state);
 
     try {
       const result = streamFn(model, streamContext, propagatedOptions);
       if (isPromiseLike(result)) {
         return result.then(
-          (resolved) => observeModelCallResult(resolved, eventBase, startedAt, state),
+          (resolved) => observeModelCallResult(resolved, eventBaseWithContent, startedAt, state),
           (err) => {
-            emitModelCallError(eventBase, startedAt, state, modelCallErrorFields(err));
+            emitModelCallError(eventBaseWithContent, startedAt, state, modelCallErrorFields(err));
             throw err;
           },
         );
       }
-      return observeModelCallResult(result, eventBase, startedAt, state);
+      return observeModelCallResult(result, eventBaseWithContent, startedAt, state);
     } catch (err) {
-      emitModelCallError(eventBase, startedAt, state, modelCallErrorFields(err));
+      emitModelCallError(eventBaseWithContent, startedAt, state, modelCallErrorFields(err));
       throw err;
     }
   }) as StreamFn;
