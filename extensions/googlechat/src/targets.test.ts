@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
     response: await fetch(params.url, params.init),
     release: async () => {},
   })),
+  directGaxiosCtor: vi.fn(),
   googleAuthCtor: vi.fn(),
   gaxiosCtor: vi.fn(),
   getAccessToken: vi.fn().mockResolvedValue({ token: "access-token" }),
@@ -34,9 +35,11 @@ vi.mock("openclaw/plugin-sdk/ssrf-runtime", () => {
   };
 });
 
-vi.mock("gaxios", () => {
-  throw new Error("Google Chat auth must use google-auth-library's bundled gaxios.");
-});
+vi.mock("gaxios", () => ({
+  Gaxios: function MockDirectGaxios(defaults?: unknown) {
+    mocks.directGaxiosCtor(defaults);
+  },
+}));
 
 vi.mock("google-auth-library", () => ({
   gaxios: {
@@ -311,6 +314,7 @@ function mockTicket(payload: Record<string, unknown>) {
 describe("verifyGoogleChatRequest", () => {
   afterEach(() => {
     authTesting.resetGoogleChatAuthForTests();
+    mocks.directGaxiosCtor.mockClear();
     mocks.getAccessToken.mockClear();
     mocks.gaxiosCtor.mockClear();
     mocks.googleAuthCtor.mockClear();
@@ -339,6 +343,7 @@ describe("verifyGoogleChatRequest", () => {
     };
 
     expect(mocks.gaxiosCtor).toHaveBeenCalledOnce();
+    expect(mocks.directGaxiosCtor).not.toHaveBeenCalled();
     expect(googleAuthOptions).toMatchObject({
       credentials: {
         client_email: "bot@example.iam.gserviceaccount.com",
