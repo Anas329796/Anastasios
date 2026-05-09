@@ -1,5 +1,6 @@
 import type { FailoverReason } from "../agents/pi-embedded-helpers/types.js";
 import type { ChannelId } from "../channels/plugins/types.public.js";
+import type { ConfiguredModelProviderRequest } from "../config/types.provider-request.js";
 import type { HookExternalContentSource } from "../security/external-content.js";
 import type { CronJobBase } from "./types-shared.js";
 
@@ -193,6 +194,8 @@ type CronAgentTurnPayloadFields = {
   lightContext?: boolean;
   /** Optional tool allow-list; when set, only these tools are sent to the model. */
   toolsAllow?: string[];
+  /** Per-job provider request overrides; merged over agent/global config. */
+  providers?: Record<string, { request?: ConfiguredModelProviderRequest }>;
 };
 
 type CronAgentTurnPayload = {
@@ -201,8 +204,9 @@ type CronAgentTurnPayload = {
 
 type CronAgentTurnPayloadPatch = {
   kind: "agentTurn";
-} & Partial<Omit<CronAgentTurnPayloadFields, "toolsAllow">> & {
+} & Partial<Omit<CronAgentTurnPayloadFields, "toolsAllow" | "providers">> & {
     toolsAllow?: string[] | null;
+    providers?: Record<string, { request?: ConfiguredModelProviderRequest }> | null;
   };
 export type CronJobState = {
   nextRunAtMs?: number;
