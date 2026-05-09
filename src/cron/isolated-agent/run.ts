@@ -503,10 +503,10 @@ async function prepareCronRunContext(params: {
   // precedence over agent-level and global provider request config.
   if (input.job.payload.kind === "agentTurn" && input.job.payload.providers) {
     const existingList = cfgWithAgentDefaults.agents?.list;
-    let agentList = existingList ? existingList.map((a) => ({ ...a })) : [];
-    const idx = agentList.findIndex((a) => a.id === agentId);
+    const idx = existingList?.findIndex((a) => a.id === agentId) ?? -1;
+    let agentList: typeof existingList;
     if (idx >= 0) {
-      const existing = agentList[idx].providers ?? {};
+      const existing = existingList[idx].providers ?? {};
       const merged: Record<string, { request?: Record<string, unknown> }> = {
         ...existing,
         ...input.job.payload.providers,
@@ -520,14 +520,14 @@ async function prepareCronRunContext(params: {
           };
         }
       }
-      agentList[idx] = { ...agentList[idx], providers: merged };
+      agentList = existingList.map((a, i) => (i === idx ? { ...a, providers: merged } : a));
     } else {
       // Default-agent cron jobs without an agents.list entry: create one so
       // resolveAgentProviderRequest can find the job-level overrides.
-      agentList.push({
-        id: agentId,
-        providers: input.job.payload.providers,
-      });
+      agentList = [
+        ...(existingList ?? []),
+        { id: agentId, providers: input.job.payload.providers },
+      ];
     }
     cfgWithAgentDefaults = {
       ...cfgWithAgentDefaults,
