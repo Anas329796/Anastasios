@@ -194,6 +194,57 @@ function extractInputMessages(model: unknown): string[] {
   return messages;
 }
 
+/**
+ * Extract output text from a non-streaming model call result.
+ * Handles OpenAI chat completions format ({ choices: [{ message: { content } }] })
+ * and responses API format ({ output: [{ content: [{ text }] }] }).
+ */
+function extractOutputFromResult(result: unknown): string[] {
+  if (typeof result !== "object" || result === null) return [];
+  const obj = result as Record<string, unknown>;
+  const messages: string[] = [];
+
+  // OpenAI chat completions: { choices: [{ message: { content: "..." } }] }
+  const choices = obj.choices;
+  if (Array.isArray(choices) && choices.length > 0) {
+    const message = (choices[0] as Record<string, unknown>)?.message;
+    if (typeof message === "object" && message !== null) {
+      const content = (message as Record<string, unknown>).content;
+      if (typeof content === "string" && content.length > 0) {
+        messages.push(content);
+      }
+    }
+    return messages;
+  }
+
+  // OpenAI responses API: { output: [{ type: "message", content: [{ type: "output_text", text: "..." }] }] }
+  const output = obj.output;
+  if (Array.isArray(output)) {
+    for (const item of output) {
+      if (typeof item === "object" && item !== null) {
+        const content = (item as Record<string, unknown>).content;
+        if (Array.isArray(content)) {
+          for (const part of content) {
+            if (
+              typeof part === "object" &&
+              part !== null &&
+              (part as Record<string, unknown>).type === "output_text"
+            ) {
+              const text = (part as Record<string, unknown>).text;
+              if (typeof text === "string" && text.length > 0) {
+                messages.push(text);
+              }
+            }
+          }
+        }
+      }
+    }
+    return messages;
+  }
+
+  return messages;
+}
+
 function modelCallSizeTimingFields(state: ModelCallObservationState): ModelCallSizeTimingFields {
   return {
     ...(state.requestPayloadBytes !== undefined
@@ -539,6 +590,11 @@ function observeModelCallResult(
       startedAt,
       state,
     );
+  }
+  // Non-streaming response: extract output text from the result object
+  const outputMessages = extractOutputFromResult(result);
+  if (outputMessages.length > 0) {
+    state.outputTextChunks = outputMessages;
   }
   emitModelCallCompleted(eventBase, startedAt, state);
   return result;
