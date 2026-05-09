@@ -143,6 +143,9 @@ const HOST_READ_TEXT_PLAIN_ALIASES = new Set([
   "application/json",
   "application/yaml",
 ]);
+const HOST_READ_TEXT_PLAIN_EXTENSION_BY_MIME: Record<string, readonly string[]> = {
+  "text/plain": [".txt"],
+};
 const MB = 1024 * 1024;
 
 function getTextStats(text: string): { printableRatio: number } {
@@ -226,6 +229,18 @@ function isValidatedHostReadText(buffer?: Buffer): boolean {
   return printableRatio > 0.95;
 }
 
+function isAllowedHostReadTextAlias(mime: string | undefined, filePath?: string): boolean {
+  if (!mime || !HOST_READ_TEXT_PLAIN_ALIASES.has(mime)) {
+    return false;
+  }
+  const allowedExtensions = HOST_READ_TEXT_PLAIN_EXTENSION_BY_MIME[mime];
+  if (!allowedExtensions) {
+    return true;
+  }
+  const ext = getFileExtension(filePath);
+  return !!ext && allowedExtensions.includes(ext);
+}
+
 function formatMb(bytes: number, digits = 2): string {
   return (bytes / MB).toFixed(digits);
 }
@@ -278,7 +293,7 @@ function assertHostReadMediaAllowed(params: {
   // text validator path. Some opaque blobs can still produce bogus binary MIME
   // hits (for example BOM-prefixed 0xFF data sniffing as audio/mpeg), and
   // host-read should reject those instead of returning early on the sniff.
-  if (declaredMime && HOST_READ_TEXT_PLAIN_ALIASES.has(declaredMime)) {
+  if (declaredMime && isAllowedHostReadTextAlias(declaredMime, params.filePath)) {
     if (!params.sniffedContentType && params.buffer && isValidatedHostReadText(params.buffer)) {
       return;
     }
@@ -313,7 +328,7 @@ function assertHostReadMediaAllowed(params: {
   if (
     !sniffedMime &&
     normalizedMime &&
-    HOST_READ_TEXT_PLAIN_ALIASES.has(normalizedMime) &&
+    isAllowedHostReadTextAlias(normalizedMime, params.filePath) &&
     params.buffer &&
     isValidatedHostReadText(params.buffer)
   ) {
