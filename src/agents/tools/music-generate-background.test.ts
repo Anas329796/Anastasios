@@ -93,6 +93,9 @@ describe("music generate background helpers", () => {
 
     expect(taskDeliveryRuntimeMocks.sendMessage).not.toHaveBeenCalled();
     expect(announceDeliveryMocks.deliverSubagentAnnouncement).toHaveBeenCalled();
+    expect(announceDeliveryMocks.deliverSubagentAnnouncement).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceRunId: "tool:music_generate:abc" }),
+    );
   });
 
   it("warns channel completion agents that normal final replies are private", async () => {
