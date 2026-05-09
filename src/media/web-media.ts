@@ -129,10 +129,20 @@ const HOST_READ_ALLOWED_DOCUMENT_MIMES = new Set([
   "application/zip",
   "text/csv",
   "text/markdown",
+  "text/plain",
+  "application/json",
+  "application/yaml",
 ]);
-// file-type returns undefined (no magic bytes) for plain-text formats like CSV and
-// Markdown, so host-read needs an explicit "this really decodes as text" fallback.
-const HOST_READ_TEXT_PLAIN_ALIASES = new Set(["text/csv", "text/markdown"]);
+// file-type returns undefined (no magic bytes) for plain-text formats like CSV,
+// Markdown, TXT, JSON, and YAML, so host-read needs an explicit "this really
+// decodes as text" fallback.
+const HOST_READ_TEXT_PLAIN_ALIASES = new Set([
+  "text/csv",
+  "text/markdown",
+  "text/plain",
+  "application/json",
+  "application/yaml",
+]);
 const MB = 1024 * 1024;
 
 function getTextStats(text: string): { printableRatio: number } {
@@ -274,7 +284,7 @@ function assertHostReadMediaAllowed(params: {
     }
     throw new LocalMediaAccessError(
       "path-not-allowed",
-      "hostReadCapability permits only validated plain-text CSV/Markdown documents for local reads",
+      "hostReadCapability permits only validated plain-text documents for local reads",
     );
   }
   const sniffedKind = kindFromMime(params.sniffedContentType);
@@ -295,10 +305,10 @@ function assertHostReadMediaAllowed(params: {
   ) {
     return;
   }
-  // CSV / Markdown exception: file-type v22 returns undefined (not "text/plain") for
-  // plain-text buffers that have no binary magic bytes. Allow these formats when:
+  // Plain-text document exception: file-type v22 returns undefined (not "text/plain")
+  // for text buffers that have no binary magic bytes. Allow these formats when:
   // - sniffedMime is undefined (no binary signature detected by file-type)
-  // - The extension-derived MIME is text/csv or text/markdown (operator intent)
+  // - The extension-derived MIME is an allowed text/document MIME (operator intent)
   // - The buffer decodes as actual text instead of opaque binary bytes
   if (
     !sniffedMime &&
@@ -321,7 +331,7 @@ function assertHostReadMediaAllowed(params: {
   }
   throw new LocalMediaAccessError(
     "path-not-allowed",
-    `Host-local media sends only allow buffer-verified images, audio, video, PDF, Office documents, archives, CSV, and Markdown (got ${sniffedMime ?? normalizedMime ?? "unknown"}).`,
+    `Host-local media sends only allow buffer-verified images, audio, video, PDF, Office documents, archives, and validated plain-text documents (got ${sniffedMime ?? normalizedMime ?? "unknown"}).`,
   );
 }
 
