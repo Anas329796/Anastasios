@@ -130,8 +130,9 @@ openclaw memory rem-harness [--agent <id>] [--include-promoted] [--json]
 ## Dreaming
 
 Dreaming is the background memory consolidation system with three cooperative
-phases: **light** (sort/stage short-term material), **deep** (promote durable
-facts into `MEMORY.md`), and **REM** (reflect and surface themes).
+phases: **light** (sort/stage short-term material), **deep** (archive durable
+short-term excerpts and update the `MEMORY.md` pointer), and **REM** (reflect
+and surface themes).
 
 - Enable with `plugins.entries.memory-core.config.dreaming.enabled: true`.
 - Toggle from chat with `/dreaming on|off` (or inspect with `/dreaming status`).
