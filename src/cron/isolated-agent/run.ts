@@ -513,10 +513,21 @@ async function prepareCronRunContext(params: {
       };
       for (const [pid, jp] of Object.entries(input.job.payload.providers)) {
         if (existing[pid]?.request) {
+          const existingReq = existing[pid].request as Record<string, unknown> | undefined;
+          const jobReq = jp.request as Record<string, unknown> | undefined;
+          // Deep-merge headers so non-conflicting agent headers are preserved.
+          const existingHeaders = existingReq?.headers as Record<string, unknown> | undefined;
+          const jobHeaders = jobReq?.headers as Record<string, unknown> | undefined;
+          const mergedHeaders =
+            existingHeaders || jobHeaders ? { ...existingHeaders, ...jobHeaders } : undefined;
           merged[pid] = {
             ...existing[pid],
             ...jp,
-            request: { ...existing[pid].request, ...jp.request },
+            request: {
+              ...existingReq,
+              ...jobReq,
+              ...(mergedHeaders ? { headers: mergedHeaders } : {}),
+            },
           };
         }
       }
