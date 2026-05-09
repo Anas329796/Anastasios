@@ -59,6 +59,12 @@ async function buildModelsJsonFingerprint(params: {
     path.join(params.agentDir, "auth-profiles.json"),
   );
   const modelsFileMtimeMs = await readFileMtimeMs(path.join(params.agentDir, "models.json"));
+  const targetDir = path.resolve(params.agentDir);
+  const mainAgentDir = path.resolve(resolveDefaultAgentDir(params.config));
+  const mainModelsFileMtimeMs =
+    targetDir === mainAgentDir
+      ? modelsFileMtimeMs
+      : await readFileMtimeMs(path.join(mainAgentDir, "models.json"));
   const envShape = createConfigRuntimeEnv(params.config, {});
   const pluginMetadataSnapshotIndexFingerprint = params.pluginMetadataSnapshot
     ? resolveInstalledManifestRegistryIndexFingerprint(params.pluginMetadataSnapshot.index)
@@ -69,6 +75,7 @@ async function buildModelsJsonFingerprint(params: {
     envShape,
     authProfilesMtimeMs,
     modelsFileMtimeMs,
+    mainModelsFileMtimeMs,
     workspaceDir: params.workspaceDir,
     pluginMetadataSnapshotIndexFingerprint,
     providerDiscoveryProviderIds: params.providerDiscoveryProviderIds,
@@ -118,6 +125,93 @@ export async function writeModelsFileAtomicForModelsJson(
   contents: string,
 ): Promise<void> {
   await privateFileStore(path.dirname(targetPath)).writeText(path.basename(targetPath), contents);
+}
+
+function hasErrorCode(error: unknown, expectedCode: string): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    String(error.code) === expectedCode
+  );
+}
+
+function isLinkUnavailableError(error: unknown): boolean {
+  return (
+    hasErrorCode(error, "EPERM") ||
+    hasErrorCode(error, "ENOTSUP") ||
+    hasErrorCode(error, "EOPNOTSUPP") ||
+    hasErrorCode(error, "EXDEV")
+  );
+}
+
+async function writeModelsFileAtomicIfMissing(
+  targetPath: string,
+  contents: string,
+): Promise<boolean> {
+  const tempPath = `${targetPath}.${process.pid}.${Date.now()}.tmp`;
+  await fs.writeFile(tempPath, contents, { mode: 0o600 });
+  try {
+    try {
+      // link() creates targetPath atomically and never overwrites an existing file.
+      await fs.link(tempPath, targetPath);
+      return true;
+    } catch (error) {
+      if (hasErrorCode(error, "EEXIST")) {
+        return false;
+      }
+      if (!isLinkUnavailableError(error)) {
+        throw error;
+      }
+      try {
+        await fs.writeFile(targetPath, contents, { mode: 0o600, flag: "wx" });
+        return true;
+      } catch (writeError) {
+        if (hasErrorCode(writeError, "EEXIST")) {
+          return false;
+        }
+        throw writeError;
+      }
+    }
+  } finally {
+    await fs.unlink(tempPath).catch(() => {
+      // best-effort cleanup
+    });
+  }
+}
+
+async function inheritModelsJsonFromMainAgent(params: {
+  config: OpenClawConfig;
+  agentDir: string;
+  targetPath: string;
+}): Promise<boolean> {
+  const targetDir = path.resolve(params.agentDir);
+  const mainAgentDir = path.resolve(resolveDefaultAgentDir(params.config));
+  if (targetDir === mainAgentDir) {
+    return false;
+  }
+
+  const targetStore = privateFileStore(path.dirname(params.targetPath));
+  const existingRaw = await targetStore.readTextIfExists(path.basename(params.targetPath));
+  if (existingRaw !== null) {
+    return false;
+  }
+
+  const sourcePath = path.join(mainAgentDir, "models.json");
+  const sourceRaw = await privateFileStore(path.dirname(sourcePath)).readTextIfExists(
+    path.basename(sourcePath),
+  );
+  if (!sourceRaw?.trim()) {
+    return false;
+  }
+
+  await fs.mkdir(params.agentDir, { recursive: true, mode: 0o700 });
+  const wrote = await writeModelsFileAtomicIfMissing(params.targetPath, sourceRaw);
+  if (!wrote) {
+    return false;
+  }
+  await ensureModelsFileModeForModelsJson(params.targetPath);
+  return true;
 }
 
 function resolveModelsConfigInput(config?: OpenClawConfig): {
@@ -242,7 +336,12 @@ export async function ensureOpenClawModelsJson(
     });
 
     if (plan.action === "skip") {
-      return { fingerprint, result: { agentDir, wrote: false } };
+      const inherited = await inheritModelsJsonFromMainAgent({
+        config: cfg,
+        agentDir,
+        targetPath,
+      });
+      return { fingerprint, result: { agentDir, wrote: inherited } };
     }
 
     if (plan.action === "noop") {
