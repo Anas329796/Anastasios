@@ -25,6 +25,11 @@ import type {
 
 export { diagnosticErrorCategory };
 
+type ContentCapturePolicy = {
+  inputMessages: boolean;
+  outputMessages: boolean;
+};
+
 type ModelCallDiagnosticContext = {
   runId: string;
   sessionKey?: string;
@@ -36,6 +41,7 @@ type ModelCallDiagnosticContext = {
   trace: DiagnosticTraceContext;
   nextCallId: () => string;
   onStarted?: () => void;
+  contentCapture: ContentCapturePolicy;
 };
 
 type ModelCallEventBase = Omit<
@@ -65,12 +71,40 @@ type ModelCallObservationState = {
   requestPayloadBytes?: number;
   responseStreamBytes: number;
   timeToFirstByteMs?: number;
+  inputMessages?: string[];
   outputTextChunks: string[];
 };
 
 const MODEL_CALL_STREAM_RETURN_TIMEOUT_MS = 1000;
 const TRACEPARENT_HEADER_NAME = "traceparent";
 type ModelCallStreamOptions = Parameters<StreamFn>[2];
+
+const NO_CONTENT_CAPTURE: ContentCapturePolicy = {
+  inputMessages: false,
+  outputMessages: false,
+};
+
+/**
+ * Resolve the diagnostics.otel.captureContent config value to a policy.
+ * Mirrors the OTEL service's resolveContentCapturePolicy but only exposes
+ * the fields relevant to model-call content capture.
+ */
+export function resolveContentCapturePolicy(value: unknown): ContentCapturePolicy {
+  if (value === true) {
+    return { inputMessages: true, outputMessages: true };
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return NO_CONTENT_CAPTURE;
+  }
+  const config = value as Record<string, unknown>;
+  if (config.enabled !== true) {
+    return NO_CONTENT_CAPTURE;
+  }
+  return {
+    inputMessages: config.inputMessages === true,
+    outputMessages: config.outputMessages === true,
+  };
+}
 
 function utf8JsonByteLength(value: unknown): number | undefined {
   try {
@@ -106,13 +140,27 @@ function observeResponseChunk(
 
 /**
  * Extract text content from a streamed response chunk.
- * Handles both OpenAI chat completion delta format and responses API format.
+ * Handles three formats:
+ * 1. Normalized provider chunks: { type: "text_delta", delta: "..." }
+ * 2. OpenAI chat completion stream format: { choices: [{ delta: { content: "..." } }] }
+ * 3. OpenAI responses API stream format: { type: "response.output_text.delta", delta: "..." }
  */
 function extractTextFromChunk(chunk: unknown): string | undefined {
   if (typeof chunk !== "object" || chunk === null) {
     return undefined;
   }
   const obj = chunk as Record<string, unknown>;
+
+  // Normalized provider stream format: { type: "text_delta", delta: "..." }
+  // Used by OpenAI WS, Anthropic, and other providers after normalization.
+  if (obj.type === "text_delta" && typeof obj.delta === "string" && obj.delta.length > 0) {
+    return obj.delta;
+  }
+
+  // Non-streaming normalized format: { type: "text", text: "..." }
+  if (obj.type === "text" && typeof obj.text === "string" && obj.text.length > 0) {
+    return obj.text;
+  }
 
   // OpenAI chat completion stream format: { choices: [{ delta: { content: "..." } }] }
   const choices = obj.choices;
@@ -402,6 +450,7 @@ function emitModelCallCompleted(
   eventBase: ModelCallEventBase,
   startedAt: number,
   state: ModelCallObservationState,
+  contentCapture: ContentCapturePolicy,
 ): void {
   const durationMs = Date.now() - startedAt;
   const sizeTimingFields = modelCallSizeTimingFields(state);
@@ -410,8 +459,11 @@ function emitModelCallCompleted(
     ...eventBase,
     durationMs,
     ...sizeTimingFields,
-    ...(state.outputTextChunks.length > 0
+    ...(contentCapture.outputMessages && state.outputTextChunks.length > 0
       ? { outputMessages: [state.outputTextChunks.join("")] }
+      : {}),
+    ...(contentCapture.inputMessages && state.inputMessages && state.inputMessages.length > 0
+      ? { inputMessages: state.inputMessages }
       : {}),
   });
   dispatchModelCallEndedHook(eventBase, {
@@ -426,6 +478,7 @@ function emitModelCallError(
   startedAt: number,
   state: ModelCallObservationState,
   fields: ModelCallErrorFields,
+  contentCapture: ContentCapturePolicy,
 ): void {
   const durationMs = Date.now() - startedAt;
   const sizeTimingFields = modelCallSizeTimingFields(state);
@@ -435,6 +488,13 @@ function emitModelCallError(
     durationMs,
     ...sizeTimingFields,
     ...fields,
+    // Include partial content captured before the error, gated by policy.
+    ...(contentCapture.inputMessages && state.inputMessages && state.inputMessages.length > 0
+      ? { inputMessages: state.inputMessages }
+      : {}),
+    ...(contentCapture.outputMessages && state.outputTextChunks.length > 0
+      ? { outputMessages: [state.outputTextChunks.join("")] }
+      : {}),
   });
   dispatchModelCallEndedHook(eventBase, {
     durationMs,
@@ -448,10 +508,20 @@ function withDiagnosticTraceparentHeader(
   options: ModelCallStreamOptions,
   trace: DiagnosticTraceContext,
   state: ModelCallObservationState,
+  contentCapture: ContentCapturePolicy,
 ): ModelCallStreamOptions {
   const traceparent = formatDiagnosticTraceparent(trace);
   const originalOnPayload = options?.onPayload;
   const onPayload: NonNullable<ModelCallStreamOptions>["onPayload"] = (payload, model) => {
+    // Extract input messages from the final request payload (not the model descriptor).
+    // The onPayload callback receives the actual request after provider wrappers have
+    // mutated it, so this is the correct seam for content capture.
+    if (contentCapture.inputMessages) {
+      const messages = extractInputMessages(payload);
+      if (messages.length > 0) {
+        state.inputMessages = messages;
+      }
+    }
     if (!originalOnPayload) {
       assignRequestPayloadBytes(state, payload);
       return undefined;
@@ -459,9 +529,24 @@ function withDiagnosticTraceparentHeader(
     const result = originalOnPayload(payload, model);
     if (isPromiseLike(result)) {
       return result.then((replacement) => {
+        // If the original onPayload mutated the payload, re-extract input messages
+        // from the replacement to capture the final form.
+        if (contentCapture.inputMessages) {
+          const messages = extractInputMessages(replacement ?? payload);
+          if (messages.length > 0) {
+            state.inputMessages = messages;
+          }
+        }
         assignRequestPayloadBytes(state, replacement ?? payload);
         return replacement;
       });
+    }
+    // Re-extract from the mutated payload if the hook returned a replacement.
+    if (contentCapture.inputMessages && result !== undefined) {
+      const messages = extractInputMessages(result);
+      if (messages.length > 0) {
+        state.inputMessages = messages;
+      }
     }
     assignRequestPayloadBytes(state, result ?? payload);
     return result;
@@ -526,6 +611,7 @@ async function* observeModelCallIterator<T>(
   eventBase: ModelCallEventBase,
   startedAt: number,
   state: ModelCallObservationState,
+  contentCapture: ContentCapturePolicy,
 ): AsyncIterable<T> {
   let terminalEmitted = false;
   try {
@@ -538,15 +624,15 @@ async function* observeModelCallIterator<T>(
       yield next.value;
     }
     terminalEmitted = true;
-    emitModelCallCompleted(eventBase, startedAt, state);
+    emitModelCallCompleted(eventBase, startedAt, state, contentCapture);
   } catch (err) {
     terminalEmitted = true;
-    emitModelCallError(eventBase, startedAt, state, modelCallErrorFields(err));
+    emitModelCallError(eventBase, startedAt, state, modelCallErrorFields(err), contentCapture);
     throw err;
   } finally {
     if (!terminalEmitted) {
       await safeReturnIterator(iterator);
-      emitModelCallCompleted(eventBase, startedAt, state);
+      emitModelCallCompleted(eventBase, startedAt, state, contentCapture);
     }
   }
 }
@@ -557,9 +643,12 @@ function observeModelCallStream<T extends AsyncIterable<unknown>>(
   eventBase: ModelCallEventBase,
   startedAt: number,
   state: ModelCallObservationState,
+  contentCapture: ContentCapturePolicy,
 ): T {
   const observedIterator = () =>
-    observeModelCallIterator(createIterator(), eventBase, startedAt, state)[Symbol.asyncIterator]();
+    observeModelCallIterator(createIterator(), eventBase, startedAt, state, contentCapture)[
+      Symbol.asyncIterator
+    ]();
   let hasNonConfigurableIterator = false;
   try {
     hasNonConfigurableIterator =
@@ -588,6 +677,7 @@ function observeModelCallResult(
   eventBase: ModelCallEventBase,
   startedAt: number,
   state: ModelCallObservationState,
+  contentCapture: ContentCapturePolicy,
 ): unknown {
   const createIterator = asyncIteratorFactory(result);
   if (createIterator) {
@@ -597,14 +687,17 @@ function observeModelCallResult(
       eventBase,
       startedAt,
       state,
+      contentCapture,
     );
   }
   // Non-streaming response: extract output text from the result object
-  const outputMessages = extractOutputFromResult(result);
-  if (outputMessages.length > 0) {
-    state.outputTextChunks = outputMessages;
+  if (contentCapture.outputMessages) {
+    const outputMessages = extractOutputFromResult(result);
+    if (outputMessages.length > 0) {
+      state.outputTextChunks = outputMessages;
+    }
   }
-  emitModelCallCompleted(eventBase, startedAt, state);
+  emitModelCallCompleted(eventBase, startedAt, state, contentCapture);
   return result;
 }
 
@@ -616,33 +709,40 @@ export function wrapStreamFnWithDiagnosticModelCallEvents(
     const callId = ctx.nextCallId();
     const trace = freezeDiagnosticTraceContext(createChildDiagnosticTraceContext(ctx.trace));
     const eventBase = baseModelCallEvent(ctx, callId, trace);
-    // Extract input messages from the model request payload for content capture
-    const inputMessages = extractInputMessages(model);
-    const eventBaseWithContent: ModelCallEventBase = {
-      ...eventBase,
-      ...(inputMessages.length > 0 ? { inputMessages } : {}),
-    };
+    const contentCapture = ctx.contentCapture;
 
-    emitModelCallStarted(eventBaseWithContent);
+    emitModelCallStarted(eventBase);
     ctx.onStarted?.();
     const startedAt = Date.now();
     const state: ModelCallObservationState = { responseStreamBytes: 0, outputTextChunks: [] };
-    const propagatedOptions = withDiagnosticTraceparentHeader(options, trace, state);
+    const propagatedOptions = withDiagnosticTraceparentHeader(
+      options,
+      trace,
+      state,
+      contentCapture,
+    );
 
     try {
       const result = streamFn(model, streamContext, propagatedOptions);
       if (isPromiseLike(result)) {
         return result.then(
-          (resolved) => observeModelCallResult(resolved, eventBaseWithContent, startedAt, state),
+          (resolved) =>
+            observeModelCallResult(resolved, eventBase, startedAt, state, contentCapture),
           (err) => {
-            emitModelCallError(eventBaseWithContent, startedAt, state, modelCallErrorFields(err));
+            emitModelCallError(
+              eventBase,
+              startedAt,
+              state,
+              modelCallErrorFields(err),
+              contentCapture,
+            );
             throw err;
           },
         );
       }
-      return observeModelCallResult(result, eventBaseWithContent, startedAt, state);
+      return observeModelCallResult(result, eventBase, startedAt, state, contentCapture);
     } catch (err) {
-      emitModelCallError(eventBaseWithContent, startedAt, state, modelCallErrorFields(err));
+      emitModelCallError(eventBase, startedAt, state, modelCallErrorFields(err), contentCapture);
       throw err;
     }
   }) as StreamFn;
