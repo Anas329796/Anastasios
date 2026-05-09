@@ -1789,7 +1789,17 @@ export async function applyShortTermPromotions(
       }
     }
 
-    if (rehydratedSelected.length === 0) {
+    const existingMemory = await fs.readFile(memoryPath, "utf-8").catch((err: unknown) => {
+      if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
+        return "";
+      }
+      throw err;
+    });
+    const migrated = extractDetailedPromotionSections(existingMemory);
+    const migratedMarkers = extractPromotionMarkers(migrated.sections.join("\n\n"));
+    const existingMarkers = await collectExistingPromotionMarkers(workspaceDir, existingMemory);
+
+    if (rehydratedSelected.length === 0 && migrated.sections.length === 0) {
       return {
         memoryPath,
         archivePath,
@@ -1803,18 +1813,14 @@ export async function applyShortTermPromotions(
       };
     }
 
-    const existingMemory = await fs.readFile(memoryPath, "utf-8").catch((err: unknown) => {
-      if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
-        return "";
-      }
-      throw err;
-    });
-    const migrated = extractDetailedPromotionSections(existingMemory);
-    const existingMarkers = await collectExistingPromotionMarkers(workspaceDir, existingMemory);
     const alreadyWritten = rehydratedSelected.filter((candidate) =>
       existingMarkers.has(candidate.key),
     );
     const toAppend = rehydratedSelected.filter((candidate) => !existingMarkers.has(candidate.key));
+    const alreadyWrittenKeys = new Set(alreadyWritten.map((candidate) => candidate.key));
+    const migratedOnlyCount = [...migratedMarkers].filter(
+      (key) => !alreadyWrittenKeys.has(key),
+    ).length;
 
     const compactedDates: string[] = [];
     if (toAppend.length > 0 || migrated.sections.length > 0) {
@@ -1882,7 +1888,7 @@ export async function applyShortTermPromotions(
       archiveRelativePath,
       applied: rehydratedSelected.length,
       appended: toAppend.length,
-      reconciledExisting: alreadyWritten.length,
+      reconciledExisting: alreadyWritten.length + migratedOnlyCount,
       appliedCandidates: rehydratedSelected,
       compactedSections: compactedDates.length,
       compactedDates,

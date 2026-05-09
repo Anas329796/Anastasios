@@ -1016,6 +1016,81 @@ describe("short-term promotion", () => {
     });
   });
 
+  it("migrates existing root promotion sections when store entries are already promoted", async () => {
+    await withTempWorkspace(async (workspaceDir) => {
+      await writeDailyMemoryNote(workspaceDir, "2026-04-01", [
+        "The gateway should stay loopback-only on port 18789.",
+      ]);
+      await recordShortTermRecalls({
+        workspaceDir,
+        query: "gateway loopback",
+        results: [
+          {
+            path: "memory/2026-04-01.md",
+            startLine: 1,
+            endLine: 1,
+            score: 0.95,
+            snippet: "The gateway should stay loopback-only on port 18789.",
+            source: "memory",
+          },
+        ],
+      });
+      const ranked = await rankShortTermPromotionCandidates({
+        workspaceDir,
+        minScore: 0,
+        minRecallCount: 0,
+        minUniqueQueries: 0,
+      });
+      const key = ranked[0].key;
+      const storePath = resolveShortTermRecallStorePath(workspaceDir);
+      const rawStore = JSON.parse(await fs.readFile(storePath, "utf-8")) as {
+        entries: Record<string, { promotedAt?: string }>;
+      };
+      const entry = rawStore.entries[key];
+      if (!entry) {
+        throw new Error(`missing store entry for ${key}`);
+      }
+      entry.promotedAt = "2026-04-01T12:00:00.000Z";
+      await fs.writeFile(storePath, `${JSON.stringify(rawStore, null, 2)}\n`, "utf-8");
+      await fs.writeFile(
+        path.join(workspaceDir, "MEMORY.md"),
+        [
+          "# Long-Term Memory",
+          "",
+          "## Promoted From Short-Term Memory (2026-04-01)",
+          "",
+          `<!-- openclaw-memory-promotion:${key} -->`,
+          "- The gateway should stay loopback-only on port 18789. [score=0.950 recalls=1 avg=0.950 source=memory/2026-04-01.md:1-1]",
+          "",
+          "## Other Section",
+          "",
+          "Keep me.",
+        ].join("\n"),
+        "utf-8",
+      );
+
+      const applied = await applyShortTermPromotions({
+        workspaceDir,
+        candidates: ranked,
+        minScore: 0,
+        minRecallCount: 0,
+        minUniqueQueries: 0,
+        nowMs: Date.parse("2026-04-02T10:00:00.000Z"),
+      });
+
+      expect(applied.applied).toBe(0);
+      expect(applied.appended).toBe(0);
+      expect(applied.reconciledExisting).toBe(1);
+      const memoryText = await fs.readFile(path.join(workspaceDir, "MEMORY.md"), "utf-8");
+      const archiveText = await fs.readFile(applied.archivePath, "utf-8");
+      expect(memoryText).toContain("Latest promotion archive:");
+      expect(memoryText).toContain("## Other Section");
+      expect(memoryText).not.toContain("openclaw-memory-promotion:");
+      expect(archiveText).toContain(`<!-- openclaw-memory-promotion:${key} -->`);
+      expect(archiveText).toContain("The gateway should stay loopback-only on port 18789.");
+    });
+  });
+
   it("inserts the compact promotion pointer before a final root section", async () => {
     await withTempWorkspace(async (workspaceDir) => {
       await writeDailyMemoryNote(workspaceDir, "2026-04-01", [
