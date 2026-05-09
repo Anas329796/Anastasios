@@ -782,7 +782,14 @@ describe("config io write", () => {
     });
   });
 
-  it("rejects destructive internal writes before replacing the config", async () => {
+  it("preserves all original fields on narrow internal writes (catalog #5/#17 fix)", async () => {
+    // After catalog #5/#17 fix: a narrow write (only `update.channel`) no longer
+    // clobbers the rest of the config via the merge-patch null-delete path.
+    // Instead, absent keys in nextConfig are preserved from the source snapshot,
+    // so the write is safe and not destructive. The `CONFIG_WRITE_REJECTED` guard
+    // that fired previously was a consequence of the bug (the narrow write would
+    // produce an `update-channel-only-root` result) — it no longer fires because
+    // the persisted config correctly includes all original fields.
     await withSuiteHome(async (home) => {
       const configPath = path.join(home, ".openclaw", "openclaw.json");
       await fs.mkdir(path.dirname(configPath), { recursive: true });
@@ -816,27 +823,30 @@ describe("config io write", () => {
         legacyIssues: [],
       } satisfies ConfigFileSnapshot;
 
-      await expect(
-        io.writeConfigFile(
-          { update: { channel: "beta" } },
-          {
-            baseSnapshot,
-          },
-        ),
-      ).rejects.toMatchObject({
-        code: "CONFIG_WRITE_REJECTED",
-      });
+      // Narrow write: only `update.channel` in nextConfig. All original keys
+      // are absent from nextConfig but must be preserved from the base snapshot.
+      const result = await io.writeConfigFile({ update: { channel: "beta" } }, { baseSnapshot });
 
-      await expect(fs.readFile(configPath, "utf-8")).resolves.toBe(originalRaw);
-      const entries = await fs.readdir(path.dirname(configPath));
-      expect(
-        entries.reduce((count, entry) => count + (entry.includes(".rejected.") ? 1 : 0), 0),
-      ).toBe(1);
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining("Config write rejected:"));
+      // The persisted config must carry ALL original fields plus the new key.
+      expect(result.persistedConfig).toMatchObject({
+        gateway: { mode: "local" },
+        channels: { telegram: { enabled: true, dmPolicy: "pairing" } },
+        agents: { list: [{ id: "main", default: true, workspace: "/tmp/openclaw-main" }] },
+        tools: { profile: "messaging" },
+        commands: { ownerDisplay: "hash" },
+        update: { channel: "beta" },
+      });
+      // No destructive-write rejection; warn should not have been called.
+      expect(warn).not.toHaveBeenCalledWith(expect.stringContaining("Config write rejected:"));
     });
   });
 
   it("allows intentional size-drop writes without disabling gateway-mode protection", async () => {
+    // After catalog #5/#17 fix: absent keys in nextConfig are preserved from source.
+    // Narrow writes can no longer accidentally lose gateway.mode — it is always
+    // preserved unless the caller explicitly passes gateway: undefined via unsetPaths.
+    // allowConfigSizeDrop still correctly allows dropping large channel allowFrom
+    // arrays while keeping the rest of the config intact.
     await withSuiteHome(async (home) => {
       const configPath = path.join(home, ".openclaw", "openclaw.json");
       await fs.mkdir(path.dirname(configPath), { recursive: true });
@@ -872,6 +882,7 @@ describe("config io write", () => {
         legacyIssues: [],
       } satisfies ConfigFileSnapshot;
 
+      // Explicit gateway in nextConfig — preserves gateway as authored.
       await expect(
         io.writeConfigFile(
           { meta: original.meta, gateway: { mode: "local" } },
@@ -884,6 +895,9 @@ describe("config io write", () => {
         persistedConfig: expect.objectContaining({ gateway: { mode: "local" } }),
       });
 
+      // Narrow nextConfig (only meta) — gateway is absent from nextConfig but
+      // preserved from source snapshot. allowConfigSizeDrop allows the size
+      // reduction (channels.allowFrom array dropped). Write succeeds.
       await expect(
         io.writeConfigFile(
           { meta: original.meta },
@@ -892,8 +906,8 @@ describe("config io write", () => {
             baseSnapshot,
           },
         ),
-      ).rejects.toMatchObject({
-        code: "CONFIG_WRITE_REJECTED",
+      ).resolves.toMatchObject({
+        persistedConfig: expect.objectContaining({ gateway: { mode: "local" } }),
       });
     });
   });
@@ -1445,6 +1459,75 @@ describe("config io write", () => {
       const persisted = JSON.parse(await fs.readFile(configPath, "utf-8")) as OpenClawConfig;
       expect(persisted.logging?.file).toBe("~/openclaw-upgrade-survivor/gateway.jsonl");
       expect(persisted.logging?.level).toBe("debug");
+    });
+  });
+
+  // Regression: catalog #5/#17 fix (absent-key preservation) must not prevent
+  // doctor-style full-replace writes from deleting fields via unsetPaths when
+  // the hadBothSnapshots branch is active. Before this fix, the absent-in-target
+  // key (dm.policy) was preserved by createMergePatch and the unsetPaths deletion
+  // was applied too late — after nextCfg had already been baked with the preserved
+  // value. The test must FAIL on commit 4ea857aae4 and PASS on this fix.
+  it("applies unsetPaths deletions in hadBothSnapshots branch (doctor full-replace regression)", async () => {
+    await withSuiteHome(async (home) => {
+      const configPath = path.join(home, ".openclaw", "openclaw.json");
+      const previousConfigPath = process.env.OPENCLAW_CONFIG_PATH;
+      process.env.OPENCLAW_CONFIG_PATH = configPath;
+      await fs.mkdir(path.dirname(configPath), { recursive: true });
+
+      // Seed: runtime snapshot has the legacy channels.discord.dm.policy field.
+      const sourceConfig: OpenClawConfig = {
+        gateway: { mode: "local" },
+        channels: {
+          discord: {
+            dm: { policy: "pairing" } as Record<string, unknown>,
+          } as unknown as NonNullable<OpenClawConfig["channels"]>["discord"],
+        },
+      };
+      await fs.writeFile(configPath, `${JSON.stringify(sourceConfig, null, 2)}\n`, "utf-8");
+
+      // Runtime snapshot (what the gateway loaded) also has dm.policy.
+      const runtimeConfig: OpenClawConfig = {
+        gateway: { mode: "local" },
+        channels: {
+          discord: {
+            dm: { policy: "pairing" } as Record<string, unknown>,
+          } as unknown as NonNullable<OpenClawConfig["channels"]>["discord"],
+        },
+      };
+
+      try {
+        // Simulate gateway startup: pin both runtime and source snapshots so the
+        // hadBothSnapshots branch activates on the subsequent write.
+        setRuntimeConfigSnapshot(runtimeConfig, sourceConfig);
+
+        // Doctor-style full-replace write: caller omits channels.discord.dm entirely
+        // and explicitly declares the path for deletion via unsetPaths. Without the
+        // fix, absent-key preservation wins and dm.policy survives on disk.
+        await writeConfigFile(
+          { gateway: { mode: "local" } },
+          { unsetPaths: [["channels", "discord", "dm", "policy"]] },
+        );
+
+        const persisted = JSON.parse(await fs.readFile(configPath, "utf-8")) as Record<
+          string,
+          unknown
+        >;
+        const dmSection = (
+          (persisted.channels as Record<string, unknown> | undefined)?.discord as
+            | Record<string, unknown>
+            | undefined
+        )?.dm as Record<string, unknown> | undefined;
+
+        // dm.policy must be absent: the caller declared it as an explicit deletion.
+        expect(dmSection?.policy).toBeUndefined();
+      } finally {
+        if (previousConfigPath === undefined) {
+          delete process.env.OPENCLAW_CONFIG_PATH;
+        } else {
+          process.env.OPENCLAW_CONFIG_PATH = previousConfigPath;
+        }
+      }
     });
   });
 });
