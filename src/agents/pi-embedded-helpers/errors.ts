@@ -258,6 +258,7 @@ export type ProviderRuntimeFailureKind =
   | "callback_timeout"
   | "callback_validation"
   | "auth_html_403"
+  | "auth_html_401"
   | "upstream_html"
   | "proxy"
   | "rate_limit"
@@ -947,7 +948,7 @@ export function classifyProviderRuntimeFailureKind(
     return "proxy";
   }
   if (message && isHtmlErrorResponse(message, status)) {
-    return status === 403 ? "auth_html_403" : "upstream_html";
+    return status === 401 ? "auth_html_401" : status === 403 ? "auth_html_403" : "upstream_html";
   }
   const failoverClassification = classifyFailoverSignal({
     ...normalizedSignal,
@@ -1058,6 +1059,13 @@ export function formatAssistantErrorText(
     return (
       "Authentication is missing the required OpenAI Codex scopes. " +
       "Re-run OpenAI/Codex login and try again."
+    );
+  }
+
+  if (providerRuntimeFailureKind === "auth_html_401") {
+    return (
+      "Authentication failed with an HTML 401 response from the provider. " +
+      "Re-authenticate and verify your provider credentials."
     );
   }
 
