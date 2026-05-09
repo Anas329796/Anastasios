@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -189,7 +190,7 @@ describe("compactEmbeddedPiSessionDirect hooks", () => {
 
     expect(ensureRuntimePluginsLoaded).toHaveBeenCalledWith({
       config: undefined,
-      workspaceDir: "/tmp/workspace",
+      workspaceDir: path.resolve("/tmp/workspace"),
     });
   });
 
@@ -212,7 +213,7 @@ describe("compactEmbeddedPiSessionDirect hooks", () => {
 
     expect(ensureRuntimePluginsLoaded).toHaveBeenCalledWith({
       config: undefined,
-      workspaceDir: "/tmp/workspace",
+      workspaceDir: path.resolve("/tmp/workspace"),
       allowGatewaySubagentBinding: true,
     });
   });
@@ -229,7 +230,7 @@ describe("compactEmbeddedPiSessionDirect hooks", () => {
     expect(resolveSandboxContextMock).toHaveBeenCalledWith({
       config: undefined,
       sessionKey: "agent:main:telegram:default:direct:12345",
-      workspaceDir: "/tmp/workspace",
+      workspaceDir: path.resolve("/tmp/workspace"),
     });
   });
 
