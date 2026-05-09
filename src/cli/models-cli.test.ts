@@ -192,6 +192,23 @@ describe("models cli", () => {
     );
   });
 
+  it("passes paste-token --token through to the auth command", async () => {
+    await runModelsCommand([
+      "models",
+      "auth",
+      "paste-token",
+      "--provider",
+      "anthropic",
+      "--token",
+      "sk-ant-oat01-token",
+    ]);
+
+    expect(modelsAuthPasteTokenCommand).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "anthropic", token: "sk-ant-oat01-token" }),
+      expect.any(Object),
+    );
+  });
+
   it.each([
     {
       label: "set",
