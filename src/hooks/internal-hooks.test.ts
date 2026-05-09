@@ -257,10 +257,10 @@ describe("hooks", () => {
       // Handler A is slow (still running). An independent concurrent trigger
       // for the same key should be delivered. But a re-entrant call from
       // within Handler A's chain should be blocked.
-      let resolveSlowHandler: () => void;
+      const resolvers: Array<() => void> = [];
       const slowHandler = vi.fn(async () => {
         await new Promise<void>((resolve) => {
-          resolveSlowHandler = resolve;
+          resolvers.push(resolve);
         });
       });
       const reentrantCount = { value: 0 };
@@ -284,8 +284,10 @@ describe("hooks", () => {
         createInternalHookEvent("message", "received", "session-a"),
       );
 
-      // Resolve the slow handler to let both dispatches complete
-      resolveSlowHandler!();
+      // Resolve all slow handler invocations to let both dispatches complete
+      for (const resolve of resolvers) {
+        resolve();
+      }
 
       await Promise.all([firstDispatch, independentDispatch]);
 
