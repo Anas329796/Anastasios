@@ -996,6 +996,23 @@ describe("capability cli", () => {
     );
   });
 
+  it("passes detected image describe MIME types through media understanding", async () => {
+    const tempInput = path.join(os.tmpdir(), `openclaw-image-describe-${Date.now()}.png`);
+    await fs.writeFile(tempInput, Buffer.from(PNG_1X1_BASE64, "base64"));
+
+    await runRegisteredCli({
+      register: registerCapabilityCli as (program: Command) => void,
+      argv: ["capability", "image", "describe", "--file", tempInput, "--json"],
+    });
+
+    expect(mocks.describeImageFile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filePath: tempInput,
+        mime: "image/png",
+      }),
+    );
+  });
+
   it("uses the explicit media-understanding provider for image describe model overrides", async () => {
     await runRegisteredCli({
       register: registerCapabilityCli as (program: Command) => void,
@@ -1029,6 +1046,34 @@ describe("capability cli", () => {
       expect.objectContaining({
         provider: "ollama",
         model: "gpt-4.1-mini",
+      }),
+    );
+  });
+
+  it("passes detected MIME types through explicit image describe model overrides", async () => {
+    const tempInput = path.join(os.tmpdir(), `openclaw-image-describe-model-${Date.now()}.png`);
+    await fs.writeFile(tempInput, Buffer.from(PNG_1X1_BASE64, "base64"));
+
+    await runRegisteredCli({
+      register: registerCapabilityCli as (program: Command) => void,
+      argv: [
+        "capability",
+        "image",
+        "describe",
+        "--file",
+        tempInput,
+        "--model",
+        "ollama/qwen2.5vl:7b",
+        "--json",
+      ],
+    });
+
+    expect(mocks.describeImageFileWithModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filePath: tempInput,
+        provider: "ollama",
+        model: "qwen2.5vl:7b",
+        mime: "image/png",
       }),
     );
   });
