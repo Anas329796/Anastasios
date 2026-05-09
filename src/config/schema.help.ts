@@ -1442,6 +1442,8 @@ export const FIELD_HELP: Record<string, string> = {
     "Named MCP server definitions. OpenClaw stores them in its own config and runtime adapters decide which transports are supported at execution time.",
   "mcp.sessionIdleTtlMs":
     "Idle TTL in milliseconds for session-scoped bundled MCP runtimes. Defaults to 10 minutes; set 0 to disable idle eviction.",
+  "mcp.runtimeScope":
+    'Scope for the bundled MCP runtime cache. "session" (default) creates one runtime per session and disposes it when the session is retired. "shared" reuses one runtime per (workspaceDir, configFingerprint) across all sessions, ref-counting attached sessions; the runtime is only disposed when the last session detaches. Use "shared" in single-tenant deployments where every session shares one workspace and config to avoid per-session MCP cold starts.',
   session:
     "Global session routing, reset, delivery policy, and maintenance controls for conversation history behavior. Keep defaults unless you need stricter isolation, retention, or delivery constraints.",
   "session.scope":
