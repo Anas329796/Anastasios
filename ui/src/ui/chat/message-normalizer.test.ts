@@ -426,5 +426,15 @@ describe("message-normalizer", () => {
 
       expect(result.senderLabel).toBeNull();
     });
+
+    it("preserves Control UI-like sender labels on non-user messages", () => {
+      const result = normalizeMessage({
+        role: "assistant",
+        content: "Assistant reply",
+        senderLabel: "openclaw-control-ui",
+      });
+
+      expect(result.senderLabel).toBe("openclaw-control-ui");
+    });
   });
 });
