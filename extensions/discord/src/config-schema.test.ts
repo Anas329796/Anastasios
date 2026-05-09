@@ -147,6 +147,22 @@ describe("discord config schema", () => {
     expect(cfg.voice?.model).toBe("openai/gpt-5.4-mini");
   });
 
+  it("accepts voice agent session target routing", () => {
+    const cfg = expectValidDiscordConfig({
+      voice: {
+        agentSession: {
+          mode: "target",
+          target: "channel:123456789012345678",
+        },
+      },
+    });
+
+    expect(cfg.voice?.agentSession).toEqual({
+      mode: "target",
+      target: "channel:123456789012345678",
+    });
+  });
+
   it("accepts Discord realtime voice modes", () => {
     const cfg = expectValidDiscordConfig({
       voice: {
@@ -158,6 +174,8 @@ describe("discord config schema", () => {
           voice: "cedar",
           toolPolicy: "safe-read-only",
           consultPolicy: "always",
+          bargeIn: true,
+          minBargeInAudioEndMs: 500,
           providers: {
             openai: {
               apiKey: "sk-test",
@@ -175,6 +193,8 @@ describe("discord config schema", () => {
     expect(cfg.voice?.realtime?.voice).toBe("cedar");
     expect(cfg.voice?.realtime?.toolPolicy).toBe("safe-read-only");
     expect(cfg.voice?.realtime?.consultPolicy).toBe("always");
+    expect(cfg.voice?.realtime?.bargeIn).toBe(true);
+    expect(cfg.voice?.realtime?.minBargeInAudioEndMs).toBe(500);
   });
 
   it("rejects invalid Discord realtime voice modes", () => {
@@ -183,6 +203,9 @@ describe("discord config schema", () => {
       { mode: "bidi", realtime: { toolPolicy: "dangerous" } },
       { mode: "talk-buffer", realtime: { consultPolicy: "substantive" } },
       { mode: "talk-buffer", realtime: { debounceMs: 10_001 } },
+      { mode: "talk-buffer", realtime: { minBargeInAudioEndMs: -1 } },
+      { mode: "talk-buffer", realtime: { minBargeInAudioEndMs: 10_001 } },
+      { agentSession: { mode: "target" } },
     ]) {
       expectInvalidDiscordConfig({ voice });
     }
