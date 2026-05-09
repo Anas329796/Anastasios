@@ -178,6 +178,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Channels/whatsapp: honor `ChannelOutboundContext.forceDocument` (alias `asDocument`) end-to-end so WhatsApp outbound routes through the document payload regardless of MIME, preserving the caller-supplied filename and mimetype, and update the agent `message` tool schema to drop the "(Telegram only)" qualifier from `forceDocument`/`asDocument`. Thanks @itsuzef.
 - Memory: close temp SQLite handles before failed atomic reindex cleanup and retry Windows EBUSY/EPERM/EACCES temp file removals, so `memory index --force` does not abort or leave temp sidecars on locked filesystems. Fixes #79708. Thanks @LobsterFarmerAmp and @hclsys.
 - Agents/CLI: add an explicit `reseedFromRawTranscriptWhenUncompacted` backend opt-in so safe invalidated CLI sessions can reseed from a bounded raw OpenClaw transcript tail before compaction while auth-boundary resets remain no-raw. Fixes #79713. (#79764) Thanks @hclsys.
 - Agents/CLI: handle resumed CLI JSONL output and bound supervisor output buffering so resumed runs stay readable without letting noisy child output grow unbounded.
