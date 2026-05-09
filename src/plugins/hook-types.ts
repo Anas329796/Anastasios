@@ -177,6 +177,7 @@ export const CONVERSATION_HOOK_NAMES = [
   "llm_output",
   "before_agent_finalize",
   "agent_end",
+  "model_failure_terminal",
   "before_agent_run",
 ] as const satisfies readonly PluginHookName[];
 
@@ -330,6 +331,8 @@ export type PluginHookModelFailoverEvent = {
   failoverReason?: string | null;
   profileFailureReason?: string | null;
   fallbackConfigured: boolean;
+  /** Whether OpenClaw's cooldown policy expects the failed source to be worth probing again later. */
+  sourceRecoverable?: boolean;
   timedOut?: boolean;
   aborted?: boolean;
   status?: number;
