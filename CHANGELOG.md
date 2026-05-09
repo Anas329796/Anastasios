@@ -154,6 +154,9 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+<<<<<<< HEAD
+- Providers/Microsoft Foundry: skip Anthropic (Claude) deployments during onboard since the built-in Foundry provider only speaks the OpenAI-compatible API surface, and apply the same filter to the persisted deployment catalog so mixed GPT+Claude resources no longer leak Claude entries into `models.providers.microsoft-foundry` after the picker hides them. Fixes #60546. Thanks @ottodeng.
+=======
 - QQBot: route gateway WebSocket connections through the ambient proxy agent so deployments with `https_proxy`, `HTTPS_PROXY`, or `HTTP_PROXY` can reach the QQ gateway. (#72961) Thanks @xialonglee.
 - Agents/subagents: treat `sessions_spawn` `model: "default"` as the default-model fallback and ignore ACP-only stream targets for native sub-agent spawns. Fixes #72078. (#72101) Thanks @xialonglee.
 - Memory/QMD: warn with a manual stale collection removal hint when QMD reports a path/pattern conflict but `collection list` lacks verifiable metadata, avoiding unsafe stderr-only rebinds. Refs #71783. (#72297) Thanks @MonkeyLeeT.
@@ -162,6 +165,7 @@ Docs: https://docs.openclaw.ai
 - Agents/failover: persist overloaded auth-profile cooldown marks before exhausted fallback summaries surface, so immediate fallback retries honor the recorded cooldown state.
 - Docs/Subagents: correct the listed sub-agent bootstrap context files to include `SOUL.md`, `IDENTITY.md`, and `USER.md`. (#79470) Thanks @lastguru-net.
 - Backup: keep live backup archives from copying current agent session transcripts, cron run logs, and delivery queues while preserving workspace lock/temp files and keeping `--json` output parseable when volatile files are skipped. Fixes #72249. (#72251) Thanks @abnershang.
+>>>>>>> upstream/main
 - OpenAI/Codex: install the Codex runtime plugin from npm during OpenAI onboarding and load it automatically for implicit OpenAI model routes, while preserving manual PI runtime overrides. Fixes #79358.
 - OpenAI/realtime voice: defer `response.create` while a realtime response is still active, retry after `response.done`/`response.cancelled`, and align GA input transcription/noise-reduction defaults with the Codex realtime reference so Discord/Voice Call consult results can resume speaking instead of tripping the active-response race.
 - OpenAI/realtime voice: avoid duplicate barge-in cancellation requests, log realtime model interruption/cutoff events in Discord voice logs, and treat OpenAI's no-active-response cancellation reply as a completed cancel so Discord voice sessions do not wedge pending speech after fast interruptions.
