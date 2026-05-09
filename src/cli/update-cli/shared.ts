@@ -271,6 +271,7 @@ export async function tryWriteCompletionCache(root: string, jsonMode: boolean): 
 
   const result = spawnSync(resolveNodeRunner(), [binPath, "completion", "--write-state"], {
     cwd: root,
+    windowsHide: true,
     env: {
       ...process.env,
       [COMPLETION_SKIP_PLUGIN_COMMANDS_ENV]: "1",
