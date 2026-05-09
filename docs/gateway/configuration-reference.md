@@ -1140,6 +1140,7 @@ Notes:
 ```json5
 {
   cli: {
+    locale: "zh-CN", // en | zh-CN
     banner: {
       taglineMode: "off", // random | default | off
     },
@@ -1147,6 +1148,8 @@ Notes:
 }
 ```
 
+- `cli.locale` sets the setup wizard language. Supported values are `"en"` and `"zh-CN"`.
+- `OPENCLAW_LOCALE` can override `cli.locale` for one process; values such as `zh_CN.UTF-8` normalize to `zh-CN`.
 - `cli.banner.taglineMode` controls banner tagline style:
   - `"random"` (default): rotating funny/seasonal taglines.
   - `"default"`: fixed neutral tagline (`All your chats, one OpenClaw.`).

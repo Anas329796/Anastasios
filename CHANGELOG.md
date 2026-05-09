@@ -42,6 +42,7 @@ Docs: https://docs.openclaw.ai
 - Telegram/streaming: continue over-limit draft previews in a new message instead of stopping when rendered preview text crosses Telegram's message limit. (#74508) Thanks @anagnorisis2peripeteia.
 - Slack: route handled top-level channel turns in implicit-conversation channels to thread-scoped sessions when Slack reply threading is enabled, keeping the root turn and later thread replies on one OpenClaw session. (#78522) Thanks @zeroth-blip.
 - Telegram: re-probe the primary fetch transport after repeated sticky fallback success so transient IPv4 or pinned-IP fallback promotion can recover without a gateway restart. Fixes #77088. (#77157) Thanks @MkDev11.
+- CLI/setup: add `cli.locale` and `OPENCLAW_LOCALE` support so the setup wizard can select, persist, and reuse English or zh-CN copy across reset flows.
 - Runtime/install: raise the supported Node 22 floor to `22.16+` so native SQLite query handling can rely on the `node:sqlite` statement metadata API while continuing to recommend Node 24. (#78921)
 - Discord/voice: make duplicate same-guild auto-join entries resolve to the last configured channel so moving an agent between voice channels does not keep joining the stale channel.
 - Discord/voice: add realtime `/vc` modes so Discord voice channels can run as STT/TTS, a realtime talk buffer with the OpenClaw agent brain, or a bidi realtime session with `openclaw_agent_consult`.
