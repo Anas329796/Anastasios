@@ -531,7 +531,7 @@ describe("plugin runtime command execution", () => {
   });
 
   it("omits delivery fields for session-only ACP prompts", async () => {
-    vi.spyOn(configModule, "loadConfig").mockReturnValue({
+    vi.spyOn(configModule, "getRuntimeConfig").mockReturnValue({
       plugins: { allowAcpSpawn: true },
     } as never);
     const callGateway = vi.spyOn(gatewayCallModule, "callGateway").mockResolvedValue({
@@ -559,7 +559,7 @@ describe("plugin runtime command execution", () => {
   });
 
   it("fails loudly when ACP prompt gateway response omits runId", async () => {
-    vi.spyOn(configModule, "loadConfig").mockReturnValue({
+    vi.spyOn(configModule, "getRuntimeConfig").mockReturnValue({
       plugins: { allowAcpSpawn: true },
     } as never);
     vi.spyOn(gatewayCallModule, "callGateway").mockResolvedValue({});
