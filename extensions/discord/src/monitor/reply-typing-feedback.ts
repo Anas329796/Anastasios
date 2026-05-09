@@ -1,8 +1,5 @@
 import { logTypingFailure } from "openclaw/plugin-sdk/channel-feedback";
-import {
-  createTypingCallbacks,
-  type TypingCallbacks,
-} from "openclaw/plugin-sdk/channel-reply-pipeline";
+import { createTypingCallbacks } from "openclaw/plugin-sdk/channel-message";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
 import { createDiscordRestClient } from "../client.js";
 import type { RequestClient } from "../internal/discord.js";
@@ -10,7 +7,7 @@ import { sendTyping } from "./typing.js";
 
 export const DISCORD_REPLY_TYPING_MAX_DURATION_MS = 20 * 60_000;
 
-export type DiscordReplyTypingFeedback = TypingCallbacks & {
+export type DiscordReplyTypingFeedback = ReturnType<typeof createTypingCallbacks> & {
   updateChannelId: (channelId: string) => void;
   getChannelId: () => string;
 };
