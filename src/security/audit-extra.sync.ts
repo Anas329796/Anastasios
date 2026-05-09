@@ -374,7 +374,7 @@ type SharedIngressTarget = {
 function listAuditAgentEntries(cfg: OpenClawConfig) {
   return (cfg.agents?.list ?? []).filter(
     (entry): entry is NonNullable<NonNullable<OpenClawConfig["agents"]>["list"]>[number] =>
-      Boolean(entry && typeof entry === "object" && typeof entry.id === "string"),
+      entry != null && typeof entry === "object" && typeof entry.id === "string",
   );
 }
 
