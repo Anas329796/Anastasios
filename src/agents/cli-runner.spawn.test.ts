@@ -154,10 +154,6 @@ function requireRegexMatch(value: string, pattern: RegExp): RegExpExecArray {
   return match;
 }
 
-async function expectPathMissing(targetPath: string): Promise<void> {
-  await expect(fs.access(targetPath)).rejects.toMatchObject({ code: "ENOENT" });
-}
-
 describe("runCliAgent spawn path", () => {
   it("formats redacted CLI resume diagnostics without exposing raw session ids", () => {
     const logLine = buildCliExecLogLine({
