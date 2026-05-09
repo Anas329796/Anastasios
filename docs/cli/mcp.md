@@ -361,7 +361,8 @@ Those saved definitions are for runtimes that OpenClaw launches or configures la
     - they do not validate whether the command, URL, or remote transport is reachable right now
     - runtime adapters decide which transport shapes they actually support at execution time
     - embedded Pi exposes configured MCP tools in normal `coding` and `messaging` tool profiles; `minimal` still hides them, and `tools.deny: ["bundle-mcp"]` disables them explicitly
-    - session-scoped bundled MCP runtimes are reaped after `mcp.sessionIdleTtlMs` milliseconds of idle time (default 10 minutes; set `0` to disable) and one-shot embedded runs clean them up at run end
+    - bundled MCP runtimes are reaped after `mcp.sessionIdleTtlMs` milliseconds of idle time (default 10 minutes; set `0` to disable) and one-shot embedded runs clean them up at run end
+    - by default each gateway session gets its own bundled MCP runtime (`mcp.runtimeScope: "session"`); single-tenant deployments can opt into `"shared"` to let sessions on the same workspace and `mcp.servers` config reuse one ref-counted runtime and skip the per-session cold start, at the cost of cross-session isolation between MCP children
 
   </Accordion>
 </AccordionGroup>
