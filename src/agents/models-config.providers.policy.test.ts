@@ -53,7 +53,7 @@ beforeEach(async () => {
 });
 
 describe("models-config.providers.policy", () => {
-  it("resolves config apiKey markers through provider plugin hooks", async () => {
+  it("resolves config apiKey markers through provider plugin hooks", () => {
     const env = {
       AWS_PROFILE: "default",
     } as NodeJS.ProcessEnv;
@@ -63,7 +63,7 @@ describe("models-config.providers.policy", () => {
     expect(resolver?.(env)).toBe("AWS_PROFILE");
   });
 
-  it("resolves anthropic-vertex ADC markers through provider plugin hooks", async () => {
+  it("resolves anthropic-vertex ADC markers through provider plugin hooks", () => {
     const resolver = resolveProviderConfigApiKeyResolver("anthropic-vertex");
 
     expect(resolver).toBeTypeOf("function");
@@ -74,16 +74,17 @@ describe("models-config.providers.policy", () => {
     ).toBe("gcp-vertex-credentials");
   });
 
-  it("normalizes Google provider config through provider plugin hooks", async () => {
+  it("normalizes Google provider config through provider plugin hooks", () => {
     expect(
       normalizeProviderSpecificConfig("google", {
         api: "google-generative-ai",
         baseUrl: "https://generativelanguage.googleapis.com",
         models: [],
       }),
-    ).toMatchObject({
+    ).toEqual({
       api: "google-generative-ai",
       baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+      models: [],
     });
   });
 

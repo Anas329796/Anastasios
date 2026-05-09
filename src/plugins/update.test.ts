@@ -12,6 +12,24 @@ function appBundledPluginRoot(pluginId: string): string {
   return bundledPluginRootAt(APP_ROOT, pluginId);
 }
 
+function requireExpectedPluginId(params: { expectedPluginId?: string }): string {
+  if (!params.expectedPluginId) {
+    throw new Error("Expected npm install params to include expectedPluginId");
+  }
+  return params.expectedPluginId;
+}
+
+function requirePluginPackageName(
+  plugins: Array<{ pluginId: string; packageName: string }>,
+  pluginId: string,
+): string {
+  const plugin = plugins.find((candidate) => candidate.pluginId === pluginId);
+  if (!plugin) {
+    throw new Error(`Expected plugin fixture ${pluginId}`);
+  }
+  return plugin.packageName;
+}
+
 const installPluginFromNpmSpecMock = vi.fn();
 const installPluginFromMarketplaceMock = vi.fn();
 const installPluginFromClawHubMock = vi.fn();
@@ -270,6 +288,28 @@ function createInstalledPackageDir(params: {
     ),
   );
   return dir;
+}
+
+function createOpenClawPeerLinkFixtures(plugins: Array<{ pluginId: string; packageName: string }>) {
+  const peerTarget = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-peer-target-"));
+  tempDirs.push(peerTarget);
+  const installPaths = Object.fromEntries(
+    plugins.map(({ pluginId, packageName }) => [
+      pluginId,
+      createInstalledPackageDir({
+        name: packageName,
+        version: "2026.5.4",
+        peerDependencies: { openclaw: ">=2026.5.4" },
+      }),
+    ]),
+  );
+  const peerLinkPath = (pluginId: string) =>
+    path.join(installPaths[pluginId], "node_modules", "openclaw");
+  const linkPeer = (pluginId: string) => {
+    fs.mkdirSync(path.dirname(peerLinkPath(pluginId)), { recursive: true });
+    fs.symlinkSync(peerTarget, peerLinkPath(pluginId), "junction");
+  };
+  return { installPaths, peerLinkPath, linkPeer };
 }
 
 function mockNpmViewMetadata(params: {
@@ -833,6 +873,226 @@ describe("updateNpmInstalledPlugins", () => {
     ]);
   });
 
+  it("repairs openclaw peer links after batch npm updates prune earlier plugin links", async () => {
+    const plugins = [
+      { pluginId: "brave", packageName: "@openclaw/brave-plugin" },
+      { pluginId: "codex", packageName: "@openclaw/codex" },
+      { pluginId: "discord", packageName: "@openclaw/discord" },
+    ];
+    const { installPaths, peerLinkPath, linkPeer } = createOpenClawPeerLinkFixtures(plugins);
+    for (const { packageName } of plugins) {
+      mockNpmViewMetadata({
+        name: packageName,
+        version: "2026.5.4",
+        integrity: "sha512-same",
+        shasum: "same",
+      });
+    }
+    installPluginFromNpmSpecMock.mockImplementation(
+      (params: { expectedPluginId?: string; spec: string }) => {
+        const pluginId = requireExpectedPluginId(params);
+        for (const { pluginId: installedPluginId } of plugins) {
+          fs.rmSync(peerLinkPath(installedPluginId), { recursive: true, force: true });
+        }
+        linkPeer(pluginId);
+        const packageName = requirePluginPackageName(plugins, pluginId);
+        return Promise.resolve(
+          createSuccessfulNpmUpdateResult({
+            pluginId,
+            targetDir: installPaths[pluginId],
+            version: "2026.5.4",
+            npmResolution: {
+              name: packageName,
+              version: "2026.5.4",
+              resolvedSpec: `${packageName}@2026.5.4`,
+            },
+          }),
+        );
+      },
+    );
+
+    const result = await updateNpmInstalledPlugins({
+      config: {
+        plugins: {
+          installs: Object.fromEntries(
+            plugins.map(({ pluginId, packageName }) => [
+              pluginId,
+              {
+                source: "npm",
+                spec: packageName,
+                installPath: installPaths[pluginId],
+                resolvedName: packageName,
+                resolvedVersion: "2026.5.4",
+                resolvedSpec: `${packageName}@2026.5.4`,
+                integrity: "sha512-same",
+                shasum: "same",
+              },
+            ]),
+          ),
+        },
+      },
+      pluginIds: plugins.map((plugin) => plugin.pluginId),
+    });
+
+    expect(installPluginFromNpmSpecMock).toHaveBeenCalledTimes(3);
+    for (const { pluginId } of plugins) {
+      expect(fs.existsSync(peerLinkPath(pluginId))).toBe(true);
+    }
+    expect(result.outcomes).toEqual(
+      plugins.map(({ pluginId }) => ({
+        pluginId,
+        status: "unchanged",
+        currentVersion: "2026.5.4",
+        nextVersion: "2026.5.4",
+        message: `${pluginId} already at 2026.5.4.`,
+      })),
+    );
+  });
+
+  it("repairs sibling openclaw peer links after a targeted npm update prunes the shared install tree", async () => {
+    const plugins = [
+      { pluginId: "brave", packageName: "@openclaw/brave-plugin" },
+      { pluginId: "codex", packageName: "@openclaw/codex" },
+      { pluginId: "discord", packageName: "@openclaw/discord" },
+    ];
+    const { installPaths, peerLinkPath, linkPeer } = createOpenClawPeerLinkFixtures(plugins);
+    linkPeer("brave");
+    linkPeer("discord");
+    mockNpmViewMetadata({
+      name: "@openclaw/codex",
+      version: "2026.5.4",
+      integrity: "sha512-same",
+      shasum: "same",
+    });
+    installPluginFromNpmSpecMock.mockImplementation(() => {
+      for (const { pluginId } of plugins) {
+        fs.rmSync(peerLinkPath(pluginId), { recursive: true, force: true });
+      }
+      linkPeer("codex");
+      return Promise.resolve(
+        createSuccessfulNpmUpdateResult({
+          pluginId: "codex",
+          targetDir: installPaths.codex,
+          version: "2026.5.4",
+          npmResolution: {
+            name: "@openclaw/codex",
+            version: "2026.5.4",
+            resolvedSpec: "@openclaw/codex@2026.5.4",
+          },
+        }),
+      );
+    });
+
+    await updateNpmInstalledPlugins({
+      config: {
+        plugins: {
+          installs: Object.fromEntries(
+            plugins.map(({ pluginId, packageName }) => [
+              pluginId,
+              {
+                source: "npm",
+                spec: packageName,
+                installPath: installPaths[pluginId],
+                resolvedName: packageName,
+                resolvedVersion: "2026.5.4",
+                resolvedSpec: `${packageName}@2026.5.4`,
+                integrity: "sha512-same",
+                shasum: "same",
+              },
+            ]),
+          ),
+        },
+      },
+      pluginIds: ["codex"],
+    });
+
+    expect(installPluginFromNpmSpecMock).toHaveBeenCalledTimes(1);
+    for (const { pluginId } of plugins) {
+      expect(fs.existsSync(peerLinkPath(pluginId))).toBe(true);
+    }
+  });
+
+  it("continues repairing sibling openclaw peer links after one recorded npm install cannot be relinked", async () => {
+    const plugins = [
+      { pluginId: "brave", packageName: "@openclaw/brave-plugin" },
+      { pluginId: "codex", packageName: "@openclaw/codex" },
+    ];
+    const { installPaths, peerLinkPath, linkPeer } = createOpenClawPeerLinkFixtures(plugins);
+    const brokenInstallPath = createInstalledPackageDir({
+      name: "@openclaw/broken-plugin",
+      version: "2026.5.4",
+      peerDependencies: { openclaw: ">=2026.5.4" },
+    });
+    fs.writeFileSync(path.join(brokenInstallPath, "node_modules"), "not a directory");
+    linkPeer("brave");
+    mockNpmViewMetadata({
+      name: "@openclaw/codex",
+      version: "2026.5.4",
+      integrity: "sha512-same",
+      shasum: "same",
+    });
+    installPluginFromNpmSpecMock.mockImplementation(() => {
+      for (const { pluginId } of plugins) {
+        fs.rmSync(peerLinkPath(pluginId), { recursive: true, force: true });
+      }
+      linkPeer("codex");
+      return Promise.resolve(
+        createSuccessfulNpmUpdateResult({
+          pluginId: "codex",
+          targetDir: installPaths.codex,
+          version: "2026.5.4",
+          npmResolution: {
+            name: "@openclaw/codex",
+            version: "2026.5.4",
+            resolvedSpec: "@openclaw/codex@2026.5.4",
+          },
+        }),
+      );
+    });
+    const warnMessages: string[] = [];
+
+    await updateNpmInstalledPlugins({
+      config: {
+        plugins: {
+          installs: {
+            broken: {
+              source: "npm",
+              spec: "@openclaw/broken-plugin",
+              installPath: brokenInstallPath,
+              resolvedName: "@openclaw/broken-plugin",
+              resolvedVersion: "2026.5.4",
+              resolvedSpec: "@openclaw/broken-plugin@2026.5.4",
+            },
+            ...Object.fromEntries(
+              plugins.map(({ pluginId, packageName }) => [
+                pluginId,
+                {
+                  source: "npm",
+                  spec: packageName,
+                  installPath: installPaths[pluginId],
+                  resolvedName: packageName,
+                  resolvedVersion: "2026.5.4",
+                  resolvedSpec: `${packageName}@2026.5.4`,
+                  integrity: "sha512-same",
+                  shasum: "same",
+                },
+              ]),
+            ),
+          },
+        },
+      },
+      pluginIds: ["codex"],
+      logger: { warn: (message) => warnMessages.push(message) },
+    });
+
+    expect(installPluginFromNpmSpecMock).toHaveBeenCalledTimes(1);
+    expect(fs.existsSync(peerLinkPath("brave"))).toBe(true);
+    expect(fs.existsSync(peerLinkPath("codex"))).toBe(true);
+    expect(warnMessages).toContainEqual(
+      expect.stringContaining('Could not repair openclaw peer link for "broken"'),
+    );
+  });
+
   it("refreshes legacy npm install records before skipping unchanged artifacts", async () => {
     const installPath = createInstalledPackageDir({
       name: "@martian-engineering/lossless-claw",
@@ -1109,6 +1369,207 @@ describe("updateNpmInstalledPlugins", () => {
         message: 'Skipping "demo" (disabled in config).',
       },
     ]);
+  });
+
+  it("updates disabled trusted official npm installs from the channel spec when requested", async () => {
+    const installPath = createInstalledPackageDir({
+      name: "@openclaw/codex",
+      version: "2026.5.3",
+    });
+    mockNpmViewMetadata({
+      name: "@openclaw/codex",
+      version: "2026.5.4",
+      integrity: "sha512-next",
+      shasum: "next",
+    });
+    installPluginFromNpmSpecMock.mockResolvedValue(
+      createSuccessfulNpmUpdateResult({
+        pluginId: "codex",
+        targetDir: installPath,
+        version: "2026.5.4",
+        npmResolution: {
+          name: "@openclaw/codex",
+          version: "2026.5.4",
+          resolvedSpec: "@openclaw/codex@2026.5.4",
+        },
+      }),
+    );
+
+    const result = await updateNpmInstalledPlugins({
+      config: {
+        plugins: {
+          entries: {
+            codex: {
+              enabled: false,
+              config: { preserved: true },
+            },
+          },
+          installs: {
+            codex: {
+              source: "npm",
+              spec: "@openclaw/codex@2026.5.3",
+              installPath,
+            },
+          },
+        },
+      },
+      skipDisabledPlugins: true,
+      syncOfficialPluginInstalls: true,
+    });
+
+    expect(installPluginFromNpmSpecMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        spec: "@openclaw/codex",
+        expectedPluginId: "codex",
+        trustedSourceLinkedOfficialInstall: true,
+      }),
+    );
+    expect(result.changed).toBe(true);
+    expect(result.config.plugins?.entries?.codex).toEqual({
+      enabled: false,
+      config: { preserved: true },
+    });
+    expect(result.config.plugins?.installs?.codex).toMatchObject({
+      source: "npm",
+      spec: "@openclaw/codex",
+      version: "2026.5.4",
+      resolvedName: "@openclaw/codex",
+      resolvedVersion: "2026.5.4",
+      resolvedSpec: "@openclaw/codex@2026.5.4",
+    });
+    expect(result.outcomes[0]).toMatchObject({
+      pluginId: "codex",
+      status: "updated",
+      currentVersion: "2026.5.3",
+      nextVersion: "2026.5.4",
+    });
+  });
+
+  it("keeps third-party exact pinned npm specs pinned during official install sync", async () => {
+    const installPath = createInstalledPackageDir({
+      name: "@acme/demo",
+      version: "1.2.3",
+    });
+    installPluginFromNpmSpecMock.mockResolvedValue(
+      createSuccessfulNpmUpdateResult({
+        pluginId: "demo",
+        targetDir: installPath,
+        version: "1.2.3",
+      }),
+    );
+
+    await updateNpmInstalledPlugins({
+      config: createNpmInstallConfig({
+        pluginId: "demo",
+        spec: "@acme/demo@1.2.3",
+        installPath,
+      }),
+      pluginIds: ["demo"],
+      dryRun: true,
+      syncOfficialPluginInstalls: true,
+    });
+
+    expect(installPluginFromNpmSpecMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        spec: "@acme/demo@1.2.3",
+        expectedPluginId: "demo",
+      }),
+    );
+  });
+
+  it("updates disabled trusted official ClawHub installs through the catalog spec", async () => {
+    installPluginFromClawHubMock.mockResolvedValue(
+      createSuccessfulClawHubUpdateResult({
+        pluginId: "diagnostics-otel",
+        targetDir: "/tmp/diagnostics-otel",
+        version: "2026.5.4",
+        clawhubPackage: "@openclaw/diagnostics-otel",
+      }),
+    );
+
+    const config = createClawHubInstallConfig({
+      pluginId: "diagnostics-otel",
+      installPath: "/tmp/diagnostics-otel",
+      clawhubUrl: "https://clawhub.ai",
+      clawhubPackage: "@openclaw/diagnostics-otel",
+      clawhubFamily: "code-plugin",
+      clawhubChannel: "official",
+      spec: "clawhub:@openclaw/diagnostics-otel@2026.5.3",
+    });
+    const result = await updateNpmInstalledPlugins({
+      config: {
+        ...config,
+        plugins: {
+          ...config.plugins,
+          entries: {
+            "diagnostics-otel": {
+              enabled: false,
+              config: { preserved: true },
+            },
+          },
+        },
+      },
+      skipDisabledPlugins: true,
+      syncOfficialPluginInstalls: true,
+    });
+
+    expect(installPluginFromClawHubMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        spec: "clawhub:@openclaw/diagnostics-otel",
+        expectedPluginId: "diagnostics-otel",
+      }),
+    );
+    expect(result.config.plugins?.installs?.["diagnostics-otel"]).toMatchObject({
+      source: "clawhub",
+      spec: "clawhub:@openclaw/diagnostics-otel",
+      version: "2026.5.4",
+      clawhubPackage: "@openclaw/diagnostics-otel",
+      clawhubChannel: "official",
+    });
+    expect(result.config.plugins?.entries?.["diagnostics-otel"]).toEqual({
+      enabled: false,
+      config: { preserved: true },
+    });
+  });
+
+  it("updates bare trusted official ClawHub installs through the catalog spec", async () => {
+    installPluginFromClawHubMock.mockResolvedValue(
+      createSuccessfulClawHubUpdateResult({
+        pluginId: "diagnostics-prometheus",
+        targetDir: "/tmp/diagnostics-prometheus",
+        version: "2026.5.4",
+        clawhubPackage: "@openclaw/diagnostics-prometheus",
+      }),
+    );
+
+    const result = await updateNpmInstalledPlugins({
+      config: {
+        plugins: {
+          installs: {
+            "diagnostics-prometheus": {
+              source: "clawhub",
+              spec: "clawhub:@openclaw/diagnostics-prometheus@2026.5.3",
+              installPath: "/tmp/diagnostics-prometheus",
+            },
+          },
+        },
+      },
+      syncOfficialPluginInstalls: true,
+    });
+
+    expect(installPluginFromClawHubMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        spec: "clawhub:@openclaw/diagnostics-prometheus",
+        expectedPluginId: "diagnostics-prometheus",
+      }),
+    );
+    expect(result.config.plugins?.installs?.["diagnostics-prometheus"]).toMatchObject({
+      source: "clawhub",
+      spec: "clawhub:@openclaw/diagnostics-prometheus",
+      version: "2026.5.4",
+      clawhubPackage: "@openclaw/diagnostics-prometheus",
+      clawhubChannel: "official",
+    });
   });
 
   it("keeps enabled tracked plugin update failures fatal when disabled skipping is enabled", async () => {
@@ -2291,7 +2752,7 @@ describe("syncPluginsForUpdateChannel", () => {
 
       expect(installPluginFromNpmSpecMock).not.toHaveBeenCalled();
       expect(result.changed).toBe(expectedChanged);
-      expect(result.summary.switchedToNpm).toEqual([]);
+      expect(result.summary.switchedToNpm).toStrictEqual([]);
       expect(result.config.plugins?.load?.paths).toEqual(expectedLoadPaths);
       expectBundledPathInstall({
         install: result.config.plugins?.installs?.feishu,
@@ -2425,8 +2886,8 @@ describe("syncPluginsForUpdateChannel", () => {
     );
     expect(result.changed).toBe(true);
     expect(result.summary.switchedToNpm).toEqual(["legacy-chat"]);
-    expect(result.summary.errors).toEqual([]);
-    expect(result.config.plugins?.load?.paths).toEqual([]);
+    expect(result.summary.errors).toStrictEqual([]);
+    expect(result.config.plugins?.load?.paths).toStrictEqual([]);
     expect(result.config.plugins?.installs?.["legacy-chat"]).toMatchObject({
       source: "npm",
       spec: "@openclaw/legacy-chat",
@@ -2538,9 +2999,9 @@ describe("syncPluginsForUpdateChannel", () => {
     expect(installPluginFromNpmSpecMock).not.toHaveBeenCalled();
     expect(result.changed).toBe(true);
     expect(result.summary.switchedToClawHub).toEqual(["legacy-chat"]);
-    expect(result.summary.switchedToNpm).toEqual([]);
-    expect(result.summary.errors).toEqual([]);
-    expect(result.config.plugins?.load?.paths).toEqual([]);
+    expect(result.summary.switchedToNpm).toStrictEqual([]);
+    expect(result.summary.errors).toStrictEqual([]);
+    expect(result.config.plugins?.load?.paths).toStrictEqual([]);
     expect(result.config.plugins?.installs?.["legacy-chat"]).toMatchObject({
       source: "clawhub",
       spec: "clawhub:legacy-chat@2026.5.1-beta.2",
@@ -2621,12 +3082,12 @@ describe("syncPluginsForUpdateChannel", () => {
       }),
     );
     expect(result.changed).toBe(true);
-    expect(result.summary.switchedToClawHub).toEqual([]);
+    expect(result.summary.switchedToClawHub).toStrictEqual([]);
     expect(result.summary.switchedToNpm).toEqual(["legacy-chat"]);
     expect(result.summary.warnings).toEqual([
       "ClawHub clawhub:legacy-chat@2026.5.1-beta.2 unavailable for legacy-chat; falling back to npm @openclaw/legacy-chat.",
     ]);
-    expect(result.summary.errors).toEqual([]);
+    expect(result.summary.errors).toStrictEqual([]);
     expect(result.config.plugins?.installs?.["legacy-chat"]).toMatchObject({
       source: "npm",
       spec: "@openclaw/legacy-chat",

@@ -20,8 +20,7 @@ const mocks = vi.hoisted(() => ({
   realtimeHandlerRegisterToolHandler: vi.fn(),
   realtimeHandlerSetPublicUrl: vi.fn(),
   resolveConfiguredRealtimeVoiceProvider: vi.fn(),
-  getActiveMemorySearchManager: vi.fn(),
-  memorySearch: vi.fn(),
+  resolveRealtimeFastContextConsult: vi.fn(),
   startTunnel: vi.fn(),
   setupTailscaleExposure: vi.fn(),
   cleanupTailscaleExposure: vi.fn(),
@@ -74,6 +73,10 @@ vi.mock("./realtime-voice.runtime.js", () => ({
   resolveConfiguredRealtimeVoiceProvider: mocks.resolveConfiguredRealtimeVoiceProvider,
 }));
 
+vi.mock("./realtime-fast-context.js", () => ({
+  resolveRealtimeFastContextConsult: mocks.resolveRealtimeFastContextConsult,
+}));
+
 vi.mock("./webhook/realtime-handler.js", () => ({
   RealtimeCallHandler: class {
     constructor(...args: unknown[]) {
@@ -82,10 +85,6 @@ vi.mock("./webhook/realtime-handler.js", () => ({
     registerToolHandler = mocks.realtimeHandlerRegisterToolHandler;
     setPublicUrl = mocks.realtimeHandlerSetPublicUrl;
   },
-}));
-
-vi.mock("openclaw/plugin-sdk/memory-host-search", () => ({
-  getActiveMemorySearchManager: mocks.getActiveMemorySearchManager,
 }));
 
 vi.mock("./tunnel.js", () => ({
@@ -155,14 +154,8 @@ describe("createVoiceCallRuntime lifecycle", () => {
       provider: { id: "openai" },
       providerConfig: { model: "gpt-realtime" },
     });
-    mocks.getActiveMemorySearchManager.mockReset();
-    mocks.memorySearch.mockReset();
-    mocks.getActiveMemorySearchManager.mockResolvedValue({
-      manager: {
-        search: mocks.memorySearch,
-      },
-    });
-    mocks.memorySearch.mockResolvedValue([]);
+    mocks.resolveRealtimeFastContextConsult.mockReset();
+    mocks.resolveRealtimeFastContextConsult.mockResolvedValue({ handled: false });
     mocks.startTunnel.mockResolvedValue(null);
     mocks.setupTailscaleExposure.mockResolvedValue(null);
     mocks.cleanupTailscaleExposure.mockResolvedValue(undefined);
@@ -363,10 +356,9 @@ describe("createVoiceCallRuntime lifecycle", () => {
         expect.objectContaining({ name: "custom_tool" }),
       ],
     });
-    expect(mocks.realtimeHandlerRegisterToolHandler).toHaveBeenCalledWith(
-      "openclaw_agent_consult",
-      expect.any(Function),
-    );
+    const registeredToolHandler = mocks.realtimeHandlerRegisterToolHandler.mock.calls[0];
+    expect(registeredToolHandler?.[0]).toBe("openclaw_agent_consult");
+    expect(registeredToolHandler?.[1]).toBeTypeOf("function");
 
     const handler = mocks.realtimeHandlerRegisterToolHandler.mock.calls[0]?.[1] as
       | ((
@@ -499,16 +491,12 @@ describe("createVoiceCallRuntime lifecycle", () => {
       to: "+15550009999",
       transcript: [],
     });
-    mocks.memorySearch.mockResolvedValue([
-      {
-        source: "memory",
-        path: "MEMORY.md",
-        startLine: 12,
-        endLine: 14,
-        score: 0.91,
-        snippet: "The caller's basement lights are on.",
+    mocks.resolveRealtimeFastContextConsult.mockResolvedValue({
+      handled: true,
+      result: {
+        text: "Fast OpenClaw memory or session context found.\nThe caller's basement lights are on.",
       },
-    ]);
+    });
 
     await createVoiceCallRuntime({
       config,
@@ -528,11 +516,83 @@ describe("createVoiceCallRuntime lifecycle", () => {
         text: expect.stringContaining("The caller's basement lights are on."),
       },
     );
-    expect(mocks.memorySearch).toHaveBeenCalledWith("Are the basement lights on?", {
-      maxResults: 2,
+    expect(mocks.resolveRealtimeFastContextConsult).toHaveBeenCalledWith({
+      cfg: {},
+      agentId: "main",
+      args: { question: "Are the basement lights on?" },
+      config: {
+        enabled: true,
+        fallbackToConsult: false,
+        maxResults: 2,
+        sources: ["memory"],
+        timeoutMs: 800,
+      },
+      logger: {
+        info: console.log,
+        warn: console.warn,
+        error: console.error,
+        debug: console.debug,
+      },
       sessionKey: "voice:15550001234",
-      sources: ["memory"],
     });
     expect(runEmbeddedPiAgent).not.toHaveBeenCalled();
+  });
+
+  it("uses the configured realtime consult thinking level when set", async () => {
+    const config = createBaseConfig();
+    config.inboundPolicy = "allowlist";
+    config.realtime.enabled = true;
+    config.realtime.consultThinkingLevel = "low";
+    config.realtime.consultFastMode = true;
+    const sessionStore: Record<string, unknown> = {};
+    const runEmbeddedPiAgent = vi.fn(async () => ({
+      payloads: [{ text: "Done." }],
+      meta: {},
+    }));
+    const agentRuntime = {
+      defaults: { provider: "openai", model: "gpt-5.4" },
+      resolveAgentDir: vi.fn(() => "/tmp/agent"),
+      resolveAgentWorkspaceDir: vi.fn(() => "/tmp/workspace"),
+      resolveAgentIdentity: vi.fn(),
+      resolveThinkingDefault: vi.fn(() => "high"),
+      resolveAgentTimeoutMs: vi.fn(() => 30_000),
+      ensureAgentWorkspace: vi.fn(async () => {}),
+      session: {
+        resolveStorePath: vi.fn(() => "/tmp/sessions.json"),
+        loadSessionStore: vi.fn(() => sessionStore),
+        saveSessionStore: vi.fn(async () => {}),
+        updateSessionStore: vi.fn(async (_storePath, mutator) => mutator(sessionStore)),
+        resolveSessionFilePath: vi.fn(() => "/tmp/session.json"),
+      },
+      runEmbeddedPiAgent,
+    };
+    mocks.managerGetCall.mockReturnValue({
+      callId: "call-1",
+      direction: "outbound",
+      from: "+15550001234",
+      to: "+15550009999",
+      transcript: [],
+    });
+
+    await createVoiceCallRuntime({
+      config,
+      coreConfig: {} as CoreConfig,
+      agentRuntime: agentRuntime as never,
+    });
+
+    const handler = mocks.realtimeHandlerRegisterToolHandler.mock.calls[0]?.[1] as
+      | ((args: unknown, callId: string) => Promise<unknown>)
+      | undefined;
+    await expect(handler?.({ question: "Turn on the lights." }, "call-1")).resolves.toEqual({
+      text: "Done.",
+    });
+
+    expect(agentRuntime.resolveThinkingDefault).not.toHaveBeenCalled();
+    expect(runEmbeddedPiAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        thinkLevel: "low",
+        fastMode: true,
+      }),
+    );
   });
 });

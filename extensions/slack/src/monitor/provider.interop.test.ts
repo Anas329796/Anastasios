@@ -156,14 +156,15 @@ describe("createSlackBoltApp", () => {
     });
 
     expect(receiver).toBeInstanceOf(FakeSocketModeReceiver);
-    expect((receiver as unknown as FakeSocketModeReceiver).args).toEqual({
+    const receiverArgs = (receiver as unknown as FakeSocketModeReceiver).args;
+    const receiverLogger = receiverArgs.logger as { error?: unknown; warn?: unknown };
+    expect(receiverLogger.error).toBeTypeOf("function");
+    expect(receiverLogger.warn).toBeTypeOf("function");
+    expect(receiverArgs).toEqual({
       appToken: "xapp-test",
       autoReconnectEnabled: false,
       clientPingTimeout: 15_000,
-      logger: expect.objectContaining({
-        error: expect.any(Function),
-        warn: expect.any(Function),
-      }),
+      logger: receiverLogger,
       installerOptions: {
         clientOptions,
       },
@@ -199,16 +200,17 @@ describe("createSlackBoltApp", () => {
       },
     });
 
-    expect((receiver as unknown as FakeSocketModeReceiver).args).toEqual({
+    const receiverArgs = (receiver as unknown as FakeSocketModeReceiver).args;
+    const receiverLogger = receiverArgs.logger as { error?: unknown; warn?: unknown };
+    expect(receiverLogger.error).toBeTypeOf("function");
+    expect(receiverLogger.warn).toBeTypeOf("function");
+    expect(receiverArgs).toEqual({
       appToken: "xapp-test",
       autoReconnectEnabled: false,
       clientPingTimeout: 20_000,
       serverPingTimeout: 45_000,
       pingPongLoggingEnabled: true,
-      logger: expect.objectContaining({
-        error: expect.any(Function),
-        warn: expect.any(Function),
-      }),
+      logger: receiverLogger,
       installerOptions: {
         clientOptions,
       },
@@ -288,6 +290,28 @@ describe("createSlackBoltApp", () => {
     logger.warn("another socket warning");
 
     expect(warnCalls).toEqual([["socket-mode:SlackWebSocket:1", "another socket warning"]]);
+    expect(logger.getLastMessage()).toBe("socket-mode:SlackWebSocket:1 another socket warning");
+  });
+
+  it("remembers the last Socket Mode SDK error for retry diagnostics", () => {
+    const logger = createSlackSocketModeLogger({
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+    });
+
+    logger.setName("SlackWebSocket:1");
+    logger.error("failed to retrieve WSS URL", {
+      data: {
+        error: "missing_scope",
+        needed: "connections:write",
+      },
+    });
+
+    expect(logger.getLastMessage()).toBe(
+      "socket-mode:SlackWebSocket:1 failed to retrieve WSS URL slack error: missing_scope; needed: connections:write",
+    );
   });
 
   it("keeps Bolt self filtering except assistant message_changed events", () => {

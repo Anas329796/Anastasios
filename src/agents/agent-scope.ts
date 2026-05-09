@@ -5,6 +5,7 @@ import type { AgentDefaultsConfig } from "../config/types.agent-defaults.js";
 import type { AgentModelConfig } from "../config/types.agents-shared.js";
 import type { AgentConfig } from "../config/types.agents.js";
 import type { OpenClawConfig } from "../config/types.js";
+import { isPathInside } from "../infra/path-guards.js";
 import {
   normalizeAgentId,
   parseAgentSessionKey,
@@ -18,15 +19,10 @@ import {
 } from "../shared/string-coerce.js";
 import { resolveUserPath } from "../utils.js";
 import {
-  listAgentEntries,
   listAgentIds,
   resolveAgentConfig,
-  resolveAgentContextLimits,
-  resolveAgentDir,
-  resolveDefaultAgentDir,
   resolveAgentWorkspaceDir,
   resolveDefaultAgentId,
-  type ResolvedAgentConfig,
 } from "./agent-scope-config.js";
 import { resolveEffectiveAgentSkillFilter } from "./skills/agent-filter.js";
 export {
@@ -239,11 +235,6 @@ function normalizePathForComparison(input: string): string {
   return normalized;
 }
 
-function isPathWithinRoot(candidatePath: string, rootPath: string): boolean {
-  const relative = path.relative(rootPath, candidatePath);
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
-}
-
 export function resolveAgentIdsByWorkspacePath(
   cfg: OpenClawConfig,
   workspacePath: string,
@@ -255,7 +246,7 @@ export function resolveAgentIdsByWorkspacePath(
   for (let index = 0; index < ids.length; index += 1) {
     const id = ids[index];
     const workspaceDir = normalizePathForComparison(resolveAgentWorkspaceDir(cfg, id));
-    if (!isPathWithinRoot(normalizedWorkspacePath, workspaceDir)) {
+    if (!isPathInside(workspaceDir, normalizedWorkspacePath)) {
       continue;
     }
     matches.push({ id, workspaceDir, order: index });

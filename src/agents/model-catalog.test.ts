@@ -19,16 +19,40 @@ let readFileMock: ReturnType<typeof vi.fn>;
 
 vi.mock("./model-suppression.runtime.js", () => ({
   shouldSuppressBuiltInModel: (params: { provider?: string; id?: string }) =>
-    (params.provider === "openai" ||
-      params.provider === "azure-openai-responses" ||
-      params.provider === "openai-codex") &&
-    params.id === "gpt-5.3-codex-spark",
+    isSuppressedModel(params.provider, params.id),
   buildShouldSuppressBuiltInModel: () => (params: { provider?: string; id?: string }) =>
-    (params.provider === "openai" ||
-      params.provider === "azure-openai-responses" ||
-      params.provider === "openai-codex") &&
-    params.id === "gpt-5.3-codex-spark",
+    isSuppressedModel(params.provider, params.id),
 }));
+
+function isSuppressedModel(provider?: string, id?: string): boolean {
+  const modelId = id?.trim().toLowerCase();
+  if (!modelId) {
+    return false;
+  }
+  if (
+    (provider === "openai" ||
+      provider === "azure-openai-responses" ||
+      provider === "openai-codex") &&
+    modelId === "gpt-5.3-codex-spark"
+  ) {
+    return true;
+  }
+  return (
+    provider === "openai-codex" &&
+    [
+      "gpt-5.1",
+      "gpt-5.1-codex",
+      "gpt-5.1-codex-mini",
+      "gpt-5.1-codex-max",
+      "gpt-5.2",
+      "gpt-5.2-codex",
+      "gpt-5.2-pro",
+      "gpt-5.3",
+      "gpt-5.3-codex",
+      "gpt-5.3-chat-latest",
+    ].includes(modelId)
+  );
+}
 
 function mockCatalogImportFailThenRecover() {
   let call = 0;
@@ -156,7 +180,7 @@ describe("loadModelCatalog", () => {
 
       const cfg = {} as OpenClawConfig;
       const first = await loadModelCatalog({ config: cfg });
-      expect(first).toEqual([]);
+      expect(first).toStrictEqual([]);
 
       const second = await loadModelCatalog({ config: cfg });
       expect(second).toEqual([{ id: "gpt-4.1", name: "GPT-4.1", provider: "openai" }]);
@@ -524,6 +548,57 @@ describe("loadModelCatalog", () => {
     );
   });
 
+  it("filters stale openai-codex 5.1/5.2/5.3 built-ins from the catalog", async () => {
+    mockPiDiscoveryModels([
+      {
+        id: "gpt-5.1-codex-mini",
+        provider: "openai-codex",
+        name: "GPT-5.1 Codex Mini",
+        reasoning: true,
+        contextWindow: 400000,
+        input: ["text", "image"],
+      },
+      {
+        id: "gpt-5.2-codex",
+        provider: "openai-codex",
+        name: "GPT-5.2 Codex",
+        reasoning: true,
+        contextWindow: 400000,
+        input: ["text", "image"],
+      },
+      {
+        id: "gpt-5.3-codex",
+        provider: "openai-codex",
+        name: "GPT-5.3 Codex",
+        reasoning: true,
+        contextWindow: 400000,
+        input: ["text", "image"],
+      },
+      {
+        id: "gpt-5.5",
+        provider: "openai-codex",
+        name: "GPT-5.5",
+        reasoning: true,
+        contextWindow: 400000,
+        input: ["text", "image"],
+      },
+    ]);
+
+    const result = await loadModelCatalog({ config: {} as OpenClawConfig });
+    expect(result).not.toContainEqual(
+      expect.objectContaining({ provider: "openai-codex", id: "gpt-5.1-codex-mini" }),
+    );
+    expect(result).not.toContainEqual(
+      expect.objectContaining({ provider: "openai-codex", id: "gpt-5.2-codex" }),
+    );
+    expect(result).not.toContainEqual(
+      expect.objectContaining({ provider: "openai-codex", id: "gpt-5.3-codex" }),
+    );
+    expect(result).toContainEqual(
+      expect.objectContaining({ provider: "openai-codex", id: "gpt-5.5" }),
+    );
+  });
+
   it("does not synthesize gpt-5.4 OpenAI forward-compat entries from template models", async () => {
     mockPiDiscoveryModels([
       {
@@ -603,7 +678,7 @@ describe("loadModelCatalog", () => {
     expect(result).toContainEqual(
       expect.objectContaining({
         provider: "kilocode",
-        id: "google/gemini-3-pro-preview",
+        id: "google/gemini-3.1-pro-preview",
         name: "Gemini 3 Pro Preview",
       }),
     );

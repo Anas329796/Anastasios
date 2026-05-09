@@ -348,7 +348,7 @@ describe("handleAgentEnd", () => {
       mediaUrls: ["/tmp/reply.opus"],
       audioAsVoice: true,
     });
-    expect(ctx.state.pendingToolMediaUrls).toEqual([]);
+    expect(ctx.state.pendingToolMediaUrls).toStrictEqual([]);
     expect(ctx.state.pendingToolAudioAsVoice).toBe(false);
   });
 
@@ -594,7 +594,7 @@ describe("handleAgentEnd", () => {
     });
   });
 
-  it("emits lifecycle end when block reply flush throws", async () => {
+  it("emits lifecycle end when block reply flush throws", () => {
     const onAgentEvent = vi.fn();
     const ctx = createContext(undefined, { onAgentEvent });
     ctx.flushBlockReplyBuffer = vi.fn(() => {

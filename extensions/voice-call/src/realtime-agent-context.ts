@@ -1,6 +1,6 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
+import { buildRealtimeVoiceAgentConsultPolicyInstructions } from "openclaw/plugin-sdk/realtime-voice";
+import { root } from "openclaw/plugin-sdk/security-runtime";
 import type { VoiceCallConfig } from "./config.js";
 import type { CoreAgentDeps, CoreConfig } from "./core-bridge.js";
 
@@ -42,15 +42,6 @@ function resolveAgentSystemPromptOverride(cfg: CoreConfig, agentId: string): str
   );
 }
 
-function isSafeWorkspaceRelativeFile(file: string): boolean {
-  if (!file.trim() || path.isAbsolute(file)) {
-    return false;
-  }
-  const normalized = path.normalize(file);
-  const parts = normalized.split(/[\\/]+/);
-  return normalized !== "." && !parts.includes("..") && !normalized.includes("\0");
-}
-
 function limitText(text: string, maxChars: number): string {
   if (text.length <= maxChars) {
     return text;
@@ -65,12 +56,15 @@ async function readWorkspaceVoiceContextFiles(params: {
 }): Promise<string[]> {
   const sections: string[] = [];
   let remaining = params.maxChars;
+  const workspaceRoot = await root(params.workspaceDir).catch(() => null);
+  if (!workspaceRoot) {
+    return sections;
+  }
   for (const file of params.files) {
-    if (remaining <= 0 || !isSafeWorkspaceRelativeFile(file)) {
+    if (remaining <= 0) {
       continue;
     }
-    const fullPath = path.join(params.workspaceDir, path.normalize(file));
-    const content = await readFile(fullPath, "utf8").catch(() => undefined);
+    const content = await workspaceRoot.readText(file).catch(() => undefined);
     const trimmed = content?.trim();
     if (!trimmed) {
       continue;
@@ -83,28 +77,6 @@ async function readWorkspaceVoiceContextFiles(params: {
   return sections;
 }
 
-function buildConsultPolicyGuidance(
-  config: Pick<VoiceCallConfig["realtime"], "consultPolicy" | "toolPolicy">,
-): string | undefined {
-  if (config.toolPolicy === "none" || config.consultPolicy === "auto") {
-    return undefined;
-  }
-  if (config.consultPolicy === "always") {
-    return [
-      "Consult behavior:",
-      "- Call openclaw_agent_consult before every substantive answer.",
-      "- You may answer directly only for greetings, acknowledgements, brief latency tests, or filler while waiting for the consult result.",
-      "- After the consult result arrives, speak that result concisely.",
-    ].join("\n");
-  }
-  return [
-    "Consult behavior:",
-    "- Answer directly for greetings, acknowledgements, simple conversational glue, and brief latency tests.",
-    "- Call openclaw_agent_consult before answering requests that need facts, memory, current information, tools, workspace state, or the user's OpenClaw-specific context.",
-    "- Keep spoken replies concise and natural.",
-  ].join("\n");
-}
-
 export async function buildRealtimeVoiceInstructions(params: {
   baseInstructions: string;
   config: VoiceCallConfig;
@@ -113,7 +85,7 @@ export async function buildRealtimeVoiceInstructions(params: {
 }): Promise<string> {
   const { config } = params;
   const sections: string[] = [params.baseInstructions];
-  const consultGuidance = buildConsultPolicyGuidance(config.realtime);
+  const consultGuidance = buildRealtimeVoiceAgentConsultPolicyInstructions(config.realtime);
   if (consultGuidance) {
     sections.push(consultGuidance);
   }

@@ -46,10 +46,10 @@ vi.mock("../../infra/json-files.js", async () => {
   );
   return {
     ...actual,
-    writeJsonAtomic: async (
+    writeJson: async (
       filePath: string,
       value: unknown,
-      options?: Parameters<typeof actual.writeJsonAtomic>[2],
+      options?: Parameters<typeof actual.writeJson>[2],
     ) => {
       const payload = JSON.stringify(value);
       const gate = writeGateState.active;
@@ -64,7 +64,7 @@ vi.mock("../../infra/json-files.js", async () => {
         }
         await gate.waitForRelease;
       }
-      await actual.writeJsonAtomic(filePath, value, options);
+      await actual.writeJson(filePath, value, options);
     },
   };
 });
@@ -188,6 +188,10 @@ async function seedStaleLock(lockPath: string) {
   );
 }
 
+async function expectPathMissing(targetPath: string): Promise<void> {
+  await expect(fs.access(targetPath)).rejects.toMatchObject({ code: "ENOENT" });
+}
+
 describe("registry race safety", () => {
   it("does not migrate legacy registry files from runtime reads", async () => {
     await seedContainerRegistry([containerEntry({ containerName: "legacy-container" })]);
@@ -246,10 +250,10 @@ describe("registry race safety", () => {
       expect.objectContaining({ kind: "browsers", status: "migrated", entries: 1 }),
     ]);
 
-    await expect(fs.access(SANDBOX_REGISTRY_PATH)).rejects.toThrow();
-    await expect(fs.access(SANDBOX_BROWSER_REGISTRY_PATH)).rejects.toThrow();
-    await expect(fs.access(`${SANDBOX_REGISTRY_PATH}.lock`)).rejects.toThrow();
-    await expect(fs.access(`${SANDBOX_BROWSER_REGISTRY_PATH}.lock`)).rejects.toThrow();
+    await expectPathMissing(SANDBOX_REGISTRY_PATH);
+    await expectPathMissing(SANDBOX_BROWSER_REGISTRY_PATH);
+    await expectPathMissing(`${SANDBOX_REGISTRY_PATH}.lock`);
+    await expectPathMissing(`${SANDBOX_BROWSER_REGISTRY_PATH}.lock`);
     await expect(readRegistry()).resolves.toEqual({
       entries: [
         expect.objectContaining({
@@ -353,7 +357,7 @@ describe("registry race safety", () => {
     const registry = await readRegistry();
 
     expect(registry.entries.map((entry) => entry.containerName)).toEqual(["../escape"]);
-    await expect(fs.access(`${TEST_STATE_DIR}/escape.json`)).rejects.toThrow();
+    await expectPathMissing(`${TEST_STATE_DIR}/escape.json`);
   });
 
   it("returns registry entries in deterministic container-name order", async () => {
@@ -408,8 +412,8 @@ describe("registry race safety", () => {
     await seedMalformedBrowserRegistry("{bad json");
     const results = await migrateLegacySandboxRegistryFiles();
 
-    await expect(fs.access(SANDBOX_REGISTRY_PATH)).rejects.toThrow();
-    await expect(fs.access(SANDBOX_BROWSER_REGISTRY_PATH)).rejects.toThrow();
+    await expectPathMissing(SANDBOX_REGISTRY_PATH);
+    await expectPathMissing(SANDBOX_BROWSER_REGISTRY_PATH);
     expect(results.map((result) => result.status)).toEqual([
       "quarantined-invalid",
       "quarantined-invalid",

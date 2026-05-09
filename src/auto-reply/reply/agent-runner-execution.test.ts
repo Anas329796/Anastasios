@@ -471,6 +471,208 @@ describe("runAgentTurnWithFallback", () => {
     );
   });
 
+  it("bridges CLI assistant agent events into onPartialReply for live preview (#76869)", async () => {
+    state.isCliProviderMock.mockReturnValue(true);
+    state.runWithModelFallbackMock.mockImplementationOnce(async (params: FallbackRunnerParams) => ({
+      result: await params.run("claude-cli", "claude-opus-4-6"),
+      provider: "claude-cli",
+      model: "claude-opus-4-6",
+      attempts: [],
+    }));
+    state.runCliAgentMock.mockImplementationOnce(async (params: { runId: string }) => {
+      const realAgentEvents = await vi.importActual<typeof import("../../infra/agent-events.js")>(
+        "../../infra/agent-events.js",
+      );
+      realAgentEvents.emitAgentEvent({
+        runId: params.runId,
+        stream: "assistant",
+        data: { text: "Hello", delta: "Hello" },
+      });
+      realAgentEvents.emitAgentEvent({
+        runId: params.runId,
+        stream: "assistant",
+        data: { text: "Hello world", delta: " world" },
+      });
+      return { payloads: [{ text: "Hello world" }], meta: {} };
+    });
+
+    const onPartialReply = vi.fn<NonNullable<GetReplyOptions["onPartialReply"]>>(
+      async (_payload) => undefined,
+    );
+    const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
+    const followupRun = createFollowupRun();
+    followupRun.run.provider = "claude-cli";
+    followupRun.run.model = "claude-opus-4-6";
+
+    await runAgentTurnWithFallback({
+      commandBody: "hi",
+      followupRun,
+      sessionCtx: {
+        Provider: "telegram",
+        MessageSid: "msg",
+      } as unknown as TemplateContext,
+      opts: { onPartialReply },
+      typingSignals: createMockTypingSignaler(),
+      blockReplyPipeline: null,
+      blockStreamingEnabled: false,
+      resolvedBlockStreamingBreak: "message_end",
+      applyReplyToMode: (payload) => payload,
+      shouldEmitToolResult: () => true,
+      shouldEmitToolOutput: () => false,
+      pendingToolTasks: new Set(),
+      resetSessionAfterCompactionFailure: async () => false,
+      resetSessionAfterRoleOrderingConflict: async () => false,
+      isHeartbeat: false,
+      sessionKey: "main",
+      getActiveSessionEntry: () => undefined,
+      resolvedVerboseLevel: "off",
+    });
+
+    const partialTexts = onPartialReply.mock.calls.map((call) => call[0].text);
+    expect(partialTexts).toEqual(["Hello", "Hello world"]);
+  });
+
+  it("serializes and drains bridged CLI assistant previews before completing (#76869)", async () => {
+    state.isCliProviderMock.mockReturnValue(true);
+    state.runWithModelFallbackMock.mockImplementationOnce(async (params: FallbackRunnerParams) => ({
+      result: await params.run("claude-cli", "claude-opus-4-6"),
+      provider: "claude-cli",
+      model: "claude-opus-4-6",
+      attempts: [],
+    }));
+    state.runCliAgentMock.mockImplementationOnce(async (params: { runId: string }) => {
+      const realAgentEvents = await vi.importActual<typeof import("../../infra/agent-events.js")>(
+        "../../infra/agent-events.js",
+      );
+      realAgentEvents.emitAgentEvent({
+        runId: params.runId,
+        stream: "assistant",
+        data: { text: "Hello", delta: "Hello" },
+      });
+      realAgentEvents.emitAgentEvent({
+        runId: params.runId,
+        stream: "assistant",
+        data: { text: "Hello world", delta: " world" },
+      });
+      return { payloads: [{ text: "Hello world" }], meta: {} };
+    });
+
+    let firstPreviewStarted: (() => void) | undefined;
+    let releaseFirstPreview: (() => void) | undefined;
+    const firstPreviewPromise = new Promise<void>((resolve) => {
+      firstPreviewStarted = resolve;
+    });
+    const previewOrder: string[] = [];
+    const onPartialReply = vi.fn<NonNullable<GetReplyOptions["onPartialReply"]>>(
+      async (payload) => {
+        previewOrder.push(payload.text ?? "");
+        if (payload.text === "Hello") {
+          firstPreviewStarted?.();
+          await new Promise<void>((resolve) => {
+            releaseFirstPreview = resolve;
+          });
+          previewOrder.push("Hello released");
+        }
+      },
+    );
+    const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
+    const followupRun = createFollowupRun();
+    followupRun.run.provider = "claude-cli";
+    followupRun.run.model = "claude-opus-4-6";
+
+    const runPromise = runAgentTurnWithFallback({
+      commandBody: "hi",
+      followupRun,
+      sessionCtx: {
+        Provider: "telegram",
+        MessageSid: "msg",
+      } as unknown as TemplateContext,
+      opts: { onPartialReply },
+      typingSignals: createMockTypingSignaler(),
+      blockReplyPipeline: null,
+      blockStreamingEnabled: false,
+      resolvedBlockStreamingBreak: "message_end",
+      applyReplyToMode: (payload) => payload,
+      shouldEmitToolResult: () => true,
+      shouldEmitToolOutput: () => false,
+      pendingToolTasks: new Set(),
+      resetSessionAfterCompactionFailure: async () => false,
+      resetSessionAfterRoleOrderingConflict: async () => false,
+      isHeartbeat: false,
+      sessionKey: "main",
+      getActiveSessionEntry: () => undefined,
+      resolvedVerboseLevel: "off",
+    });
+
+    await firstPreviewPromise;
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(previewOrder).toEqual(["Hello"]);
+
+    releaseFirstPreview?.();
+    await runPromise;
+
+    expect(previewOrder).toEqual(["Hello", "Hello released", "Hello world"]);
+  });
+
+  it("does not bridge CLI assistant deltas when silentExpected is set (#76869)", async () => {
+    state.isCliProviderMock.mockReturnValue(true);
+    state.runWithModelFallbackMock.mockImplementationOnce(async (params: FallbackRunnerParams) => ({
+      result: await params.run("claude-cli", "claude-opus-4-6"),
+      provider: "claude-cli",
+      model: "claude-opus-4-6",
+      attempts: [],
+    }));
+    state.runCliAgentMock.mockImplementationOnce(async (params: { runId: string }) => {
+      const realAgentEvents = await vi.importActual<typeof import("../../infra/agent-events.js")>(
+        "../../infra/agent-events.js",
+      );
+      realAgentEvents.emitAgentEvent({
+        runId: params.runId,
+        stream: "assistant",
+        data: { text: "secret heartbeat output", delta: "secret heartbeat output" },
+      });
+      realAgentEvents.emitAgentEvent({
+        runId: params.runId,
+        stream: "assistant",
+        data: { text: "NO_REPLY do not preview", delta: " do not preview" },
+      });
+      return { payloads: [{ text: "final" }], meta: {} };
+    });
+
+    const onPartialReply = vi.fn<NonNullable<GetReplyOptions["onPartialReply"]>>(
+      async (_payload) => undefined,
+    );
+    const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
+    const followupRun = createFollowupRun();
+    followupRun.run.provider = "claude-cli";
+    followupRun.run.model = "claude-opus-4-6";
+    followupRun.run.silentExpected = true;
+
+    await runAgentTurnWithFallback({
+      commandBody: "hi",
+      followupRun,
+      sessionCtx: { Provider: "telegram", MessageSid: "msg" } as unknown as TemplateContext,
+      opts: { onPartialReply },
+      typingSignals: createMockTypingSignaler(),
+      blockReplyPipeline: null,
+      blockStreamingEnabled: false,
+      resolvedBlockStreamingBreak: "message_end",
+      applyReplyToMode: (payload) => payload,
+      shouldEmitToolResult: () => true,
+      shouldEmitToolOutput: () => false,
+      pendingToolTasks: new Set(),
+      resetSessionAfterCompactionFailure: async () => false,
+      resetSessionAfterRoleOrderingConflict: async () => false,
+      isHeartbeat: false,
+      sessionKey: "main",
+      getActiveSessionEntry: () => undefined,
+      resolvedVerboseLevel: "off",
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(onPartialReply).not.toHaveBeenCalled();
+  });
+
   it("resolves CLI messageProvider from the live session surface when no origin channel is set", async () => {
     state.isCliProviderMock.mockReturnValue(true);
     state.runWithModelFallbackMock.mockImplementationOnce(async (params: FallbackRunnerParams) => ({
@@ -1145,6 +1347,103 @@ describe("runAgentTurnWithFallback", () => {
     });
   });
 
+  it("skips channel item progress when a matching tool event carries the progress", async () => {
+    const onItemEvent = vi.fn();
+    const onToolStart = vi.fn();
+    state.runEmbeddedPiAgentMock.mockImplementationOnce(async (params: EmbeddedAgentParams) => {
+      await params.onAgentEvent?.({
+        stream: "item",
+        data: {
+          itemId: "cmd-1",
+          kind: "command",
+          title: "Command",
+          name: "bash",
+          phase: "start",
+          status: "running",
+          suppressChannelProgress: true,
+        },
+      });
+      await params.onAgentEvent?.({
+        stream: "tool",
+        data: {
+          itemId: "cmd-1",
+          toolCallId: "cmd-1",
+          name: "bash",
+          phase: "start",
+          args: { command: "pnpm test" },
+        },
+      });
+      return { payloads: [{ text: "final" }], meta: {} };
+    });
+
+    const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
+    const result = await runAgentTurnWithFallback({
+      ...createMinimalRunAgentTurnParams({
+        opts: {
+          onItemEvent,
+          onToolStart,
+        } satisfies GetReplyOptions,
+      }),
+    });
+
+    expect(result.kind).toBe("success");
+    expect(onItemEvent).not.toHaveBeenCalled();
+    expect(onToolStart).toHaveBeenCalledWith({
+      name: "bash",
+      phase: "start",
+      args: { command: "pnpm test" },
+      detailMode: undefined,
+    });
+  });
+
+  it("preserves suppressed item progress when no tool-start callback is registered", async () => {
+    const onItemEvent = vi.fn();
+    state.runEmbeddedPiAgentMock.mockImplementationOnce(async (params: EmbeddedAgentParams) => {
+      await params.onAgentEvent?.({
+        stream: "item",
+        data: {
+          itemId: "cmd-1",
+          kind: "command",
+          title: "Command",
+          name: "bash",
+          phase: "start",
+          status: "running",
+          suppressChannelProgress: true,
+        },
+      });
+      await params.onAgentEvent?.({
+        stream: "tool",
+        data: {
+          itemId: "cmd-1",
+          toolCallId: "cmd-1",
+          name: "bash",
+          phase: "start",
+          args: { command: "pnpm test" },
+        },
+      });
+      return { payloads: [{ text: "final" }], meta: {} };
+    });
+
+    const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
+    const result = await runAgentTurnWithFallback({
+      ...createMinimalRunAgentTurnParams({
+        opts: {
+          onItemEvent,
+        } satisfies GetReplyOptions,
+      }),
+    });
+
+    expect(result.kind).toBe("success");
+    expect(onItemEvent).toHaveBeenCalledWith({
+      itemId: "cmd-1",
+      kind: "command",
+      title: "Command",
+      name: "bash",
+      phase: "start",
+      status: "running",
+    });
+  });
+
   it("forwards raw tool progress detail mode to tool-start reply options", async () => {
     const onToolStart = vi.fn();
     state.runEmbeddedPiAgentMock.mockImplementationOnce(async (params: EmbeddedAgentParams) => {
@@ -1176,6 +1475,54 @@ describe("runAgentTurnWithFallback", () => {
       args: { command: "pnpm test -- --watch=false" },
       detailMode: "raw",
     });
+  });
+
+  it("fires tool-start progress before slow typing signals resolve for best-effort Pi events", async () => {
+    const onToolStart = vi.fn(async () => {});
+    let releaseTyping: (() => void) | undefined;
+    const typingSignals = createMockTypingSignaler();
+    vi.mocked(typingSignals.signalToolStart).mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseTyping = resolve;
+        }),
+    );
+    state.runEmbeddedPiAgentMock.mockImplementationOnce(async (params: EmbeddedAgentParams) => {
+      void params.onAgentEvent?.({
+        stream: "tool",
+        data: {
+          name: "exec",
+          phase: "start",
+          args: { command: "echo hi" },
+        },
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      return { payloads: [{ text: "final" }], meta: {} };
+    });
+
+    const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
+    const result = await runAgentTurnWithFallback({
+      ...createMinimalRunAgentTurnParams({
+        opts: {
+          onToolStart,
+        } satisfies GetReplyOptions,
+      }),
+      typingSignals,
+    });
+
+    try {
+      expect(result.kind).toBe("success");
+      expect(onToolStart).toHaveBeenCalledWith({
+        name: "exec",
+        phase: "start",
+        args: { command: "echo hi" },
+        detailMode: undefined,
+      });
+    } finally {
+      releaseTyping?.();
+      await Promise.resolve();
+    }
   });
 
   it("leaves Codex app-server telemetry publication to the harness", async () => {

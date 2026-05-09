@@ -430,17 +430,6 @@ describe("isContextOverflowError", () => {
     expect(isContextOverflowError("We're debugging context overflow issues")).toBe(false);
     expect(isContextOverflowError("Something is causing context overflow messages")).toBe(false);
   });
-
-  it("excludes reasoning-required invalid-request errors", () => {
-    const samples = [
-      "400 Reasoning is mandatory for this endpoint and cannot be disabled.",
-      '{"type":"error","error":{"type":"invalid_request_error","message":"Reasoning is mandatory for this endpoint and cannot be disabled."}}',
-      "This model requires reasoning to be enabled",
-    ];
-    for (const sample of samples) {
-      expect(isContextOverflowError(sample)).toBe(false);
-    }
-  });
 });
 
 describe("error classifiers", () => {
@@ -527,17 +516,6 @@ describe("isLikelyContextOverflowError", () => {
     expect(classifyFailoverReason(sample)).toBeNull();
   });
 
-  it("excludes reasoning-required invalid-request errors", () => {
-    const samples = [
-      "400 Reasoning is mandatory for this endpoint and cannot be disabled.",
-      '{"type":"error","error":{"type":"invalid_request_error","message":"Reasoning is mandatory for this endpoint and cannot be disabled."}}',
-      "This endpoint requires reasoning",
-    ];
-    for (const sample of samples) {
-      expect(isLikelyContextOverflowError(sample)).toBe(false);
-    }
-  });
-
   it("excludes billing errors even when text matches context overflow patterns", () => {
     const samples = [
       "402 Payment Required: request token limit exceeded for this billing plan",
@@ -547,6 +525,33 @@ describe("isLikelyContextOverflowError", () => {
     for (const sample of samples) {
       expect(isBillingErrorMessage(sample)).toBe(true);
       expect(isLikelyContextOverflowError(sample)).toBe(false);
+    }
+  });
+});
+
+describe("reasoning-required invalid-request errors", () => {
+  it.each([
+    {
+      name: "strict context overflow classifier",
+      classifier: isContextOverflowError,
+      samples: [
+        "400 Reasoning is mandatory for this endpoint and cannot be disabled.",
+        '{"type":"error","error":{"type":"invalid_request_error","message":"Reasoning is mandatory for this endpoint and cannot be disabled."}}',
+        "This model requires reasoning to be enabled",
+      ],
+    },
+    {
+      name: "likely context overflow classifier",
+      classifier: isLikelyContextOverflowError,
+      samples: [
+        "400 Reasoning is mandatory for this endpoint and cannot be disabled.",
+        '{"type":"error","error":{"type":"invalid_request_error","message":"Reasoning is mandatory for this endpoint and cannot be disabled."}}',
+        "This endpoint requires reasoning",
+      ],
+    },
+  ])("excludes reasoning-required invalid-request errors from $name", ({ classifier, samples }) => {
+    for (const sample of samples) {
+      expect(classifier(sample)).toBe(false);
     }
   });
 });
@@ -688,7 +693,7 @@ describe("classifyFailoverReasonFromHttpStatus", () => {
   });
 });
 
-describe("classifyFailoverReason", () => {
+describe("classifyFailoverReason HTTP 410 handling", () => {
   it("treats generic 410 text as retryable timeout", () => {
     expect(classifyFailoverReason("410")).toBe("timeout");
     expect(classifyFailoverReason("HTTP 410")).toBe("timeout");
@@ -918,6 +923,8 @@ describe("isFailoverErrorMessage", () => {
       "terminated",
       "Terminated",
       "  terminated  ",
+      "stream_read_error",
+      "  stream_read_error  ",
       "UND_ERR_SOCKET",
       "Error: UND_ERR_SOCKET other side closed",
       "UND_ERR_CONNECT_TIMEOUT",
@@ -958,10 +965,12 @@ describe("image dimension errors", () => {
     const raw =
       '400 {"type":"error","error":{"type":"invalid_request_error","message":"messages.84.content.1.image.source.base64.data: At least one of the image dimensions exceed max allowed size for many-image requests: 2000 pixels"}}';
     const parsed = parseImageDimensionError(raw);
-    expect(parsed).not.toBeNull();
-    expect(parsed?.maxDimensionPx).toBe(2000);
-    expect(parsed?.messageIndex).toBe(84);
-    expect(parsed?.contentIndex).toBe(1);
+    expect(parsed).toEqual({
+      maxDimensionPx: 2000,
+      messageIndex: 84,
+      contentIndex: 1,
+      raw,
+    });
     expect(isImageDimensionErrorMessage(raw)).toBe(true);
   });
 });
@@ -1064,7 +1073,7 @@ describe("classifyFailoverReasonFromHttpStatus – 402 temporary limits", () => 
   });
 });
 
-describe("classifyFailoverReason", () => {
+describe("classifyFailoverReason provider messages", () => {
   it("classifies documented provider error messages", () => {
     expect(classifyFailoverReason(OPENAI_RATE_LIMIT_MESSAGE)).toBe("rate_limit");
     expect(classifyFailoverReason(GEMINI_RESOURCE_EXHAUSTED_MESSAGE)).toBe("rate_limit");
@@ -1145,6 +1154,15 @@ describe("classifyFailoverReason", () => {
       ),
     ).toBe("timeout");
     expect(classifyFailoverReason("string should match pattern")).toBe("format");
+    expect(
+      classifyFailoverReason(
+        "This model does not support assistant message prefill. The conversation must end with a user message.",
+      ),
+    ).toBe("format");
+    expect(
+      classifyFailoverReason("LLM request rejected: does not support assistant message prefill"),
+    ).toBe("format");
+    expect(classifyFailoverReason("conversation must end with a user message")).toBe("format");
     expect(classifyFailoverReason("bad request")).toBeNull();
     expect(
       classifyFailoverReason(

@@ -322,13 +322,14 @@ function expectOpenAiThenGroqAttemptOrder(params?: { expectOpenAiAuthProfileId?:
     | { provider?: string; authProfileId?: string }
     | undefined;
   const secondCall = runEmbeddedAttemptMock.mock.calls[1]?.[0] as { provider?: string } | undefined;
-  expect(firstCall).toBeDefined();
-  expect(secondCall).toBeDefined();
-  expect(firstCall?.provider).toBe("openai");
-  if (params?.expectOpenAiAuthProfileId) {
-    expect(firstCall?.authProfileId).toBe(params.expectOpenAiAuthProfileId);
+  if (!firstCall || !secondCall) {
+    throw new Error("expected primary and fallback embedded run attempts");
   }
-  expect(secondCall?.provider).toBe("groq");
+  expect(firstCall.provider).toBe("openai");
+  if (params?.expectOpenAiAuthProfileId) {
+    expect(firstCall.authProfileId).toBe(params.expectOpenAiAuthProfileId);
+  }
+  expect(secondCall.provider).toBe("groq");
 }
 
 function mockAllProvidersOverloaded() {
@@ -481,6 +482,10 @@ describe("runWithModelFallback + runEmbeddedPiAgent failover behavior", () => {
       {
         name: "undici-terminated",
         message: "terminated",
+      },
+      {
+        name: "stream-read-error",
+        message: "stream_read_error",
       },
       {
         name: "codex-empty-transport-response",

@@ -53,6 +53,10 @@ export type GetReplyOptions = {
   suppressTyping?: boolean;
   /** Resolved heartbeat model override (provider/model string from merged per-agent config). */
   heartbeatModelOverride?: string;
+  /** One-shot thinking level override for this run; does not persist to the session. */
+  thinkingLevelOverride?: string;
+  /** One-shot fast-mode override for this run; does not persist to the session. */
+  fastModeOverride?: boolean;
   /** Controls bootstrap workspace context injection (default: full). */
   bootstrapContextMode?: "full" | "lightweight";
   /** If true, suppress tool error warning payloads for this run. */
@@ -163,6 +167,8 @@ export type GetReplyOptions = {
    * output private; visible channel output must come from the message tool.
    */
   sourceReplyDeliveryMode?: SourceReplyDeliveryMode;
+  /** Allow channel-owned progress UI while final/source reply delivery remains message-tool-only. */
+  allowProgressCallbacksWhenSourceDeliverySuppressed?: boolean;
   disableBlockStreaming?: boolean;
   /** Timeout for block reply delivery (ms). */
   blockReplyTimeoutMs?: number;

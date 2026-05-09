@@ -100,51 +100,54 @@ describe("google provider plugin hooks", () => {
     expect(customEntries[0]?.customType).toBe("google-turn-ordering-bootstrap");
   });
 
-  it("owns Gemini CLI tool schema normalization", async () => {
+  it("owns Gemini tool schema normalization for direct and CLI providers", async () => {
     const { providers } = await registerProviderPlugin({
       plugin: googleProviderPlugin,
       id: "google",
       name: "Google Provider",
     });
-    const provider = requireRegisteredProvider(providers, "google-gemini-cli");
+    const providerIds = ["google", "google-gemini-cli"] as const;
 
-    const [tool] =
-      provider.normalizeToolSchemas?.({
-        provider: "google-gemini-cli",
-        tools: [
-          {
-            name: "write_file",
-            description: "Write a file",
-            parameters: {
-              type: "object",
-              additionalProperties: false,
-              properties: {
-                path: { type: "string", pattern: "^src/" },
+    for (const providerId of providerIds) {
+      const provider = requireRegisteredProvider(providers, providerId);
+      const [tool] =
+        provider.normalizeToolSchemas?.({
+          provider: providerId,
+          tools: [
+            {
+              name: "write_file",
+              description: "Write a file",
+              parameters: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  path: { type: "string", pattern: "^src/" },
+                },
               },
             },
-          },
-        ],
-      } as never) ?? [];
+          ],
+        } as never) ?? [];
 
-    expect(tool).toMatchObject({
-      name: "write_file",
-      parameters: {
-        type: "object",
-        properties: {
-          path: { type: "string" },
+      expect(tool).toMatchObject({
+        name: "write_file",
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string" },
+          },
         },
-      },
-    });
-    expect(tool?.parameters).not.toHaveProperty("additionalProperties");
-    expect(
-      (tool?.parameters as { properties?: { path?: Record<string, unknown> } })?.properties?.path,
-    ).not.toHaveProperty("pattern");
-    expect(
-      provider.inspectToolSchemas?.({
-        provider: "google-gemini-cli",
-        tools: [tool],
-      } as never),
-    ).toEqual([]);
+      });
+      expect(tool?.parameters).not.toHaveProperty("additionalProperties");
+      expect(
+        (tool?.parameters as { properties?: { path?: Record<string, unknown> } })?.properties?.path,
+      ).not.toHaveProperty("pattern");
+      expect(
+        provider.inspectToolSchemas?.({
+          provider: providerId,
+          tools: [tool],
+        } as never),
+      ).toEqual([]);
+    }
   });
 
   it("wires google-thinking stream hooks for direct and Gemini CLI providers", async () => {
@@ -196,8 +199,10 @@ describe("google provider plugin hooks", () => {
       name: "Google Provider",
     });
     const provider = requireRegisteredProvider(providers, "google");
-    expect(provider.resolveThinkingProfile).toBeDefined();
-    const resolveThinkingProfile = provider.resolveThinkingProfile!;
+    if (!provider.resolveThinkingProfile) {
+      throw new Error("expected Google provider thinking profile resolver");
+    }
+    const resolveThinkingProfile = provider.resolveThinkingProfile;
     const gemini3Profile = resolveThinkingProfile({
       provider: "google",
       modelId: "gemini-3.1-pro-preview",
@@ -252,10 +257,12 @@ describe("google provider plugin hooks", () => {
       onClearAudio() {},
     });
 
-    expect(bridge).toBeDefined();
-    expect(() => bridge?.sendAudio(Buffer.alloc(160))).not.toThrow();
-    expect(() => bridge?.setMediaTimestamp(20)).not.toThrow();
-    expect(() => bridge?.sendUserMessage?.("hello")).not.toThrow();
+    if (!bridge) {
+      throw new Error("expected Google realtime bridge");
+    }
+    expect(bridge.sendAudio(Buffer.alloc(160))).toBeUndefined();
+    expect(bridge.setMediaTimestamp(20)).toBeUndefined();
+    expect(bridge.sendUserMessage?.("hello")).toBeUndefined();
   });
 
   it("refreshes Gemini CLI OAuth through the provider-owned refresh hook", async () => {
