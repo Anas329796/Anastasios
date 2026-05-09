@@ -96,7 +96,6 @@ describe("buildAttemptSystemPrompt", () => {
     });
 
     expect(result.systemPrompt).toContain("Custom override prompt.");
-    expect(result.systemPrompt).toContain("## Subagent Context");
     expect(result.systemPrompt).toContain("RUN_MODE_TASK_77950");
   });
 

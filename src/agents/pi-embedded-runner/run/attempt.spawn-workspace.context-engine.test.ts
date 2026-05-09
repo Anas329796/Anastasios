@@ -418,6 +418,53 @@ describe("runEmbeddedAttempt context engine sessionKey forwarding", () => {
     expect(systemPrompt).toContain("Ask who I am.");
   });
 
+  it("preserves sessions_spawn extra system prompt when a target agent override is configured", async () => {
+    const seen: { prompt?: string; messages?: unknown[] } = {};
+
+    await createContextEngineAttemptRunner({
+      contextEngine: createContextEngineBootstrapAndAssemble(),
+      sessionKey: "agent:specialist:subagent:child",
+      tempPaths,
+      attemptOverrides: {
+        config: {
+          agents: {
+            list: [
+              {
+                id: "specialist",
+                systemPromptOverride: "Specialist override prompt.",
+              },
+            ],
+          },
+        } as OpenClawConfig,
+        extraSystemPrompt:
+          "# Subagent Context\n\n## Your Role\n- You were created to handle: RUN_MODE_TASK_77950",
+        prompt: "delegated task",
+        promptMode: "minimal",
+        transcriptPrompt: "delegated task",
+        trigger: "user",
+      },
+      sessionPrompt: async (session, prompt) => {
+        seen.prompt = prompt;
+        seen.messages = [...session.messages];
+        session.messages = [
+          ...session.messages,
+          { role: "assistant", content: "done", timestamp: 2 },
+        ];
+      },
+    });
+
+    expect(seen.prompt).toBe("delegated task");
+    expect(JSON.stringify(seen.messages)).not.toContain("RUN_MODE_TASK_77950");
+    const systemPrompt =
+      hoisted.systemPromptOverrideTexts.find((text) =>
+        text.includes("Specialist override prompt."),
+      ) ?? "";
+
+    expect(systemPrompt).toContain("Specialist override prompt.");
+    expect(systemPrompt).toContain("# Subagent Context");
+    expect(systemPrompt).toContain("RUN_MODE_TASK_77950");
+  });
+
   it("includes hook-adjusted bootstrap files preloaded before routing", async () => {
     const workspaceDir = "/tmp/openclaw-hook-workspace";
     hoisted.resolveBootstrapFilesForRunMock.mockResolvedValueOnce([
