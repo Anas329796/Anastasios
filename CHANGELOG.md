@@ -4,6 +4,10 @@ Docs: https://docs.openclaw.ai
 
 ## 2026.5.8
 
+### Fixes
+
+- Providers/Kimi: switch the bundled Kimi Coding provider to the OpenAI-compatible `/chat/completions` endpoint (`https://api.kimi.com/coding/v1`) so image attachments (`image_url` base64) are accepted instead of returning 403 Forbidden. Fixes #75959. Thanks @hpfan.
+
 ### Changes
 
 - Chat commands: add `/think default` and `/fast default` to clear session overrides and inherit configured/provider defaults. (#79385) Thanks @VACInc.
