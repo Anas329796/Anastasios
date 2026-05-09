@@ -118,7 +118,7 @@ function buildQmdProcessPath(rawPath: string | undefined): string {
 
 type McporterState = {
   coldStartWarned: boolean;
-  daemonStart: Promise<void> | null;
+  daemonStarts: Map<string, Promise<void>>;
 };
 
 type QmdEmbedQueueState = {
@@ -132,8 +132,69 @@ type QmdUpdateQueueState = {
 function getMcporterState(): McporterState {
   return resolveGlobalSingleton<McporterState>(MCPORTER_STATE_KEY, () => ({
     coldStartWarned: false,
-    daemonStart: null,
+    daemonStarts: new Map(),
   }));
+}
+
+function parseMcporterResponseJson(stdout: string): unknown {
+  const trimmed = stdout.trim();
+  try {
+    return JSON.parse(trimmed) as unknown;
+  } catch (err) {
+    const payload = extractFirstJsonValue(trimmed);
+    if (payload !== null) {
+      return payload;
+    }
+    throw err;
+  }
+}
+
+function extractFirstJsonValue(raw: string): unknown | null {
+  for (let start = 0; start < raw.length; start += 1) {
+    const opening = raw[start];
+    if (opening !== "{" && opening !== "[") {
+      continue;
+    }
+    const closing = opening === "{" ? "}" : "]";
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start; index < raw.length; index += 1) {
+      const char = raw[index];
+      if (char === undefined) {
+        break;
+      }
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+        if (char === "\\") {
+          escaped = true;
+        } else if (char === '"') {
+          inString = false;
+        }
+        continue;
+      }
+      if (char === '"') {
+        inString = true;
+        continue;
+      }
+      if (char === opening) {
+        depth += 1;
+      } else if (char === closing) {
+        depth -= 1;
+        if (depth === 0) {
+          try {
+            return JSON.parse(raw.slice(start, index + 1)) as unknown;
+          } catch {
+            break;
+          }
+        }
+      }
+    }
+  }
+  return null;
 }
 
 function getQmdEmbedQueueState(): QmdEmbedQueueState {
@@ -306,6 +367,7 @@ export class QmdMemoryManager implements MemorySearchManager {
   private readonly xdgConfigHome: string;
   private readonly xdgCacheHome: string;
   private readonly indexPath: string;
+  private readonly mcporterConfigPath: string;
   private readonly env: NodeJS.ProcessEnv;
   private readonly syncSettings: ReturnType<typeof resolveMemorySearchSyncConfig>;
   private readonly managedCollectionNames: string[];
@@ -369,6 +431,7 @@ export class QmdMemoryManager implements MemorySearchManager {
     this.xdgConfigHome = path.join(this.qmdDir, "xdg-config");
     this.xdgCacheHome = path.join(this.qmdDir, "xdg-cache");
     this.indexPath = path.join(this.xdgCacheHome, "qmd", "index.sqlite");
+    this.mcporterConfigPath = path.join(this.qmdDir, "mcporter", "mcporter.json");
 
     this.env = {
       ...process.env,
@@ -1957,6 +2020,7 @@ export class QmdMemoryManager implements MemorySearchManager {
     if (!mcporter.enabled) {
       return;
     }
+    await this.ensureMcporterConfig();
     const state = getMcporterState();
     if (!mcporter.startDaemon) {
       if (!state.coldStartWarned) {
@@ -1967,27 +2031,73 @@ export class QmdMemoryManager implements MemorySearchManager {
       }
       return;
     }
-    if (!state.daemonStart) {
-      state.daemonStart = (async () => {
+    const daemonKey = this.mcporterConfigPath;
+    let daemonStart = state.daemonStarts.get(daemonKey);
+    if (!daemonStart) {
+      daemonStart = (async () => {
         try {
           await this.runMcporter(["daemon", "start"], { timeoutMs: 10_000 });
         } catch (err) {
           log.warn(`mcporter daemon start failed: ${String(err)}`);
           // Allow future searches to retry daemon start on transient failures.
-          state.daemonStart = null;
+          state.daemonStarts.delete(daemonKey);
         }
       })();
+      state.daemonStarts.set(daemonKey, daemonStart);
     }
-    await state.daemonStart;
+    await daemonStart;
+  }
+
+  private async ensureMcporterConfig(): Promise<void> {
+    await fs.mkdir(path.dirname(this.mcporterConfigPath), { recursive: true });
+    const env = this.buildMcporterQmdEnv();
+    const config = {
+      mcpServers: {
+        [this.qmd.mcporter.serverName]: {
+          command: this.qmd.command,
+          args: ["mcp"],
+          env,
+          lifecycle: { mode: "keep-alive", idleTimeoutMs: 300_000 },
+        },
+      },
+    };
+    await fs.writeFile(this.mcporterConfigPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  }
+
+  private buildMcporterQmdEnv(): Record<string, string> {
+    const keys = [
+      "PATH",
+      "XDG_CONFIG_HOME",
+      "QMD_CONFIG_DIR",
+      "XDG_CACHE_HOME",
+      "QMD_EMBED_MODEL",
+      "QMD_RERANK_MODEL",
+      "QMD_GENERATE_MODEL",
+      "QMD_LLAMA_GPU",
+      "QMD_EMBED_CONTEXT_SIZE",
+      "QMD_RERANK_CONTEXT_SIZE",
+      "QMD_EXPAND_CONTEXT_SIZE",
+      "NO_COLOR",
+    ];
+    const env: Record<string, string> = {};
+    for (const key of keys) {
+      const value = this.env[key];
+      if (typeof value === "string" && value.length > 0) {
+        env[key] = value;
+      }
+    }
+    return env;
   }
 
   private async runMcporter(
     args: string[],
     opts?: { timeoutMs?: number },
   ): Promise<{ stdout: string; stderr: string }> {
+    await this.ensureMcporterConfig();
+    const mcporterArgs = [...args, "--config", this.mcporterConfigPath];
     const spawnInvocation = resolveCliSpawnInvocation({
       command: "mcporter",
-      args,
+      args: mcporterArgs,
       env: this.env,
       packageName: "mcporter",
     });
@@ -2087,7 +2197,7 @@ export class QmdMemoryManager implements MemorySearchManager {
       throw err;
     }
 
-    const parsedUnknown: unknown = JSON.parse(result.stdout);
+    const parsedUnknown = parseMcporterResponseJson(result.stdout);
     const parsedRecord = asRecord(parsedUnknown);
     const structuredContent = parsedRecord ? asRecord(parsedRecord.structuredContent) : null;
     const structured: unknown = structuredContent ?? parsedUnknown;
