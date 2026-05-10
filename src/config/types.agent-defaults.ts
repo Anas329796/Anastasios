@@ -4,6 +4,7 @@ import type {
 } from "../shared/silent-reply-policy.js";
 import type {
   AgentEmbeddedHarnessConfig,
+  AgentChatModelConfig,
   AgentModelConfig,
   AgentRuntimePolicyConfig,
   AgentSandboxConfig,
@@ -196,8 +197,8 @@ export type AgentDefaultsConfig = {
   agentRuntime?: AgentRuntimePolicyConfig;
   /** @deprecated Use agentRuntime. */
   embeddedHarness?: AgentEmbeddedHarnessConfig;
-  /** Primary model and fallbacks (provider/model). Accepts string or {primary,fallbacks}. */
-  model?: AgentModelConfig;
+  /** Primary chat model and fallbacks (provider/model). Accepts string or {primary,fallbacks}. */
+  model?: AgentChatModelConfig;
   /** Optional image-capable model and fallbacks (provider/model). Accepts string or {primary,fallbacks}. */
   imageModel?: AgentModelConfig;
   /** Optional image-generation model and fallbacks (provider/model). Accepts string or {primary,fallbacks}. */

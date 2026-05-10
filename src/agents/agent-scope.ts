@@ -1,8 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
-import { resolveAgentModelFallbackValues } from "../config/model-input.js";
+import {
+  resolveAgentModelFallbackValues,
+  resolveUserModelOverrideFallbackPolicy,
+} from "../config/model-input.js";
 import type { AgentDefaultsConfig } from "../config/types.agent-defaults.js";
-import type { AgentModelConfig } from "../config/types.agents-shared.js";
+import type {
+  AgentModelConfig,
+  UserModelOverrideFallbackPolicy,
+} from "../config/types.agents-shared.js";
 import type { AgentConfig } from "../config/types.agents.js";
 import type { OpenClawConfig } from "../config/types.js";
 import { isPathInside } from "../infra/path-guards.js";
@@ -202,6 +208,18 @@ export function hasConfiguredModelFallbacks(params: {
   return (fallbacksOverride ?? defaultFallbacks).length > 0;
 }
 
+export function resolveAgentUserModelOverrideFallbackPolicy(
+  cfg: OpenClawConfig,
+  agentId: string,
+): UserModelOverrideFallbackPolicy {
+  const agentPolicy = resolveUserModelOverrideFallbackPolicy(
+    resolveAgentConfig(cfg, agentId)?.model,
+  );
+  return (
+    agentPolicy ?? resolveUserModelOverrideFallbackPolicy(cfg.agents?.defaults?.model) ?? "strict"
+  );
+}
+
 export function resolveEffectiveModelFallbacks(params: {
   cfg: OpenClawConfig;
   agentId: string;
@@ -212,10 +230,12 @@ export function resolveEffectiveModelFallbacks(params: {
   if (!params.hasSessionModelOverride) {
     return agentFallbacksOverride;
   }
-  if (params.modelOverrideSource !== "auto") {
-    return [];
-  }
   const defaultFallbacks = resolveAgentModelFallbackValues(params.cfg.agents?.defaults?.model);
+  if (params.modelOverrideSource !== "auto") {
+    return resolveAgentUserModelOverrideFallbackPolicy(params.cfg, params.agentId) === "resilient"
+      ? (agentFallbacksOverride ?? defaultFallbacks)
+      : [];
+  }
   return agentFallbacksOverride ?? defaultFallbacks;
 }
 

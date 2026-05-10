@@ -7,7 +7,7 @@ import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
 } from "../shared/string-coerce.js";
-import { AgentModelSchema } from "./zod-schema.agent-model.js";
+import { AgentChatModelSchema, AgentModelSchema } from "./zod-schema.agent-model.js";
 import {
   GroupChatSchema,
   HumanDelaySchema,
@@ -844,7 +844,7 @@ export const MemorySearchSchema = z
   })
   .strict()
   .optional();
-export { AgentModelSchema };
+export { AgentChatModelSchema, AgentModelSchema };
 
 const AgentRuntimeAcpSchema = z
   .object({
@@ -896,7 +896,7 @@ export const AgentEntrySchema = z
     systemPromptOverride: z.string().optional(),
     agentRuntime: AgentRuntimePolicySchema,
     embeddedHarness: AgentEmbeddedHarnessSchema,
-    model: AgentModelSchema.optional(),
+    model: AgentChatModelSchema.optional(),
     models: z
       .record(
         z.string(),
@@ -931,17 +931,7 @@ export const AgentEntrySchema = z
       .object({
         delegationMode: z.enum(["suggest", "prefer"]).optional(),
         allowAgents: z.array(z.string()).optional(),
-        model: z
-          .union([
-            z.string(),
-            z
-              .object({
-                primary: z.string().optional(),
-                fallbacks: z.array(z.string()).optional(),
-              })
-              .strict(),
-          ])
-          .optional(),
+        model: AgentModelSchema.optional(),
         thinking: z.string().optional(),
         requireAgentId: z.boolean().optional(),
       })

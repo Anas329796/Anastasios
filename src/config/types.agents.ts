@@ -8,6 +8,7 @@ import type {
 } from "./types.agent-defaults.js";
 import type {
   AgentEmbeddedHarnessConfig,
+  AgentChatModelConfig,
   AgentModelConfig,
   AgentRuntimePolicyConfig,
   AgentSandboxConfig,
@@ -87,7 +88,8 @@ export type AgentConfig = {
   agentRuntime?: AgentRuntimePolicyConfig;
   /** @deprecated Use agentRuntime. */
   embeddedHarness?: AgentEmbeddedHarnessConfig;
-  model?: AgentModelConfig;
+  /** Per-agent chat model and fallback behavior. */
+  model?: AgentChatModelConfig;
   /** Per-model metadata overrides for this agent. */
   models?: Record<string, AgentModelEntryConfig>;
   /** Optional per-agent default thinking level (overrides agents.defaults.thinkingDefault). */

@@ -6,6 +6,7 @@ import {
   AgentContextLimitsSchema,
   AgentEmbeddedHarnessSchema,
   AgentRuntimePolicySchema,
+  AgentChatModelSchema,
   AgentModelSchema,
   MemorySearchSchema,
 } from "./zod-schema.agent-runtime.js";
@@ -53,7 +54,7 @@ export const AgentDefaultsSchema = z
     params: z.record(z.string(), z.unknown()).optional(),
     agentRuntime: AgentRuntimePolicySchema,
     embeddedHarness: AgentEmbeddedHarnessSchema,
-    model: AgentModelSchema.optional(),
+    model: AgentChatModelSchema.optional(),
     imageModel: AgentModelSchema.optional(),
     imageGenerationModel: AgentModelSchema.optional(),
     videoGenerationModel: AgentModelSchema.optional(),
