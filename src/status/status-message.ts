@@ -884,7 +884,9 @@ export function buildStatusMessage(args: StatusArgs): string {
   });
   const effectiveCostAuthMode = fallbackState.active
     ? activeAuthMode
-    : (selectedAuthMode ?? activeAuthMode);
+    : runtimeAliasModelEquivalent && selectedAuthMode === "api-key" && activeAuthMode === "oauth"
+      ? activeAuthMode
+      : (selectedAuthMode ?? activeAuthMode);
   const showCost = effectiveCostAuthMode === "api-key" || effectiveCostAuthMode === "mixed";
   const hasUsage = typeof inputTokens === "number" || typeof outputTokens === "number";
   const costConfig =
