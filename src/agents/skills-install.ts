@@ -515,6 +515,24 @@ export async function installSkill(params: SkillInstallRequest): Promise<SkillIn
   }
   if (spec.kind === "download") {
     const downloadResult = await installDownloadSpec({ entry, spec, timeoutMs });
+    if (downloadResult.ok) {
+      const setupResult = await runSkillSetupHook({
+        targetDir: path.resolve(entry.skill.baseDir),
+        mode: "install",
+      });
+      if (!setupResult.ok) {
+        return withWarnings(
+          {
+            ok: false,
+            message: `Setup hook failed: ${setupResult.error}`,
+            stdout: downloadResult.stdout,
+            stderr: downloadResult.stderr,
+            code: null,
+          },
+          warnings,
+        );
+      }
+    }
     return withWarnings(downloadResult, warnings);
   }
 
