@@ -38,6 +38,7 @@ Docs: https://docs.openclaw.ai
 - Gateway: avoid synchronous restart-sentinel state probes during post-attach startup, preventing slow Windows or redirected state directories from blocking channel turns. Fixes #79264. Thanks @liyi58.
 - Agents/image: honor explicit `image` tool model overrides even when `agents.defaults.imageModel` is unset, restoring one-off vision calls for configured multimodal providers. Fixes #79341. Thanks @haumanto.
 - Codex app-server: preserve prompt-local current-turn context through context-engine prompt projection, so replied-to Telegram messages stay visible to the Codex model input.
+- Control UI: show the Communication Notifications tab for Web Push settings even when the settings section is virtual. Thanks @VladyslavLevchuk.
 - Telegram: pass agent-scoped media roots through gateway message actions so workspace-local media from the active agent is not rejected as cross-agent access. Thanks @frankekn.
 - CLI/gateway: keep `gateway status --deep` plugin-aware so configured plugin manifest warnings, including missing channel config metadata, stay visible during install and update smoke checks.
 - Feishu: fall back to a top-level group send when normal group quoted replies target a withdrawn or missing message, preventing replies from disappearing silently while preserving native topic safety. Fixes #79349. Thanks @arlen8411.
