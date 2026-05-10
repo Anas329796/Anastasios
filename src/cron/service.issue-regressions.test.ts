@@ -1,6 +1,10 @@
 import fs from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
-import type { HeartbeatRunResult } from "../infra/heartbeat-wake.js";
+import {
+  HEARTBEAT_SKIP_CRON_IN_PROGRESS,
+  HEARTBEAT_SKIP_REQUESTS_IN_FLIGHT,
+  type HeartbeatRunResult,
+} from "../infra/heartbeat-wake.js";
 import { clearCommandLane, setCommandLaneConcurrency } from "../process/command-queue.js";
 import { CommandLane } from "../process/lanes.js";
 import * as schedule from "./schedule.js";
@@ -474,7 +478,7 @@ describe("Cron issue regressions", () => {
         log: noopLogger,
         nowMs: () => now,
         enqueueSystemEvent: vi.fn(),
-        requestHeartbeatNow: vi.fn(),
+        requestHeartbeat: vi.fn(),
         runIsolatedAgentJob,
       });
 
@@ -550,7 +554,7 @@ describe("Cron issue regressions", () => {
       log: noopLogger,
       nowMs: () => now,
       enqueueSystemEvent: vi.fn(),
-      requestHeartbeatNow: vi.fn(),
+      requestHeartbeat: vi.fn(),
       runIsolatedAgentJob,
     });
 
@@ -593,7 +597,7 @@ describe("Cron issue regressions", () => {
       log: noopLogger,
       nowMs: () => now,
       enqueueSystemEvent: vi.fn(),
-      requestHeartbeatNow: vi.fn(),
+      requestHeartbeat: vi.fn(),
       runIsolatedAgentJob,
       cronConfig: {
         retry: { maxAttempts: 2, backoffMs: [1000, 2000] },
@@ -639,7 +643,7 @@ describe("Cron issue regressions", () => {
       log: noopLogger,
       nowMs: () => now,
       enqueueSystemEvent: vi.fn(),
-      requestHeartbeatNow: vi.fn(),
+      requestHeartbeat: vi.fn(),
       runIsolatedAgentJob,
       cronConfig: {
         retry: { maxAttempts: 1, backoffMs: [1000], retryOn: ["overloaded"] },
@@ -690,7 +694,7 @@ describe("Cron issue regressions", () => {
       log: noopLogger,
       nowMs: () => now,
       enqueueSystemEvent: vi.fn(),
-      requestHeartbeatNow: vi.fn(),
+      requestHeartbeat: vi.fn(),
       runIsolatedAgentJob,
       cronConfig: {
         retry: { maxAttempts: 1, backoffMs: [1000], retryOn: ["rate_limit"] },
@@ -738,7 +742,7 @@ describe("Cron issue regressions", () => {
       log: noopLogger,
       nowMs: () => now,
       enqueueSystemEvent: vi.fn(),
-      requestHeartbeatNow: vi.fn(),
+      requestHeartbeat: vi.fn(),
       runIsolatedAgentJob: vi.fn().mockResolvedValue({
         status: "error",
         error: "invalid API key",
@@ -779,7 +783,7 @@ describe("Cron issue regressions", () => {
       log: noopLogger,
       nowMs: () => now,
       enqueueSystemEvent: vi.fn(),
-      requestHeartbeatNow: vi.fn(),
+      requestHeartbeat: vi.fn(),
       runIsolatedAgentJob: vi.fn(async () => {
         // Job completes very quickly (7ms) — still within the same second
         now += 7;
@@ -825,7 +829,7 @@ describe("Cron issue regressions", () => {
       log: noopLogger,
       nowMs: () => now,
       enqueueSystemEvent: vi.fn(),
-      requestHeartbeatNow: vi.fn(),
+      requestHeartbeat: vi.fn(),
       runIsolatedAgentJob: vi.fn(async () => {
         now += 100;
         return { status: "ok" as const, summary: "done" };
@@ -864,7 +868,7 @@ describe("Cron issue regressions", () => {
       log: noopLogger,
       nowMs: () => now,
       enqueueSystemEvent: vi.fn(),
-      requestHeartbeatNow: vi.fn(),
+      requestHeartbeat: vi.fn(),
       runIsolatedAgentJob: vi.fn(async () => {
         const result = await deferredRun.promise;
         now += 5;
@@ -919,7 +923,7 @@ describe("Cron issue regressions", () => {
       log: noopLogger,
       nowMs: () => now,
       enqueueSystemEvent: vi.fn(),
-      requestHeartbeatNow: vi.fn(),
+      requestHeartbeat: vi.fn(),
       runIsolatedAgentJob,
     });
 
@@ -960,7 +964,7 @@ describe("Cron issue regressions", () => {
       log: noopLogger,
       nowMs: () => scheduledAt,
       enqueueSystemEvent: vi.fn(),
-      requestHeartbeatNow: vi.fn(),
+      requestHeartbeat: vi.fn(),
       runIsolatedAgentJob: vi.fn(async ({ deadlineAtMs }) => {
         observedDeadlineAtMs = deadlineAtMs;
         return { status: "ok" as const, summary: "done" };
@@ -1002,7 +1006,7 @@ describe("Cron issue regressions", () => {
       log: noopLogger,
       nowMs: () => now,
       enqueueSystemEvent: vi.fn(),
-      requestHeartbeatNow: vi.fn(),
+      requestHeartbeat: vi.fn(),
       runIsolatedAgentJob: vi.fn(async (params) => {
         const result = await abortAwareRunner.runIsolatedAgentJob(params);
         now += 5;
@@ -1020,7 +1024,6 @@ describe("Cron issue regressions", () => {
   });
 
   it("suppresses isolated follow-up side effects after timeout", async () => {
-    vi.useRealTimers();
     const store = makeStorePath();
     const scheduledAt = Date.parse("2026-02-15T13:00:00.000Z");
     const enqueueSystemEvent = vi.fn();
@@ -1036,40 +1039,25 @@ describe("Cron issue regressions", () => {
     await writeCronJobs(store.storePath, [cronJob]);
 
     let now = scheduledAt;
+    const abortAwareRunner = createAbortAwareIsolatedRunner("late-summary");
     const state = createCronServiceState({
       cronEnabled: true,
       storePath: store.storePath,
       log: noopLogger,
       nowMs: () => now,
       enqueueSystemEvent,
-      requestHeartbeatNow: vi.fn(),
+      requestHeartbeat: vi.fn(),
       runIsolatedAgentJob: vi.fn(async (params) => {
-        const abortSignal = params.abortSignal;
-        if (abortSignal?.aborted) {
-          now += 100;
-          throw new Error("aborted");
-        }
-        await new Promise<void>((resolve, reject) => {
-          const onAbort = () => {
-            abortSignal?.removeEventListener("abort", onAbort);
-            now += 100;
-            reject(new Error("aborted"));
-          };
-          abortSignal?.addEventListener("abort", onAbort, { once: true });
-        });
-        return {
-          status: "ok" as const,
-          summary: "late-summary",
-          delivered: false,
-          error:
-            abortSignal?.aborted && typeof abortSignal.reason === "string"
-              ? abortSignal.reason
-              : undefined,
-        };
+        const result = await abortAwareRunner.runIsolatedAgentJob(params);
+        now += 100;
+        return result;
       }),
     });
 
-    await onTimer(state);
+    const timerPromise = onTimer(state);
+    await abortAwareRunner.waitForStart();
+    await vi.advanceTimersByTimeAsync(Math.ceil(FAST_TIMEOUT_SECONDS * 1_000) + 10);
+    await timerPromise;
 
     const jobAfterTimeout = state.store?.jobs.find((j) => j.id === "timeout-side-effects");
     expect(jobAfterTimeout?.state.lastStatus).toBe("error");
@@ -1135,7 +1123,7 @@ describe("Cron issue regressions", () => {
       log: noopLogger,
       nowMs: () => now,
       enqueueSystemEvent: vi.fn(),
-      requestHeartbeatNow: vi.fn(),
+      requestHeartbeat: vi.fn(),
       runIsolatedAgentJob: vi.fn(async (params) => {
         const result = await abortAwareRunner.runIsolatedAgentJob(params);
         now += 5;
@@ -1157,11 +1145,11 @@ describe("Cron issue regressions", () => {
     const runHeartbeatOnce = vi.fn(
       async (): Promise<HeartbeatRunResult> => ({
         status: "skipped",
-        reason: "requests-in-flight",
+        reason: HEARTBEAT_SKIP_REQUESTS_IN_FLIGHT,
       }),
     );
     const enqueueSystemEvent = vi.fn();
-    const requestHeartbeatNow = vi.fn();
+    const requestHeartbeat = vi.fn();
     const mainJob: CronJob = {
       id: "main-abort",
       name: "main abort",
@@ -1180,7 +1168,7 @@ describe("Cron issue regressions", () => {
       log: noopLogger,
       nowMs: () => Date.now(),
       enqueueSystemEvent,
-      requestHeartbeatNow,
+      requestHeartbeat,
       runHeartbeatOnce,
       wakeNowHeartbeatBusyMaxWaitMs: 30,
       wakeNowHeartbeatBusyRetryDelayMs: 5,
@@ -1200,7 +1188,7 @@ describe("Cron issue regressions", () => {
     expect(result.error).toContain("timed out");
     expect(enqueueSystemEvent).toHaveBeenCalledTimes(1);
     expect(runHeartbeatOnce).toHaveBeenCalled();
-    expect(requestHeartbeatNow).not.toHaveBeenCalled();
+    expect(requestHeartbeat).not.toHaveBeenCalled();
   });
 
   it("finishes recurring wake-now main jobs quickly when the main lane is busy (#58833)", async () => {
@@ -1212,11 +1200,11 @@ describe("Cron issue regressions", () => {
     const runHeartbeatOnce = vi.fn(
       async (): Promise<HeartbeatRunResult> => ({
         status: "skipped",
-        reason: "requests-in-flight",
+        reason: HEARTBEAT_SKIP_CRON_IN_PROGRESS,
       }),
     );
     const enqueueSystemEvent = vi.fn();
-    const requestHeartbeatNow = vi.fn();
+    const requestHeartbeat = vi.fn();
     const job: CronJob = {
       id: "busy-recurring-main",
       name: "busy recurring main",
@@ -1235,7 +1223,7 @@ describe("Cron issue regressions", () => {
       log: noopLogger,
       nowMs,
       enqueueSystemEvent,
-      requestHeartbeatNow,
+      requestHeartbeat,
       runHeartbeatOnce,
       wakeNowHeartbeatBusyMaxWaitMs: 120_000,
       wakeNowHeartbeatBusyRetryDelayMs: 250,
@@ -1247,7 +1235,7 @@ describe("Cron issue regressions", () => {
 
     expect(enqueueSystemEvent).toHaveBeenCalledTimes(1);
     expect(runHeartbeatOnce).toHaveBeenCalledTimes(1);
-    expect(requestHeartbeatNow).toHaveBeenCalledWith(
+    expect(requestHeartbeat).toHaveBeenCalledWith(
       expect.objectContaining({
         reason: "cron:busy-recurring-main",
       }),
@@ -1304,7 +1292,7 @@ describe("Cron issue regressions", () => {
       log: noopLogger,
       nowMs: () => now,
       enqueueSystemEvent: vi.fn(),
-      requestHeartbeatNow: vi.fn(),
+      requestHeartbeat: vi.fn(),
       onEvent: (evt) => {
         events.push(evt);
       },
@@ -1362,7 +1350,7 @@ describe("Cron issue regressions", () => {
       log: noopLogger,
       nowMs: () => now,
       enqueueSystemEvent,
-      requestHeartbeatNow: vi.fn(),
+      requestHeartbeat: vi.fn(),
       runIsolatedAgentJob: vi.fn().mockResolvedValue({ status: "ok", summary: "ok" }),
     });
 
@@ -1403,7 +1391,7 @@ describe("Cron issue regressions", () => {
       log: noopLogger,
       nowMs: () => now,
       enqueueSystemEvent: vi.fn(),
-      requestHeartbeatNow: vi.fn(),
+      requestHeartbeat: vi.fn(),
       runIsolatedAgentJob: vi.fn(async (params: { job: { id: string } }) => {
         activeRuns += 1;
         peakActiveRuns = Math.max(peakActiveRuns, activeRuns);
@@ -1497,7 +1485,7 @@ describe("Cron issue regressions", () => {
       log: createNoopLogger(),
       nowMs: () => now,
       enqueueSystemEvent: vi.fn(),
-      requestHeartbeatNow: vi.fn(),
+      requestHeartbeat: vi.fn(),
       runIsolatedAgentJob,
       onEvent: (evt) => {
         if (evt.action === "finished" && evt.jobId === second.id && evt.status === "ok") {
@@ -1597,31 +1585,40 @@ describe("Cron issue regressions", () => {
       log: noopLogger,
       nowMs: () => now,
       enqueueSystemEvent: vi.fn(),
-      requestHeartbeatNow: vi.fn(),
-      runIsolatedAgentJob: vi.fn(async ({ abortSignal }: { abortSignal?: AbortSignal }) => {
-        started = true;
-        await new Promise<void>((resolve) => {
-          if (!abortSignal) {
-            resolve();
-            return;
-          }
-          if (abortSignal.aborted) {
-            abortWallMs = Date.now();
-            resolve();
-            return;
-          }
-          abortSignal.addEventListener(
-            "abort",
-            () => {
+      requestHeartbeat: vi.fn(),
+      runIsolatedAgentJob: vi.fn(
+        async ({
+          abortSignal,
+          onExecutionStarted,
+        }: {
+          abortSignal?: AbortSignal;
+          onExecutionStarted?: () => void;
+        }) => {
+          started = true;
+          onExecutionStarted?.();
+          await new Promise<void>((resolve) => {
+            if (!abortSignal) {
+              resolve();
+              return;
+            }
+            if (abortSignal.aborted) {
               abortWallMs = Date.now();
               resolve();
-            },
-            { once: true },
-          );
-        });
-        now += 5;
-        return { status: "ok" as const, summary: "done" };
-      }),
+              return;
+            }
+            abortSignal.addEventListener(
+              "abort",
+              () => {
+                abortWallMs = Date.now();
+                resolve();
+              },
+              { once: true },
+            );
+          });
+          now += 5;
+          return { status: "ok" as const, summary: "done" };
+        },
+      ),
     });
 
     await onTimer(state);
@@ -1647,7 +1644,7 @@ describe("Cron issue regressions", () => {
       log: noopLogger,
       nowMs: () => endedAt,
       enqueueSystemEvent: vi.fn(),
-      requestHeartbeatNow: vi.fn(),
+      requestHeartbeat: vi.fn(),
       runIsolatedAgentJob: createDefaultIsolatedRunner(),
     });
     const job = createIsolatedRegressionJob({
@@ -1685,7 +1682,7 @@ describe("Cron issue regressions", () => {
       log: noopLogger,
       nowMs: () => endedAt,
       enqueueSystemEvent: vi.fn(),
-      requestHeartbeatNow: vi.fn(),
+      requestHeartbeat: vi.fn(),
       runIsolatedAgentJob: createDefaultIsolatedRunner(),
     });
     const job = createIsolatedRegressionJob({
