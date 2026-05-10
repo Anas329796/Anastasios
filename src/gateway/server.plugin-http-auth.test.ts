@@ -355,6 +355,74 @@ describe("gateway plugin HTTP auth boundary", () => {
     });
   });
 
+  test("binds Plugin UI Entry Point sessions to full scoped plugin paths", async () => {
+    const handledPaths: string[] = [];
+    const handlePluginRequest = vi.fn(async (req: IncomingMessage, res: ServerResponse) => {
+      const pathname = new URL(req.url ?? "/", "http://localhost").pathname;
+      if (
+        pathname.startsWith("/plugins/@team/one/") ||
+        pathname.startsWith("/plugins/@team/two/")
+      ) {
+        handledPaths.push(pathname);
+        res.statusCode = 200;
+        res.end("ok");
+        return true;
+      }
+      return false;
+    });
+
+    await withGatewayServer({
+      prefix: "openclaw-plugin-http-entry-scoped-session-test-",
+      resolvedAuth: AUTH_TOKEN,
+      overrides: {
+        handlePluginRequest,
+        shouldEnforcePluginGatewayAuth: (pathContext) =>
+          pathContext.pathname.startsWith("/plugins/@team/"),
+      },
+      run: async (server) => {
+        const launchPath = issuePluginUiEntryPointLaunchPath({
+          path: "/plugins/@team/one/",
+          scopes: ["operator.read"],
+        });
+
+        const authenticated = await sendRequest(server, { path: launchPath });
+        expect(authenticated.res.statusCode).toBe(200);
+        expect(authenticated.getBody()).toBe("ok");
+        const setCookie = authenticated.setHeader.mock.calls.find(
+          ([name]) => name === "Set-Cookie",
+        )?.[1] as string | undefined;
+        expect(setCookie).toContain("openclaw_plugin_entry=");
+        expect(setCookie).toContain("Path=/plugins/@team/one/");
+
+        const cookie = setCookie?.split(";")[0];
+        expect(cookie).toBeDefined();
+
+        const nested = createResponse();
+        await dispatchRequest(
+          server,
+          createRequest({
+            path: "/plugins/@team/one/session/main",
+            ...(cookie ? { headers: { cookie } } : {}),
+          }),
+          nested.res,
+        );
+        expect(nested.res.statusCode).toBe(200);
+
+        const sibling = createResponse();
+        await dispatchRequest(
+          server,
+          createRequest({
+            path: "/plugins/@team/two/session/main",
+            ...(cookie ? { headers: { cookie } } : {}),
+          }),
+          sibling.res,
+        );
+        expectUnauthorizedResponse(sibling);
+        expect(handledPaths).toEqual(["/plugins/@team/one/", "/plugins/@team/one/session/main"]);
+      },
+    });
+  });
+
   test("preserves Plugin UI Entry Point scopes for trusted-operator plugin routes", async () => {
     const observedRuntimeScopes: string[][] = [];
     const adminAllowedResults: boolean[] = [];

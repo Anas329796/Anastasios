@@ -63,12 +63,23 @@ function appendTokenToPath(path: string, token: string): string {
 }
 
 function resolvePluginUiSessionPathPrefix(path: string): string | undefined {
-  const match = /^\/plugins\/([^/?#]+)(?:\/|$)/.exec(path);
-  const pluginId = match?.[1];
-  if (!pluginId) {
+  const pathname = path.split(/[?#]/, 1)[0] ?? "";
+  if (!pathname.startsWith("/plugins/")) {
     return undefined;
   }
-  return `/plugins/${pluginId}/`;
+  const [firstSegment, secondSegment] = pathname.slice("/plugins/".length).split("/");
+  if (!firstSegment) {
+    return undefined;
+  }
+  const pluginPath = firstSegment.startsWith("@")
+    ? secondSegment
+      ? `${firstSegment}/${secondSegment}`
+      : undefined
+    : firstSegment;
+  if (!pluginPath) {
+    return undefined;
+  }
+  return `/plugins/${pluginPath}/`;
 }
 
 function parseCookieHeader(header: string | string[] | undefined): Map<string, string> {
