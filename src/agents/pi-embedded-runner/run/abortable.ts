@@ -2,7 +2,7 @@ function getAbortReason(signal: AbortSignal): unknown {
   return "reason" in signal ? (signal as { reason?: unknown }).reason : undefined;
 }
 
-function makeAbortError(signal: AbortSignal): Error {
+export function makeAbortError(signal: AbortSignal): Error {
   const reason = getAbortReason(signal);
   if (reason instanceof Error) {
     const err = new Error(reason.message, { cause: reason });

@@ -260,7 +260,7 @@ import {
 import { splitSdkTools } from "../tool-split.js";
 import { mapThinkingLevel } from "../utils.js";
 import { flushPendingToolResultsAfterIdle } from "../wait-for-idle-before-flush.js";
-import { abortable as abortableWithSignal } from "./abortable.js";
+import { makeAbortError } from "./abortable.js";
 import { createEmbeddedAgentSessionWithResourceLoader } from "./attempt-session.js";
 import {
   applyEmbeddedAttemptToolsAllow,
@@ -2602,8 +2602,36 @@ export async function runEmbeddedAttempt(
         idleTimedOut = true;
         abortRun(true, error);
       };
-      const abortable = <T>(promise: Promise<T>): Promise<T> =>
-        abortableWithSignal(runAbortController.signal, promise);
+      const abortable = <T>(promise: Promise<T>): Promise<T> => {
+        const signal = runAbortController.signal;
+        if (signal.aborted) {
+          return Promise.reject(makeAbortError(signal));
+        }
+        return new Promise<T>((resolve, reject) => {
+          const onAbort = () => {
+            signal.removeEventListener("abort", onAbort);
+            // Abort the Pi Agent as early as possible so that if AgentSession.prompt()
+            // has already advanced past the pre-prompt guard and created Agent.activeRun
+            // inside runWithLifecycle(), we cancel it before the loop makes any LLM call.
+            // This is the earliest point at which abort() can be effective for aborts
+            // that arrive during AgentSession preflight (extension cmds, compaction, etc.).
+            activeSession?.agent?.abort();
+            activeSession?.agent?.clearAllQueues?.();
+            reject(makeAbortError(signal));
+          };
+          signal.addEventListener("abort", onAbort, { once: true });
+          promise.then(
+            (value) => {
+              signal.removeEventListener("abort", onAbort);
+              resolve(value);
+            },
+            (err) => {
+              signal.removeEventListener("abort", onAbort);
+              reject(err);
+            },
+          );
+        });
+      };
 
       const subscription = subscribeEmbeddedPiSession(
         buildEmbeddedSubscriptionParams({
@@ -3468,6 +3496,15 @@ export async function runEmbeddedAttempt(
           }
 
           if (!skipPromptSubmission) {
+            // Guard against the abort-before-prompt zombie loop: if the run is
+            // already aborted at this point, skip the prompt() call entirely.
+            // Without this check, activeSession.prompt() would be evaluated
+            // (starting the Agent._runLoop async chain) before abortable() gets
+            // a chance to reject, creating a floating Promise whose runLoop has a
+            // fresh abortController that nobody ever aborts.
+            if (runAbortController.signal.aborted) {
+              throw makeAbortError(runAbortController.signal);
+            }
             const normalizedReplayMessages = normalizeAssistantReplayContent(
               activeSession.messages,
             );
@@ -3860,6 +3897,18 @@ export async function runEmbeddedAttempt(
           // as it would mask any exception from the try block above.
           log.error(
             `CRITICAL: unsubscribe failed, possible resource leak: runId=${params.runId} ${String(err)}`,
+          );
+        }
+        // Defensively terminate the Pi Agent in case a floating Promise escaped
+        // the abort guard (e.g. abort arrived mid-prompt after passing the pre-check).
+        // agent.abort() is a no-op when _runLoop has already finished (abortController
+        // is undefined), so this is always safe to call on normal completion.
+        try {
+          activeSession?.agent?.abort();
+          activeSession?.agent?.clearAllQueues?.();
+        } catch (agentAbortErr) {
+          log.warn(
+            `agent abort during cleanup failed: runId=${params.runId} ${String(agentAbortErr)}`,
           );
         }
         if (params.replyOperation) {
