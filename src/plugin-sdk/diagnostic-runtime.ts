@@ -5,6 +5,8 @@ export type {
   DiagnosticEventMetadata,
   DiagnosticEventPayload,
 } from "../infra/diagnostic-events.js";
+export type { DiagnosticContentCapturePolicy } from "../infra/diagnostic-content-capture.js";
+export { resolveDiagnosticContentCapturePolicy } from "../infra/diagnostic-content-capture.js";
 export {
   emitDiagnosticEvent,
   emitTrustedDiagnosticEvent,

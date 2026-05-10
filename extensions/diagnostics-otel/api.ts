@@ -1,10 +1,7 @@
 export {
-  resolveDiagnosticContentCapturePolicy,
-  type DiagnosticContentCapturePolicy,
-} from "../../src/infra/diagnostic-content-capture.js";
-export {
   createChildDiagnosticTraceContext,
   createDiagnosticTraceContext,
+  resolveDiagnosticContentCapturePolicy,
   emitDiagnosticEvent,
   formatDiagnosticTraceparent,
   isValidDiagnosticSpanId,
@@ -12,6 +9,7 @@ export {
   isValidDiagnosticTraceId,
   onDiagnosticEvent,
   parseDiagnosticTraceparent,
+  type DiagnosticContentCapturePolicy,
   type DiagnosticEventMetadata,
   type DiagnosticEventPayload,
   type DiagnosticTraceContext,
