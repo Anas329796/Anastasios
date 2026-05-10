@@ -867,8 +867,16 @@ export function buildStatusMessage(args: StatusArgs): string {
     activeAuthMode && activeAuthMode !== "unknown"
       ? (args.activeModelAuth ?? activeAuthMode)
       : undefined;
-  const selectedAuthLabelValue =
-    rawSelectedAuthLabelValue ?? (runtimeAliasModelEquivalent ? activeAuthLabelValue : undefined);
+  const selectedAuthLabelValue = rawSelectedAuthLabelValue
+    ? runtimeAliasModelEquivalent &&
+      selectedAuthMode === "api-key" &&
+      activeAuthMode === "oauth" &&
+      activeAuthLabelValue
+      ? activeAuthLabelValue
+      : rawSelectedAuthLabelValue
+    : runtimeAliasModelEquivalent
+      ? activeAuthLabelValue
+      : undefined;
   const fallbackState = resolveActiveFallbackState({
     selectedModelRef: selectedModelLabel,
     activeModelRef: activeModelLabel,
