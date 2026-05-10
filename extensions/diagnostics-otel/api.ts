@@ -1,4 +1,8 @@
 export {
+  resolveDiagnosticContentCapturePolicy,
+  type DiagnosticContentCapturePolicy,
+} from "../../src/infra/diagnostic-content-capture.js";
+export {
   createChildDiagnosticTraceContext,
   createDiagnosticTraceContext,
   emitDiagnosticEvent,

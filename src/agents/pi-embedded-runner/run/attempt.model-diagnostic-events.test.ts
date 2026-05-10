@@ -546,6 +546,94 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
     expect(completed).toHaveProperty("inputMessages");
   });
 
+  it("does not inspect streamed output text when output capture is disabled", async () => {
+    async function* stream() {
+      yield {
+        type: "text_delta",
+        get delta() {
+          throw new Error("raw output should not be read");
+        },
+      };
+    }
+    const wrapped = wrapStreamFnWithDiagnosticModelCallEvents(
+      (() => stream()) as unknown as StreamFn,
+      {
+        runId: "run-1",
+        provider: "openai",
+        model: "gpt-5.4",
+        trace: createDiagnosticTraceContext(),
+        nextCallId: () => "call-no-output-read",
+        contentCapture: { inputMessages: true, outputMessages: false },
+      },
+    );
+
+    const events = await collectModelCallEvents(async () => {
+      await drain(wrapped({} as never, {} as never, {} as never) as AsyncIterable<unknown>);
+    });
+
+    const completed = events.find((e) => e.type === "model.call.completed");
+    expect(completed).toMatchObject({
+      type: "model.call.completed",
+      callId: "call-no-output-read",
+    });
+    expect(completed).not.toHaveProperty("outputMessages");
+  });
+
+  it("captures Responses input_text content parts as inputMessages", async () => {
+    async function* stream() {
+      yield { type: "text_delta", delta: "output text" };
+    }
+    const requestPayload = {
+      input: [
+        {
+          type: "message",
+          role: "user",
+          content: [
+            { type: "input_text", text: "hello from responses" },
+            { type: "input_image", source: { type: "url", url: "https://example.com/cat.png" } },
+            {
+              type: "input_file",
+              source: { type: "base64", media_type: "text/plain", data: "aGVsbG8=" },
+            },
+          ],
+        },
+      ],
+      model: "gpt-5.4",
+    };
+    const wrapped = wrapStreamFnWithDiagnosticModelCallEvents(
+      ((
+        model: Parameters<StreamFn>[0],
+        _context: Parameters<StreamFn>[1],
+        options: Parameters<StreamFn>[2],
+      ) => {
+        options?.onPayload?.(requestPayload, model);
+        return stream();
+      }) as unknown as StreamFn,
+      {
+        runId: "run-1",
+        provider: "openai",
+        model: "gpt-5.4",
+        trace: createDiagnosticTraceContext(),
+        nextCallId: () => "call-responses-input-text",
+        contentCapture: { inputMessages: true, outputMessages: true },
+      },
+    );
+
+    const events = await collectModelCallEvents(async () => {
+      const streamResult = await wrapped({} as never, {} as never, {} as never);
+      await drain(streamResult as unknown as AsyncIterable<unknown>);
+    });
+
+    const completed = events.find((e) => e.type === "model.call.completed");
+    expect(completed).toMatchObject({
+      type: "model.call.completed",
+      inputMessages: ["hello from responses"],
+      outputMessages: ["output text"],
+    });
+    expect(JSON.stringify(completed)).not.toContain("input_image");
+    expect(JSON.stringify(completed)).not.toContain("input_file");
+  });
+
   it("captures output from normalized text_delta chunks", async () => {
     async function* stream() {
       yield { type: "text_delta", delta: "hello" };
