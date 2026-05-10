@@ -19,7 +19,6 @@ import {
   writeCronStoreSnapshot,
 } from "./service.issue-regressions.test-helpers.js";
 import { CronService } from "./service.js";
-import { createDefaultIsolatedRunner } from "./service.regression-fixtures.js";
 import { createNoopLogger } from "./service.test-harness.js";
 import { computeJobNextRunAtMs } from "./service/jobs.js";
 import { enqueueRun, run } from "./service/ops.js";
