@@ -359,12 +359,61 @@ describe("update-cli", () => {
     return call;
   };
 
+  const commandCall = (index = 0) => {
+    const calls = vi.mocked(runCommandWithTimeout).mock.calls as unknown as Array<
+      [string[], Record<string, unknown>]
+    >;
+    return calls[index];
+  };
+
+  const spawnCall = (index = 0) => {
+    const calls = spawn.mock.calls as unknown as Array<
+      [string, string[], { env?: NodeJS.ProcessEnv; stdio?: unknown }]
+    >;
+    return calls[index];
+  };
+
+  const spawnSyncCall = (index = 0) => {
+    const calls = vi.mocked(spawnSync).mock.calls as unknown as Array<
+      [string, string[], { env?: NodeJS.ProcessEnv; timeout?: number }]
+    >;
+    return calls[index];
+  };
+
+  const syncPluginCall = (index = 0) => {
+    const calls = syncPluginsForUpdateChannel.mock.calls as unknown as Array<
+      [{ channel?: string; config?: OpenClawConfig }]
+    >;
+    return calls[index]?.[0];
+  };
+
+  const npmPluginUpdateCall = (index = 0) => {
+    const calls = updateNpmInstalledPlugins.mock.calls as unknown as Array<
+      [{ timeoutMs?: number }]
+    >;
+    return calls[index]?.[0];
+  };
+
+  const pluginWarning = (result?: UpdateRunResult) => result?.postUpdate?.plugins?.warnings?.[0];
+  const pluginOutcome = (result?: UpdateRunResult) => result?.postUpdate?.plugins?.npm.outcomes[0];
+
   const expectPackageInstallSpec = (spec: string) => {
     expect(runGatewayUpdate).not.toHaveBeenCalled();
-    expect(runCommandWithTimeout).toHaveBeenCalledWith(
-      ["npm", "i", "-g", spec, "--no-fund", "--no-audit", "--loglevel=error"],
-      expect.any(Object),
-    );
+    const call = (
+      vi.mocked(runCommandWithTimeout).mock.calls as unknown as Array<
+        [string[], Record<string, unknown>]
+      >
+    ).find(([argv]) => argv[0] === "npm" && argv[1] === "i" && argv[2] === "-g");
+    expect(call?.[0]).toEqual([
+      "npm",
+      "i",
+      "-g",
+      spec,
+      "--no-fund",
+      "--no-audit",
+      "--loglevel=error",
+    ]);
+    expect(call?.[1]).toBeDefined();
   };
 
   const statfsFixture = (params: {
@@ -616,16 +665,11 @@ describe("update-cli", () => {
 
     await updateCliShared.tryWriteCompletionCache(root, false);
 
-    expect(spawnSync).toHaveBeenCalledWith(
-      expect.any(String),
-      [path.join(root, "openclaw.mjs"), "completion", "--write-state"],
-      expect.objectContaining({
-        env: expect.objectContaining({
-          OPENCLAW_COMPLETION_SKIP_PLUGIN_COMMANDS: "1",
-        }),
-        timeout: 30_000,
-      }),
-    );
+    const call = spawnSyncCall();
+    expect(typeof call?.[0]).toBe("string");
+    expect(call?.[1]).toEqual([path.join(root, "openclaw.mjs"), "completion", "--write-state"]);
+    expect(call?.[2]?.env?.OPENCLAW_COMPLETION_SKIP_PLUGIN_COMMANDS).toBe("1");
+    expect(call?.[2]?.timeout).toBe(30_000);
   });
 
   it("refuses mutating updates in Nix mode before update side effects", async () => {
@@ -658,11 +702,9 @@ describe("update-cli", () => {
     await updateCliShared.tryWriteCompletionCache(root, false);
 
     const logs = vi.mocked(runtimeCapture.log).mock.calls.map((call) => String(call[0]));
-    expect(logs).toEqual(expect.arrayContaining([expect.stringContaining("timed out after 30s")]));
-    expect(logs).toEqual(
-      expect.arrayContaining([expect.stringContaining("openclaw completion --write-state")]),
-    );
-    expect(logs).not.toEqual(expect.arrayContaining([expect.stringContaining("Error: spawnSync")]));
+    expect(logs.some((line) => line.includes("timed out after 30s"))).toBe(true);
+    expect(logs.some((line) => line.includes("openclaw completion --write-state"))).toBe(true);
+    expect(logs.some((line) => line.includes("Error: spawnSync"))).toBe(false);
   });
 
   it("respawns into the updated package root before running post-update tasks", async () => {
@@ -670,18 +712,13 @@ describe("update-cli", () => {
 
     await updateCommand({ yes: true, timeout: "1800" });
 
-    expect(spawn).toHaveBeenCalledWith(
-      expect.stringMatching(/node/),
-      [entrypoints[0], "update", "--yes", "--timeout", "1800"],
-      expect.objectContaining({
-        stdio: "inherit",
-        env: expect.objectContaining({
-          NODE_DISABLE_COMPILE_CACHE: "1",
-          OPENCLAW_UPDATE_POST_CORE: "1",
-          OPENCLAW_UPDATE_POST_CORE_CHANNEL: "dev",
-        }),
-      }),
-    );
+    const call = spawnCall();
+    expect(call?.[0]).toMatch(/node/);
+    expect(call?.[1]).toEqual([entrypoints[0], "update", "--yes", "--timeout", "1800"]);
+    expect(call?.[2]?.stdio).toBe("inherit");
+    expect(call?.[2]?.env?.NODE_DISABLE_COMPILE_CACHE).toBe("1");
+    expect(call?.[2]?.env?.OPENCLAW_UPDATE_POST_CORE).toBe("1");
+    expect(call?.[2]?.env?.OPENCLAW_UPDATE_POST_CORE_CHANNEL).toBe("dev");
     expect(updateNpmInstalledPlugins).not.toHaveBeenCalled();
     expect(runDaemonInstall).not.toHaveBeenCalled();
     expect(runDaemonRestart).not.toHaveBeenCalled();
@@ -779,18 +816,13 @@ describe("update-cli", () => {
 
     await updateCommand({ channel: "dev", yes: true, restart: false });
 
-    expect(spawn).toHaveBeenCalledWith(
-      expect.stringMatching(/node/),
-      [entrypoints[0], "update", "--no-restart", "--yes"],
-      expect.objectContaining({
-        stdio: "inherit",
-        env: expect.objectContaining({
-          OPENCLAW_UPDATE_POST_CORE: "1",
-          OPENCLAW_UPDATE_POST_CORE_CHANNEL: "dev",
-          OPENCLAW_UPDATE_POST_CORE_REQUESTED_CHANNEL: "dev",
-        }),
-      }),
-    );
+    const call = spawnCall();
+    expect(call?.[0]).toMatch(/node/);
+    expect(call?.[1]).toEqual([entrypoints[0], "update", "--no-restart", "--yes"]);
+    expect(call?.[2]?.stdio).toBe("inherit");
+    expect(call?.[2]?.env?.OPENCLAW_UPDATE_POST_CORE).toBe("1");
+    expect(call?.[2]?.env?.OPENCLAW_UPDATE_POST_CORE_CHANNEL).toBe("dev");
+    expect(call?.[2]?.env?.OPENCLAW_UPDATE_POST_CORE_REQUESTED_CHANNEL).toBe("dev");
     expect(replaceConfigFile).not.toHaveBeenCalled();
     expect(syncPluginsForUpdateChannel).not.toHaveBeenCalled();
     expect(updateNpmInstalledPlugins).not.toHaveBeenCalled();
@@ -871,10 +903,10 @@ describe("update-cli", () => {
     );
 
     expect(runGatewayUpdate).not.toHaveBeenCalled();
-    expect(runCommandWithTimeout).not.toHaveBeenCalledWith(
-      ["npm", "i", "-g", expect.any(String)],
-      expect.anything(),
-    );
+    const installCall = (
+      vi.mocked(runCommandWithTimeout).mock.calls as unknown as Array<[string[], unknown]>
+    ).find(([argv]) => argv[0] === "npm" && argv[1] === "i" && argv[2] === "-g");
+    expect(installCall).toBeUndefined();
     expect(defaultRuntime.exit).toHaveBeenCalledWith(0);
     expect(syncPluginsForUpdateChannel).toHaveBeenCalledTimes(1);
     expect(updateNpmInstalledPlugins).toHaveBeenCalledTimes(1);
@@ -979,14 +1011,8 @@ describe("update-cli", () => {
       },
       baseHash: "stable-hash",
     });
-    expect(syncPluginsForUpdateChannel).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channel: "dev",
-        config: expect.objectContaining({
-          update: expect.objectContaining({ channel: "dev" }),
-        }),
-      }),
-    );
+    expect(syncPluginCall()?.channel).toBe("dev");
+    expect(syncPluginCall()?.config?.update?.channel).toBe("dev");
   });
 
   it("post-core resume mode retries update channel persistence after config hash drift", async () => {
@@ -1051,14 +1077,8 @@ describe("update-cli", () => {
       },
       baseHash: "newer-hash",
     });
-    expect(syncPluginsForUpdateChannel).toHaveBeenCalledWith(
-      expect.objectContaining({
-        config: expect.objectContaining({
-          meta: expect.objectContaining({ lastTouchedVersion: "2026.4.30" }),
-          update: expect.objectContaining({ channel: "dev" }),
-        }),
-      }),
-    );
+    expect(syncPluginCall()?.config?.meta?.lastTouchedVersion).toBe("2026.4.30");
+    expect(syncPluginCall()?.config?.update?.channel).toBe("dev");
   });
 
   it("passes the update timeout budget into post-core plugin updates", async () => {
@@ -1072,9 +1092,7 @@ describe("update-cli", () => {
       },
     );
 
-    expect(updateNpmInstalledPlugins).toHaveBeenCalledWith(
-      expect.objectContaining({ timeoutMs: 1_800_000 }),
-    );
+    expect(npmPluginUpdateCall()?.timeoutMs).toBe(1_800_000);
   });
 
   it("uses a fail-closed integrity policy for post-core plugin updates", async () => {
@@ -1180,16 +1198,12 @@ describe("update-cli", () => {
       },
     ]);
     expect(jsonOutput?.postUpdate?.plugins?.status).toBe("warning");
-    expect(jsonOutput?.postUpdate?.plugins?.warnings?.[0]).toMatchObject({
-      pluginId: "demo",
-      guidance: [
-        "Run openclaw doctor --fix to attempt automatic repair.",
-        "Run openclaw plugins inspect demo --runtime --json for details.",
-      ],
-    });
-    expect(jsonOutput?.postUpdate?.plugins?.warnings?.[0]?.reason).toContain(
-      "npm package integrity drift",
-    );
+    expect(pluginWarning(jsonOutput)?.pluginId).toBe("demo");
+    expect(pluginWarning(jsonOutput)?.guidance).toEqual([
+      "Run openclaw doctor --fix to attempt automatic repair.",
+      "Run openclaw plugins inspect demo --runtime --json for details.",
+    ]);
+    expect(pluginWarning(jsonOutput)?.reason).toContain("npm package integrity drift");
     expect(jsonOutput?.postUpdate?.plugins?.npm.outcomes[0]?.status).toBe("error");
     expect(jsonOutput?.postUpdate?.plugins?.npm.outcomes[0]?.message).toContain(
       "Run openclaw doctor --fix to attempt automatic repair.",
@@ -1248,16 +1262,10 @@ describe("update-cli", () => {
       | undefined;
     expect(jsonOutput?.status).toBe("ok");
     expect(jsonOutput?.postUpdate?.plugins?.status).toBe("warning");
-    expect(jsonOutput?.postUpdate?.plugins?.warnings?.[0]).toMatchObject({
-      pluginId: "demo",
-    });
-    expect(jsonOutput?.postUpdate?.plugins?.warnings?.[0]?.reason).toContain(
-      "package.json is missing",
-    );
-    expect(jsonOutput?.postUpdate?.plugins?.npm.outcomes[0]).toMatchObject({
-      pluginId: "demo",
-      status: "error",
-    });
+    expect(pluginWarning(jsonOutput)?.pluginId).toBe("demo");
+    expect(pluginWarning(jsonOutput)?.reason).toContain("package.json is missing");
+    expect(pluginOutcome(jsonOutput)?.pluginId).toBe("demo");
+    expect(pluginOutcome(jsonOutput)?.status).toBe("error");
   });
 
   it("prints non-fatal plugin warnings in human update output", async () => {
@@ -1315,17 +1323,13 @@ describe("update-cli", () => {
       | UpdateRunResult
       | undefined;
     expect(jsonOutput?.postUpdate?.plugins?.status).toBe("warning");
-    expect(jsonOutput?.postUpdate?.plugins?.warnings?.[0]).toMatchObject({
-      pluginId: "demo",
-      guidance: [
-        "Run openclaw doctor --fix to attempt automatic repair.",
-        "Run openclaw plugins inspect demo --runtime --json for details.",
-      ],
-    });
-    expect(jsonOutput?.postUpdate?.plugins?.npm.outcomes[0]).toMatchObject({
-      pluginId: "demo",
-      status: "skipped",
-    });
+    expect(pluginWarning(jsonOutput)?.pluginId).toBe("demo");
+    expect(pluginWarning(jsonOutput)?.guidance).toEqual([
+      "Run openclaw doctor --fix to attempt automatic repair.",
+      "Run openclaw plugins inspect demo --runtime --json for details.",
+    ]);
+    expect(pluginOutcome(jsonOutput)?.pluginId).toBe("demo");
+    expect(pluginOutcome(jsonOutput)?.status).toBe("skipped");
   });
 
   it("fails unexpected post-core plugin sync exceptions", async () => {
