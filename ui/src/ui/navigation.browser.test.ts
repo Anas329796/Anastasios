@@ -90,6 +90,28 @@ describe("control UI routing", () => {
     expect(breadcrumb.getAttribute("href")).toBe("/ui/overview");
   });
 
+  it("uses the plugin name as the breadcrumb current segment for in-app plugin entry points", async () => {
+    const app = mountApp("/channels");
+    app.activePluginUiEntryPoint = {
+      id: "notes-plugin-entry",
+      pluginId: "notes-plugin",
+      pluginName: "Session Search",
+      surface: "app-nav",
+      label: "Sessions",
+      path: "/plugins/notes-plugin/",
+      openMode: "in-app",
+    };
+    app.activePluginUiEntryPointSrc = "/plugins/notes-plugin/?__openclaw_plugin_entry=test";
+    await app.updateComplete;
+
+    const current = expectElement(
+      app,
+      "dashboard-header .dashboard-header__breadcrumb-current",
+      HTMLSpanElement,
+    );
+    expect(current.textContent?.trim()).toBe("Session Search");
+  });
+
   it("renders the dreaming view on the /dreaming route", async () => {
     const app = mountApp("/dreaming");
     app.dreamingStatus = {

@@ -72,6 +72,7 @@ import { normalizeOptionalString } from "./string-coerce.ts";
 import { startThemeTransition, type ThemeTransitionContext } from "./theme-transition.ts";
 import { resolveTheme, type ResolvedTheme, type ThemeMode, type ThemeName } from "./theme.ts";
 import type { AgentsListResult, AttentionItem } from "./types.ts";
+import type { PluginControlUiEntryPoint } from "./types.ts";
 import { normalizeLocalUserIdentity } from "./user-identity.ts";
 import { resetChatViewState } from "./views/chat.ts";
 
@@ -93,6 +94,8 @@ type SettingsHost = {
   logsAtBottom: boolean;
   eventLog: unknown[];
   eventLogBuffer: unknown[];
+  activePluginUiEntryPoint?: PluginControlUiEntryPoint | null;
+  activePluginUiEntryPointSrc?: string | null;
   basePath: string;
   agentsList?: AgentsListResult | null;
   agentsSelectedId?: string | null;
@@ -566,6 +569,8 @@ function applyTabSelection(
   options: { refreshPolicy: "always" | "connected"; syncUrl?: boolean },
 ) {
   const prev = host.tab;
+  host.activePluginUiEntryPoint = null;
+  host.activePluginUiEntryPointSrc = null;
   host.tab = next;
   if (prev !== next) {
     scheduleControlUiTabVisibleTiming(host, prev, next);

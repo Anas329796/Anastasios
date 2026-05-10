@@ -148,6 +148,7 @@ plugins.
 | `api.registerToolMetadata(...)`                                          | Tool catalog display metadata without changing the tool implementation                                                            |
 | `api.registerCommand(...)`                                               | Scoped plugin commands; command results can set `continueAgent: true`; Discord native commands support `descriptionLocalizations` |
 | `api.registerControlUiDescriptor(...)`                                   | Control UI contribution descriptors for session, tool, run, or settings surfaces                                                  |
+| `api.registerControlUiEntryPoint(...)`                                   | Same-origin, plugin-owned Control UI entry points for safe navigation surfaces                                                    |
 | `api.registerRuntimeLifecycle(...)`                                      | Cleanup callbacks for plugin-owned runtime resources on reset/delete/reload paths                                                 |
 | `api.registerAgentEventSubscription(...)`                                | Sanitized event subscriptions for workflow state and monitors                                                                     |
 | `api.setRunContext(...)` / `getRunContext(...)` / `clearRunContext(...)` | Per-run plugin scratch state cleared on terminal run lifecycle                                                                    |

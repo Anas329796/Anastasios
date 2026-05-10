@@ -34,6 +34,7 @@ import type {
   ChatModelOverride,
   ModelAuthStatusResult,
   ModelCatalogEntry,
+  PluginControlUiEntryPoint,
   NostrProfile,
   PresenceEntry,
   SessionsUsageResult,
@@ -71,6 +72,9 @@ export type AppViewState = {
   lastError: string | null;
   lastErrorCode: string | null;
   eventLog: EventLogEntry[];
+  pluginUiEntryPoints?: PluginControlUiEntryPoint[];
+  activePluginUiEntryPoint?: PluginControlUiEntryPoint | null;
+  activePluginUiEntryPointSrc?: string | null;
   assistantName: string;
   assistantAvatar: string | null;
   assistantAvatarSource?: string | null;

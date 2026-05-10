@@ -96,6 +96,7 @@ import type { PluginHookHandlerMap, PluginHookName } from "./hook-types.js";
 import type {
   PluginAgentEventSubscriptionRegistration,
   PluginControlUiDescriptor,
+  PluginControlUiEntryPoint,
   PluginJsonValue,
   PluginNextTurnInjection,
   PluginNextTurnInjectionEnqueueResult,
@@ -196,6 +197,7 @@ export type {
   PluginAgentTurnPrepareEvent,
   PluginAgentTurnPrepareResult,
   PluginControlUiDescriptor,
+  PluginControlUiEntryPoint,
   PluginHeartbeatPromptContributionEvent,
   PluginHeartbeatPromptContributionResult,
   PluginJsonValue,
@@ -2597,6 +2599,8 @@ export type OpenClawPluginApi = {
   registerToolMetadata: (metadata: PluginToolMetadataRegistration) => void;
   /** Register a generic Control UI contribution descriptor. */
   registerControlUiDescriptor: (descriptor: PluginControlUiDescriptor) => void;
+  /** Register a same-origin, plugin-owned Control UI entry point. */
+  registerControlUiEntryPoint: (entryPoint: PluginControlUiEntryPoint) => void;
   /** Register cleanup hooks for plugin-owned host state and background work. */
   registerRuntimeLifecycle: (lifecycle: PluginRuntimeLifecycleRegistration) => void;
   /** Subscribe to sanitized agent events through the host-owned plugin lifecycle. */

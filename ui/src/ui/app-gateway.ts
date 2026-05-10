@@ -47,6 +47,10 @@ import {
 import { loadHealthState, type HealthState } from "./controllers/health.ts";
 import { loadNodes, type NodesState } from "./controllers/nodes.ts";
 import {
+  loadPluginUiEntryPoints,
+  type PluginUiEntryPointsState,
+} from "./controllers/plugin-ui-entry-points.ts";
+import {
   applySessionsChangedEvent,
   loadSessions,
   subscribeSessions,
@@ -110,6 +114,7 @@ type GatewayHost = {
   execApprovalError: string | null;
   updateAvailable: UpdateAvailable | null;
   reconcileWebPushState?: () => Promise<void> | void;
+  pluginUiEntryPoints?: import("./types.ts").PluginControlUiEntryPoint[];
 };
 
 type GatewayHostWithDeferredSessionMessageReload = GatewayHost & {
@@ -545,6 +550,7 @@ export function connectGateway(host: GatewayHost, options?: ConnectGatewayOption
       void loadHealthState(host as unknown as HealthState);
       void loadNodes(host as unknown as NodesState, { quiet: true });
       void loadDevices(host as unknown as DevicesState, { quiet: true });
+      void loadPluginUiEntryPoints(host as unknown as PluginUiEntryPointsState);
       void loadAgentsThenRefreshActiveTab(host);
       // Re-run push reconciliation now that the gateway client is available.
       void host.reconcileWebPushState?.();

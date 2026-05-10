@@ -14,6 +14,7 @@ import type { PluginActivationSource } from "./config-state.js";
 import type {
   PluginAgentEventSubscriptionRegistration,
   PluginControlUiDescriptor,
+  PluginControlUiEntryPoint,
   PluginRuntimeLifecycleRegistration,
   PluginSessionSchedulerJobRegistration,
   PluginSessionExtensionRegistration,
@@ -315,6 +316,14 @@ export type PluginControlUiDescriptorRegistryRegistration = {
   rootDir?: string;
 };
 
+export type PluginControlUiEntryPointRegistryRegistration = {
+  pluginId: string;
+  pluginName?: string;
+  entryPoint: PluginControlUiEntryPoint;
+  source: string;
+  rootDir?: string;
+};
+
 export type PluginRuntimeLifecycleRegistryRegistration = {
   pluginId: string;
   pluginName?: string;
@@ -451,6 +460,7 @@ export type PluginRegistry = {
   trustedToolPolicies?: PluginTrustedToolPolicyRegistryRegistration[];
   toolMetadata?: PluginToolMetadataRegistryRegistration[];
   controlUiDescriptors?: PluginControlUiDescriptorRegistryRegistration[];
+  controlUiEntryPoints?: PluginControlUiEntryPointRegistryRegistration[];
   runtimeLifecycles?: PluginRuntimeLifecycleRegistryRegistration[];
   agentEventSubscriptions?: PluginAgentEventSubscriptionRegistryRegistration[];
   sessionSchedulerJobs?: PluginSessionSchedulerJobRegistryRegistration[];

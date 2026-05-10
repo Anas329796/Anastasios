@@ -39,7 +39,10 @@ import {
   handleUpdated,
 } from "./app-lifecycle.ts";
 import { initNativeBridge } from "./app-native-bridge.ts";
-import { createChatSession as createChatSessionInternal } from "./app-render.helpers.ts";
+import {
+  createChatSession as createChatSessionInternal,
+  switchChatSession,
+} from "./app-render.helpers.ts";
 import { renderApp } from "./app-render.ts";
 import {
   exportLogs as exportLogsInternal,
@@ -86,6 +89,7 @@ import type {
 } from "./controllers/dreaming.ts";
 import type { ExecApprovalRequest } from "./controllers/exec-approval.ts";
 import type { ExecApprovalsFile, ExecApprovalsSnapshot } from "./controllers/exec-approvals.ts";
+import { loadSessions as loadSessionsInternal } from "./controllers/sessions.ts";
 import type {
   ClawHubSearchResult,
   ClawHubSkillDetail,
@@ -122,6 +126,7 @@ import type {
   NostrProfile,
   ToolsCatalogResult,
   ToolsEffectiveResult,
+  PluginControlUiEntryPoint,
 } from "./types.ts";
 import { type ChatAttachment, type ChatQueueItem, type CronFormState } from "./ui-types.ts";
 import { generateUUID } from "./uuid.ts";
@@ -180,6 +185,9 @@ export class OpenClawApp extends LitElement {
   @state() lastError: string | null = null;
   @state() lastErrorCode: string | null = null;
   @state() eventLog: EventLogEntry[] = [];
+  @state() pluginUiEntryPoints: PluginControlUiEntryPoint[] = [];
+  @state() activePluginUiEntryPoint: PluginControlUiEntryPoint | null = null;
+  @state() activePluginUiEntryPointSrc: string | null = null;
   private eventLogBuffer: EventLogEntry[] = [];
   private toolStreamSyncTimer: number | null = null;
   private sidebarCloseTimer: number | null = null;
@@ -633,6 +641,40 @@ export class OpenClawApp extends LitElement {
     }
     this.setChatMobileControlsOpen(false);
   };
+  private pluginUiMessageHandler = (event: MessageEvent) => {
+    const data = event.data as { type?: unknown; target?: unknown; sessionKey?: unknown } | null;
+    if (
+      !this.activePluginUiEntryPoint ||
+      data?.type !== "openclaw.pluginUi.navigate" ||
+      data.target !== "chat"
+    ) {
+      return;
+    }
+    const frame = this.querySelector(".plugin-ui-entry-frame") as HTMLIFrameElement | null;
+    if (frame?.contentWindow && event.source !== frame.contentWindow) {
+      return;
+    }
+    this.activePluginUiEntryPoint = null;
+    this.activePluginUiEntryPointSrc = null;
+    const sessionKey = typeof data.sessionKey === "string" ? data.sessionKey.trim() : "";
+    if (sessionKey) {
+      void this.navigatePluginUiToChatSession(sessionKey);
+      return;
+    }
+    this.setTab("chat");
+  };
+
+  private async navigatePluginUiToChatSession(sessionKey: string) {
+    this.setTab("chat");
+    await loadSessionsInternal(this as unknown as Parameters<typeof loadSessionsInternal>[0], {
+      activeMinutes: 0,
+      limit: 0,
+      includeGlobal: true,
+      includeUnknown: true,
+      showArchived: this.sessionsShowArchived,
+    });
+    switchChatSession(this as unknown as AppViewState, sessionKey);
+  }
 
   createRenderRoot() {
     return this;
@@ -663,6 +705,7 @@ export class OpenClawApp extends LitElement {
     document.addEventListener("keydown", this.globalKeydownHandler);
     document.addEventListener("keydown", this.chatMobileControlsKeydownHandler);
     document.addEventListener("pointerdown", this.chatMobileControlsPointerdownHandler);
+    window.addEventListener("message", this.pluginUiMessageHandler);
     handleConnected(this as unknown as Parameters<typeof handleConnected>[0]);
     this.nativeBridgeCleanup = initNativeBridge(this);
     void this.initWebPushState();
@@ -678,6 +721,7 @@ export class OpenClawApp extends LitElement {
     this.nativeBridgeCleanup = null;
     document.removeEventListener("keydown", this.chatMobileControlsKeydownHandler);
     document.removeEventListener("pointerdown", this.chatMobileControlsPointerdownHandler);
+    window.removeEventListener("message", this.pluginUiMessageHandler);
     if (this.sessionSwitchNoticeTimer !== null) {
       window.clearTimeout(this.sessionSwitchNoticeTimer);
       this.sessionSwitchNoticeTimer = null;
