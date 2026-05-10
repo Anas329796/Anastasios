@@ -214,14 +214,24 @@ describe("cron service timer seam coverage", () => {
     expect(job?.state.nextRunAtMs).toBe(Date.parse("2026-03-23T07:00:00.000Z"));
   });
 
-  it("passes the outer cron deadline through detached isolated execution", async () => {
+  it("anchors the detached isolated deadline to execution start", async () => {
     const { storePath } = await makeStorePath();
     const now = Date.parse("2026-03-23T12:00:00.000Z");
-    const deadlineBaseMs = Date.parse("2026-03-23T12:00:05.000Z");
+    const setupStartMs = Date.parse("2026-03-23T12:00:05.000Z");
+    const executionStartMs = setupStartMs + 30_000;
     const timeoutSeconds = 45;
-    const runIsolatedAgentJob = vi.fn<CronServiceDeps["runIsolatedAgentJob"]>(async () => ({
-      status: "ok" as const,
-    }));
+    const dateNowSpy = vi.spyOn(Date, "now").mockReturnValue(setupStartMs);
+    let deadlineBeforeExecutionStart: number | undefined;
+    let deadlineAfterExecutionStart: number | undefined;
+    const runIsolatedAgentJob = vi.fn<CronServiceDeps["runIsolatedAgentJob"]>(
+      async ({ getDeadlineAtMs, onExecutionStarted }) => {
+        deadlineBeforeExecutionStart = getDeadlineAtMs?.();
+        dateNowSpy.mockReturnValue(executionStartMs);
+        onExecutionStarted?.();
+        deadlineAfterExecutionStart = getDeadlineAtMs?.();
+        return { status: "ok" as const };
+      },
+    );
 
     await writeCronStoreSnapshot({
       storePath,
@@ -238,7 +248,6 @@ describe("cron service timer seam coverage", () => {
       runIsolatedAgentJob,
     });
 
-    const dateNowSpy = vi.spyOn(Date, "now").mockReturnValue(deadlineBaseMs);
     try {
       await onTimer(state);
     } finally {
@@ -249,17 +258,24 @@ describe("cron service timer seam coverage", () => {
     expect(runIsolatedAgentJob.mock.calls[0]?.[0]).toMatchObject({
       job: expect.objectContaining({ id: "isolated-deadline-job" }),
       message: "deadline seam tick",
-      deadlineAtMs: deadlineBaseMs + timeoutSeconds * 1_000,
+      getDeadlineAtMs: expect.any(Function),
     });
+    expect(deadlineBeforeExecutionStart).toBeUndefined();
+    expect(deadlineAfterExecutionStart).toBe(executionStartMs + timeoutSeconds * 1_000);
   });
 
   it("passes the outer safety deadline when isolated timeoutSeconds is unset", async () => {
     const { storePath } = await makeStorePath();
     const now = Date.parse("2026-03-23T12:00:00.000Z");
     const deadlineBaseMs = Date.parse("2026-03-23T12:00:05.000Z");
-    const runIsolatedAgentJob = vi.fn<CronServiceDeps["runIsolatedAgentJob"]>(async () => ({
-      status: "ok" as const,
-    }));
+    let observedDeadlineAtMs: number | undefined;
+    const runIsolatedAgentJob = vi.fn<CronServiceDeps["runIsolatedAgentJob"]>(
+      async ({ getDeadlineAtMs, onExecutionStarted }) => {
+        onExecutionStarted?.();
+        observedDeadlineAtMs = getDeadlineAtMs?.();
+        return { status: "ok" as const };
+      },
+    );
 
     await writeCronStoreSnapshot({
       storePath,
@@ -290,7 +306,8 @@ describe("cron service timer seam coverage", () => {
         payload: expect.not.objectContaining({ timeoutSeconds: expect.any(Number) }),
       }),
       message: "deadline seam tick",
-      deadlineAtMs: deadlineBaseMs + AGENT_TURN_SAFETY_TIMEOUT_MS,
+      getDeadlineAtMs: expect.any(Function),
     });
+    expect(observedDeadlineAtMs).toBe(deadlineBaseMs + AGENT_TURN_SAFETY_TIMEOUT_MS);
   });
 });

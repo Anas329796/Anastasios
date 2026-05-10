@@ -437,6 +437,7 @@ type RunCronAgentTurnParams = {
   message: string;
   abortSignal?: AbortSignal;
   deadlineAtMs?: number;
+  getDeadlineAtMs?: () => number | undefined;
   signal?: AbortSignal;
   onExecutionStarted?: (info?: CronAgentExecutionStarted) => void;
   onExecutionPhase?: (info: CronAgentExecutionPhaseUpdate) => void;
@@ -1073,6 +1074,7 @@ export async function runCronIsolatedAgentTurn(params: {
   message: string;
   abortSignal?: AbortSignal;
   deadlineAtMs?: number;
+  getDeadlineAtMs?: () => number | undefined;
   signal?: AbortSignal;
   onExecutionStarted?: (info?: CronAgentExecutionStarted) => void;
   onExecutionPhase?: (info: CronAgentExecutionPhaseUpdate) => void;
@@ -1154,6 +1156,7 @@ export async function runCronIsolatedAgentTurn(params: {
       timeoutMs: prepared.context.timeoutMs,
       suppressExecNotifyOnExit: prepared.context.suppressExecNotifyOnExit,
       deadlineAtMs: params.deadlineAtMs,
+      getDeadlineAtMs: params.getDeadlineAtMs,
       fallbackMinRemainingMs,
     });
     if (isAborted()) {

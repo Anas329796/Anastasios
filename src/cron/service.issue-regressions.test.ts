@@ -945,7 +945,7 @@ describe("Cron issue regressions", () => {
     expect(job?.state.lastError).toBeUndefined();
   });
 
-  it("passes the outer cron deadline to isolated runs with timeoutSeconds", async () => {
+  it("anchors the outer cron deadline to deferred isolated execution start", async () => {
     const scheduledAt = Date.parse("2026-02-15T13:00:00.000Z");
     const timeoutSeconds = 120;
     const cronJob = createIsolatedRegressionJob({
@@ -957,7 +957,11 @@ describe("Cron issue regressions", () => {
       state: { nextRunAtMs: scheduledAt },
     });
 
-    let observedDeadlineAtMs: number | undefined;
+    let observedDeadlineBeforeStart: number | undefined;
+    let observedDeadlineAfterStart: number | undefined;
+    const wallNow = Date.now();
+    const executionStartedAt = wallNow + 45_000;
+    const dateNowSpy = vi.spyOn(Date, "now").mockReturnValue(wallNow);
     const state = createCronServiceState({
       cronEnabled: true,
       storePath: "/tmp/cron-deadline-propagation.json",
@@ -965,20 +969,21 @@ describe("Cron issue regressions", () => {
       nowMs: () => scheduledAt,
       enqueueSystemEvent: vi.fn(),
       requestHeartbeat: vi.fn(),
-      runIsolatedAgentJob: vi.fn(async ({ deadlineAtMs }) => {
-        observedDeadlineAtMs = deadlineAtMs;
+      runIsolatedAgentJob: vi.fn(async ({ getDeadlineAtMs, onExecutionStarted }) => {
+        observedDeadlineBeforeStart = getDeadlineAtMs?.();
+        dateNowSpy.mockReturnValue(executionStartedAt);
+        onExecutionStarted?.();
+        observedDeadlineAfterStart = getDeadlineAtMs?.();
         return { status: "ok" as const, summary: "done" };
       }),
     });
-
-    const wallNow = Date.now();
-    const dateNowSpy = vi.spyOn(Date, "now").mockReturnValue(wallNow);
 
     try {
       const result = await executeJobCoreWithTimeout(state, cronJob);
 
       expect(result).toMatchObject({ status: "ok", summary: "done" });
-      expect(observedDeadlineAtMs).toBe(wallNow + timeoutSeconds * 1000);
+      expect(observedDeadlineBeforeStart).toBeUndefined();
+      expect(observedDeadlineAfterStart).toBe(executionStartedAt + timeoutSeconds * 1000);
     } finally {
       dateNowSpy.mockRestore();
     }

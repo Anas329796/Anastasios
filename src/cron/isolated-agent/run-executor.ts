@@ -106,6 +106,7 @@ export function createCronPromptExecutor(params: {
       Partial<Omit<CronAgentExecutionPhaseUpdate, "jobId" | "phase">>,
   ) => void;
   deadlineAtMs?: number;
+  getDeadlineAtMs?: () => number | undefined;
   fallbackMinRemainingMs?: number;
 }) {
   const sessionFile =
@@ -139,7 +140,8 @@ export function createCronPromptExecutor(params: {
       agentDir: params.agentDir,
       fallbacksOverride: cronFallbacksOverride,
       beforeAttempt: ({ attempt }) => {
-        const deadlineAtMs = params.deadlineAtMs;
+        const deadlineAtMs =
+          params.getDeadlineAtMs !== undefined ? params.getDeadlineAtMs() : params.deadlineAtMs;
         const fallbackMinRemainingMs = params.fallbackMinRemainingMs;
         const hasFallbackTimeBudget =
           attempt > 1 &&
@@ -340,6 +342,7 @@ export async function executeCronRun(params: {
   timeoutMs: number;
   suppressExecNotifyOnExit: boolean;
   deadlineAtMs?: number;
+  getDeadlineAtMs?: () => number | undefined;
   fallbackMinRemainingMs?: number;
   runStartedAt?: number;
 }): Promise<CronExecutionResult> {
@@ -377,6 +380,7 @@ export async function executeCronRun(params: {
     onExecutionStarted: params.onExecutionStarted,
     onExecutionPhase: params.onExecutionPhase,
     deadlineAtMs: params.deadlineAtMs,
+    getDeadlineAtMs: params.getDeadlineAtMs,
     fallbackMinRemainingMs: params.fallbackMinRemainingMs,
   });
 

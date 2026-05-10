@@ -143,6 +143,67 @@ describe("runCronIsolatedAgentTurn — fallback time budget", () => {
     }
   });
 
+  it("uses the execution-start deadline so long setup does not exhaust fallback budget", async () => {
+    let secondAttemptGate:
+      | {
+          type: "stop";
+          reason?: string | null;
+          error?: string;
+        }
+      | undefined = undefined;
+    const setupStartMs = Date.parse("2026-03-23T12:00:00.000Z");
+    const executionStartMs = setupStartMs + 40_000;
+    const dateNowSpy = vi.spyOn(Date, "now").mockReturnValue(executionStartMs);
+
+    runWithModelFallbackMock.mockImplementationOnce(async (params) => {
+      expect(params.beforeAttempt).toBeTypeOf("function");
+
+      secondAttemptGate = await params.beforeAttempt?.({
+        candidate: { provider: "openai-codex", model: "gpt-5.4" },
+        attempt: 2,
+        total: 2,
+        previousAttempts: [
+          {
+            provider: "anthropic",
+            model: "claude-opus-4-6",
+            error: "Request was aborted.",
+            reason: "unknown",
+          },
+        ],
+        isPrimary: false,
+        requestedModelMatched: false,
+        fallbackConfigured: true,
+      });
+
+      return {
+        result: {
+          payloads: [{ text: "done" }],
+          meta: { agentMeta: { usage: { input: 10, output: 20 } } },
+        },
+        provider: "anthropic",
+        model: "claude-opus-4-6",
+        attempts: [],
+      };
+    });
+
+    try {
+      const result = await runCronIsolatedAgentTurn(
+        makeIsolatedAgentTurnParams({
+          deadlineAtMs: setupStartMs + 50_000,
+          getDeadlineAtMs: () => executionStartMs + 50_000,
+          job: makeIsolatedAgentTurnJob({
+            payload: { kind: "agentTurn", message: "test", timeoutSeconds: 50 },
+          }),
+        }),
+      );
+
+      expect(result.status).toBe("ok");
+      expect(secondAttemptGate).toBeUndefined();
+    } finally {
+      dateNowSpy.mockRestore();
+    }
+  });
+
   it("stops new fallback attempts when the per-attempt budget no longer fits", async () => {
     let secondAttemptGate:
       | {

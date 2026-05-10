@@ -103,6 +103,7 @@ export type CronServiceDeps = {
     onExecutionStarted?: (info?: CronAgentExecutionStarted) => void;
     onExecutionPhase?: (info: CronAgentExecutionPhaseUpdate) => void;
     deadlineAtMs?: number;
+    getDeadlineAtMs?: () => number | undefined;
   }) => Promise<
     {
       summary?: string;
