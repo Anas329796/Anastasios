@@ -14,6 +14,7 @@ import { resolveUserPath } from "../utils.js";
 import { installDownloadSpec } from "./skills-install-download.js";
 import { formatInstallFailureMessage } from "./skills-install-output.js";
 import type { SkillInstallResult } from "./skills-install.types.js";
+import { runSkillSetupHook } from "./skills-setup.js";
 import {
   hasBinary as defaultHasBinary,
   loadWorkspaceSkillEntries as defaultLoadWorkspaceSkillEntries,
@@ -564,7 +565,26 @@ export async function installSkill(params: SkillInstallRequest): Promise<SkillIn
   }
   const env = Object.keys(envOverrides).length > 0 ? envOverrides : undefined;
 
-  return withWarnings(await executeInstallCommand({ argv, timeoutMs, env }), warnings);
+  const installResult = await executeInstallCommand({ argv, timeoutMs, env });
+  if (installResult.ok) {
+    const setupResult = await runSkillSetupHook({
+      targetDir: path.resolve(entry.skill.baseDir),
+      mode: "install",
+    });
+    if (!setupResult.ok) {
+      return withWarnings(
+        {
+          ok: false,
+          message: `Setup hook failed: ${setupResult.error}`,
+          stdout: installResult.stdout,
+          stderr: installResult.stderr,
+          code: null,
+        },
+        warnings,
+      );
+    }
+  }
+  return withWarnings(installResult, warnings);
 }
 
 export const __testing = {

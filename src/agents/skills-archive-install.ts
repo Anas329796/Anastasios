@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import path from "node:path";
 import type { ArchiveLogger } from "../infra/archive.js";
 import { formatErrorMessage } from "../infra/errors.js";
@@ -182,23 +181,20 @@ export async function installExtractedSkillRoot(params: {
       copyErrorPrefix: "failed to install skill",
       hasDeps: false,
       depsLogMessage: "",
+      afterInstall: async (installedDir) => {
+        const setupResult = await runSkillSetupHook({
+          targetDir: installedDir,
+          mode: params.mode,
+          logger: params.logger,
+        });
+        if (!setupResult.ok) {
+          return { ok: false, error: `Setup hook failed: ${setupResult.error}` };
+        }
+        return { ok: true };
+      },
     });
     if (!install.ok) {
       return installFailure(install.error, "unavailable");
-    }
-
-    const setupResult = await runSkillSetupHook({
-      targetDir,
-      mode: params.mode,
-      logger: params.logger,
-    });
-    if (!setupResult.ok) {
-      try {
-        await fs.promises.rm(targetDir, { recursive: true, force: true });
-      } catch {
-        // Best-effort cleanup.
-      }
-      return installFailure(`Setup hook failed: ${setupResult.error}`, "unavailable");
     }
 
     return { ok: true, targetDir };

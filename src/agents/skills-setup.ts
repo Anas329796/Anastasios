@@ -115,7 +115,13 @@ export async function runSkillSetupHook(params: SkillSetupParams): Promise<Skill
     }
   }
 
-  const scriptEnv = { ...process.env, ...hookEnv };
+  const scriptEnv: Record<string, string> = {};
+  // Minimal execution environment: only PATH so shell and common tools resolve.
+  if (process.env.PATH !== undefined) {
+    scriptEnv.PATH = process.env.PATH;
+  }
+  Object.assign(scriptEnv, hookEnv);
+
   const argv = executable ? [scriptPath] : ["sh", scriptPath];
 
   params.logger?.info?.(`Running setup hook: ${setup.script}`);
@@ -125,6 +131,7 @@ export async function runSkillSetupHook(params: SkillSetupParams): Promise<Skill
       timeoutMs,
       cwd: resolvedTargetDir,
       env: scriptEnv,
+      baseEnv: {},
     });
 
     if (result.code === 0) {
