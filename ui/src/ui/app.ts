@@ -309,6 +309,10 @@ export class OpenClawApp extends LitElement {
   @state() pluginUiEntryPoints: PluginControlUiEntryPoint[] = [];
   @state() activePluginUiEntryPoint: PluginControlUiEntryPoint | null = null;
   @state() activePluginUiEntryPointSrc: string | null = null;
+  private pluginUiBridgeFrame: HTMLIFrameElement | null = null;
+  private pluginUiBridgeLoadHandler: (() => void) | null = null;
+  private pluginUiBridgePort: MessagePort | null = null;
+  private pluginUiBridgeKey: string | null = null;
   private eventLogBuffer: EventLogEntry[] = [];
   private toolStreamSyncTimer: number | null = null;
   private sidebarCloseTimer: number | null = null;
@@ -771,14 +775,6 @@ export class OpenClawApp extends LitElement {
     if (frame?.contentWindow && event.source !== frame.contentWindow) {
       return;
     }
-    if (data?.type === "openclaw.pluginUi.request" && frame) {
-      void proxyPluginUiFrameRequest({
-        frame,
-        entryPoint: this.activePluginUiEntryPoint,
-        message: data,
-      });
-      return;
-    }
     if (data?.type !== "openclaw.pluginUi.navigate" || data.target !== "chat") {
       return;
     }
@@ -802,6 +798,64 @@ export class OpenClawApp extends LitElement {
       showArchived: this.sessionsShowArchived,
     });
     switchChatSession(this as unknown as AppViewState, sessionKey);
+  }
+
+  private teardownPluginUiBridge() {
+    if (this.pluginUiBridgeFrame && this.pluginUiBridgeLoadHandler) {
+      this.pluginUiBridgeFrame.removeEventListener("load", this.pluginUiBridgeLoadHandler);
+    }
+    this.pluginUiBridgePort?.close();
+    this.pluginUiBridgeFrame = null;
+    this.pluginUiBridgeLoadHandler = null;
+    this.pluginUiBridgePort = null;
+    this.pluginUiBridgeKey = null;
+  }
+
+  private installPluginUiBridgePort(frame: HTMLIFrameElement, bridgeKey: string) {
+    const entryPoint = this.activePluginUiEntryPoint;
+    const targetWindow = frame.contentWindow;
+    if (!entryPoint || !targetWindow || this.pluginUiBridgeFrame !== frame) {
+      return;
+    }
+    this.pluginUiBridgePort?.close();
+    const channel = new MessageChannel();
+    this.pluginUiBridgePort = channel.port1;
+    this.pluginUiBridgePort.addEventListener("message", (event) => {
+      const data = event.data as PluginUiRequestMessage | null;
+      if (
+        data?.type !== "openclaw.pluginUi.request" ||
+        this.pluginUiBridgeFrame !== frame ||
+        this.pluginUiBridgeKey !== bridgeKey ||
+        !this.activePluginUiEntryPoint
+      ) {
+        return;
+      }
+      void proxyPluginUiFrameRequest({
+        frame,
+        entryPoint: this.activePluginUiEntryPoint,
+        message: data,
+      });
+    });
+    this.pluginUiBridgePort.start();
+    targetWindow.postMessage({ type: "openclaw.pluginUi.connect" }, "*", [channel.port2]);
+  }
+
+  private syncPluginUiBridge() {
+    const frame = this.querySelector(".plugin-ui-entry-frame") as HTMLIFrameElement | null;
+    const entryPoint = this.activePluginUiEntryPoint;
+    if (!entryPoint || !this.activePluginUiEntryPointSrc || !frame) {
+      this.teardownPluginUiBridge();
+      return;
+    }
+    const bridgeKey = `${entryPoint.id}\n${this.activePluginUiEntryPointSrc}`;
+    if (this.pluginUiBridgeFrame === frame && this.pluginUiBridgeKey === bridgeKey) {
+      return;
+    }
+    this.teardownPluginUiBridge();
+    this.pluginUiBridgeFrame = frame;
+    this.pluginUiBridgeKey = bridgeKey;
+    this.pluginUiBridgeLoadHandler = () => this.installPluginUiBridgePort(frame, bridgeKey);
+    frame.addEventListener("load", this.pluginUiBridgeLoadHandler);
   }
 
   createRenderRoot() {
@@ -850,6 +904,7 @@ export class OpenClawApp extends LitElement {
     document.removeEventListener("keydown", this.chatMobileControlsKeydownHandler);
     document.removeEventListener("pointerdown", this.chatMobileControlsPointerdownHandler);
     window.removeEventListener("message", this.pluginUiMessageHandler);
+    this.teardownPluginUiBridge();
     if (this.sessionSwitchNoticeTimer !== null) {
       window.clearTimeout(this.sessionSwitchNoticeTimer);
       this.sessionSwitchNoticeTimer = null;
@@ -865,6 +920,7 @@ export class OpenClawApp extends LitElement {
 
   protected updated(changed: Map<PropertyKey, unknown>) {
     handleUpdated(this as unknown as Parameters<typeof handleUpdated>[0], changed);
+    this.syncPluginUiBridge();
     // Some render callbacks assign tab directly while preparing nested panel state.
     if (changed.has("tab") && this.tab !== "chat" && this.chatMobileControlsOpen) {
       this.setChatMobileControlsOpen(false);

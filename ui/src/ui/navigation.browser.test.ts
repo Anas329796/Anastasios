@@ -37,6 +37,26 @@ function expectButtonWithText(app: ReturnType<typeof mountApp>, text: string): H
   return button;
 }
 
+function expectLatestPluginUiBridgePort(postMessageSpy: ReturnType<typeof vi.spyOn>): MessagePort {
+  let connectCall: unknown[] | undefined;
+  for (let index = postMessageSpy.mock.calls.length - 1; index >= 0; index--) {
+    const call = postMessageSpy.mock.calls[index];
+    if ((call?.[0] as { type?: unknown })?.type === "openclaw.pluginUi.connect") {
+      connectCall = call;
+      break;
+    }
+  }
+  expect(connectCall).toBeDefined();
+  const transfer = connectCall?.[2] as Transferable[] | undefined;
+  const port = transfer?.[0];
+  expect(port).toBeInstanceOf(MessagePort);
+  return port as MessagePort;
+}
+
+function postPluginUiBridgeMessage(port: MessagePort, message: unknown) {
+  port.postMessage(message);
+}
+
 async function confirmPendingGatewayChange(app: ReturnType<typeof mountApp>) {
   const confirmButton = expectButtonWithText(app, "Confirm");
   confirmButton.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
@@ -171,7 +191,7 @@ describe("control UI routing", () => {
     expect(close).not.toHaveBeenCalled();
   });
 
-  it("proxies sandboxed in-app plugin requests through the parent without allow-same-origin", async () => {
+  it("proxies sandboxed in-app plugin requests through a per-frame message port", async () => {
     const app = mountApp("/channels");
     app.activePluginUiEntryPoint = {
       id: "notes-plugin-entry",
@@ -192,6 +212,8 @@ describe("control UI routing", () => {
     const postMessageSpy = vi
       .spyOn(frame.contentWindow as Window, "postMessage")
       .mockImplementation(() => undefined);
+    frame.dispatchEvent(new Event("load"));
+    const bridgePort = expectLatestPluginUiBridgePort(postMessageSpy);
 
     window.dispatchEvent(
       new MessageEvent("message", {
@@ -212,6 +234,24 @@ describe("control UI routing", () => {
         },
       }),
     );
+    await nextFrame();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    postPluginUiBridgeMessage(bridgePort, {
+      type: "openclaw.pluginUi.request",
+      id: "req-1",
+      path: "/plugins/notes-plugin/api/search",
+      init: {
+        method: "POST",
+        headers: {
+          "content-type": "text/plain",
+          authorization: "Bearer should-not-forward",
+          "x-openclaw-scopes": "operator.admin",
+        },
+        body: "query",
+      },
+    });
     await nextFrame();
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
@@ -235,16 +275,11 @@ describe("control UI routing", () => {
     );
 
     fetchSpy.mockClear();
-    window.dispatchEvent(
-      new MessageEvent("message", {
-        source: frame.contentWindow,
-        data: {
-          type: "openclaw.pluginUi.request",
-          id: "req-2",
-          path: "/plugins/other-plugin/api/search",
-        },
-      }),
-    );
+    postPluginUiBridgeMessage(bridgePort, {
+      type: "openclaw.pluginUi.request",
+      id: "req-2",
+      path: "/plugins/other-plugin/api/search",
+    });
     await nextFrame();
 
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -254,6 +289,35 @@ describe("control UI routing", () => {
         id: "req-2",
         ok: false,
         status: 400,
+      }),
+      "*",
+    );
+
+    fetchSpy.mockClear();
+    frame.dispatchEvent(new Event("load"));
+    const currentBridgePort = expectLatestPluginUiBridgePort(postMessageSpy);
+    postPluginUiBridgeMessage(bridgePort, {
+      type: "openclaw.pluginUi.request",
+      id: "req-stale",
+      path: "/plugins/notes-plugin/api/search",
+    });
+    await nextFrame();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    postPluginUiBridgeMessage(currentBridgePort, {
+      type: "openclaw.pluginUi.request",
+      id: "req-current",
+      path: "/plugins/notes-plugin/api/search",
+    });
+    await nextFrame();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(postMessageSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "openclaw.pluginUi.response",
+        id: "req-current",
+        ok: true,
       }),
       "*",
     );
