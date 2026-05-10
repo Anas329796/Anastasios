@@ -30,6 +30,7 @@ Docs: https://docs.openclaw.ai
 - Telegram: keep no-response DM turns quiet instead of rewriting them into visible silent-reply chatter. Fixes #78188. (#78228) Thanks @Beandon13.
 - Telegram: handle managed select button callbacks before the raw callback fallback while preserving delimiter-containing option values such as `env|prod`. (#79816) Thanks @moeedahmed.
 - OpenAI-compatible models: handle JSON chat-completion bodies returned to streaming requests, preserving reasoning fields and visible text instead of completing an empty agent turn. Fixes #77870.
+- Discord/models: defer model picker component interactions before loading route, model, and preference data, preventing "This interaction failed" timeouts under gateway load. Fixes #77283. Thanks @colin-chang.
 - xAI: expose `/think low|medium|high` for reasoning-capable Grok models and keep `reasoning.effort` on native Responses payloads while preserving off-only behavior for non-reasoning routes. Fixes #79210. Thanks @colinmcintosh.
 - CLI/media: let explicit image description model refs use bundled static provider catalogs and generic model-backed image hooks, so `openclaw infer image describe --model zai/glm-4.6v` works like direct model runs and Anthropic auth probes avoid stale Claude 3 Haiku catalog entries.
 - Models/Anthropic: add `anthropic/claude-haiku-4-5` to Anthropic API-key agent allowlist defaults when an Anthropic default model is configured, so cron model overrides can select the current Haiku alias. Fixes #78000.
@@ -86,6 +87,7 @@ Docs: https://docs.openclaw.ai
 - Telegram: show full provider/model labels for nested OpenRouter model ids in the model picker, so `openrouter/openai/gpt-5.4-mini` no longer displays as `openai/gpt-5.4-mini`. Fixes #67792. (#72752) Thanks @iot2edge.
 - Models/OpenRouter: preserve live `supported_parameters` tool support metadata so non-tool Perplexity Sonar models no longer receive agent tool payloads and fall back unnecessarily. Fixes #64175. Thanks @Catfish-75.
 - Models/OpenRouter: add MoonshotAI Kimi K2.5 to the bundled OpenRouter catalog so onboarding/model pickers can offer it without waiting for live discovery. Fixes #14601.
+- Models/OpenRouter: keep keyRef/tokenRef-backed auth profiles visible to read-only PI model discovery, so OpenRouter models stay available in model pickers without storing plaintext keys. Fixes #58106. Thanks @ThalynLabs.
 - Security/audit: honor `tools.byProvider["provider/model"].deny` when reporting small-model web/browser exposure, so per-model OpenRouter mitigations clear the `models.small_params` exposure signal. Fixes #80118.
 - Models/Moonshot: accept direct `moonshotai/...` and `moonshot-ai/...` refs as aliases for canonical `moonshot/...`, so copied OpenRouter Kimi ids no longer fail as unknown direct models. Fixes #73876. (#74946) Thanks @jeffrey701.
 - Kimi Code: use Kimi's stable `kimi-for-coding` API model id in bundled catalog, onboarding, and docs while normalizing legacy `kimi-code` and `k2p5` refs. Fixes #79965.
@@ -1042,6 +1044,7 @@ Docs: https://docs.openclaw.ai
 - Gateway/macOS: stop `doctor` and LaunchAgent recovery from running `launchctl kickstart -k` after a fresh bootstrap, avoiding an immediate SIGTERM of the just-started gateway while still nudging already-loaded launchd jobs. Fixes #76261. Thanks @solosage1.
 - Google Meet: route stateful CLI session commands through the gateway-owned runtime so joined realtime sessions survive after the starting CLI process exits. Fixes #76344. Thanks @coltonharris-wq.
 - Memory/status: split builtin sqlite-vec store readiness from embedding-provider readiness in `memory status --deep` and `openclaw status`, so local vector-store failures no longer look like provider failures and provider failures no longer hide a healthy local vector store.
+- Memory/core: yield between session transcript indexing batches during startup reindexing so large session corpora do not starve the gateway event loop. Fixes #76890. Thanks @bitloi.
 - CLI/doctor: trust a ready gateway memory probe when CLI-side active memory backend resolution is unavailable, preventing false "No active memory plugin is registered" warnings for healthy runtime setups. Fixes #76792. Thanks @som-686.
 - Memory/status: keep plain `openclaw memory status` and `openclaw memory status --json` on the cheap read-only path by reserving vector and embedding provider probes for `--deep` or `--index`. Fixes #76769. Thanks @daruire.
 - Telegram: suppress stale same-session replies when a newer accepted message arrives before an older in-flight Telegram dispatch finalizes. Fixes #76642. Thanks @chinar-amrutkar.
