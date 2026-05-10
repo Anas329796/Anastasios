@@ -55,10 +55,6 @@ function expectStatusPatch(setStatus: MockCallSource, expected: Record<string, u
   ).toBe(true);
 }
 
-function runtimeErrorCalls(params: ReturnType<typeof createDiscordHandlerParams>) {
-  return (params.runtime.error as unknown as RuntimeErrorMock).mock.calls;
-}
-
 function createDeferred<T = void>() {
   let resolve: (value: T | PromiseLike<T>) => void = () => {};
   const promise = new Promise<T>((innerResolve) => {
