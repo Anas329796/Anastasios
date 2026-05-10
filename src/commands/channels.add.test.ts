@@ -53,7 +53,9 @@ const channelWizardMocks = vi.hoisted(() => {
   };
   return {
     prompter,
-    setupChannels: vi.fn(async (cfg: OpenClawConfig) => cfg),
+    setupChannels: vi.fn(
+      async (...args: Parameters<typeof import("./onboard-channels.js").setupChannels>) => args[0],
+    ),
   };
 });
 
@@ -97,7 +99,8 @@ vi.mock("./onboard-channels.js", async () => {
     await vi.importActual<typeof import("./onboard-channels.js")>("./onboard-channels.js");
   return {
     ...actual,
-    setupChannels: (...args: unknown[]) => channelWizardMocks.setupChannels(...args),
+    setupChannels: (...args: Parameters<typeof actual.setupChannels>) =>
+      channelWizardMocks.setupChannels(...args),
   };
 });
 
@@ -344,7 +347,7 @@ describe("channelsAddCommand", () => {
     channelWizardMocks.prompter.select.mockClear();
     channelWizardMocks.prompter.text.mockClear();
     channelWizardMocks.setupChannels.mockClear();
-    channelWizardMocks.setupChannels.mockImplementation(async (cfg: OpenClawConfig) => cfg);
+    channelWizardMocks.setupChannels.mockImplementation(async (...args) => args[0]);
     setMinimalChannelsAddRegistryForTests();
   });
 
