@@ -22,7 +22,11 @@ import {
   titleForTab,
   type Tab,
 } from "./navigation.ts";
-import { openExternalUrlSafe } from "./open-external-url.ts";
+import {
+  navigateReservedExternalWindow,
+  openExternalUrlSafe,
+  reserveExternalWindow,
+} from "./open-external-url.ts";
 import {
   normalizeAgentId,
   parseAgentSessionKey,
@@ -249,7 +253,9 @@ export function renderPluginUiEntryPoint(
           return;
         }
         event.preventDefault();
-        void openPluginUiEntryPoint(state, entryPoint, href);
+        const reservedWindow =
+          entryPoint.openMode === "new-window" ? reserveExternalWindow() : null;
+        void openPluginUiEntryPoint(state, entryPoint, href, reservedWindow);
       }}
     >
       <span class="nav-item__icon" aria-hidden="true">${icons.puzzle}</span>
@@ -262,10 +268,11 @@ async function openPluginUiEntryPoint(
   state: AppViewState,
   entryPoint: PluginControlUiEntryPoint,
   fallbackHref: string,
+  reservedWindow?: WindowProxy | null,
 ): Promise<void> {
   const openMode = entryPoint.openMode ?? "in-app";
   if (!state.client) {
-    openPluginUiEntryPointPath(state, entryPoint, fallbackHref, openMode);
+    openPluginUiEntryPointPath(state, entryPoint, fallbackHref, openMode, reservedWindow);
     return;
   }
   try {
@@ -281,9 +288,9 @@ async function openPluginUiEntryPoint(
       ...(state.sessionKey ? { sessionKey: state.sessionKey } : {}),
       ...(typeof contextTokens === "number" && contextTokens > 0 ? { contextTokens } : {}),
     })) as PluginsUiEntryPointLaunchResult;
-    openPluginUiEntryPointPath(state, entryPoint, result.path, openMode);
+    openPluginUiEntryPointPath(state, entryPoint, result.path, openMode, reservedWindow);
   } catch {
-    openPluginUiEntryPointPath(state, entryPoint, fallbackHref, openMode);
+    openPluginUiEntryPointPath(state, entryPoint, fallbackHref, openMode, reservedWindow);
   }
 }
 
@@ -292,8 +299,13 @@ function openPluginUiEntryPointPath(
   entryPoint: PluginControlUiEntryPoint,
   path: string,
   openMode: NonNullable<PluginControlUiEntryPoint["openMode"]>,
+  reservedWindow?: WindowProxy | null,
 ) {
   if (openMode === "new-window") {
+    if (reservedWindow) {
+      navigateReservedExternalWindow(reservedWindow, path);
+      return;
+    }
     openExternalUrlSafe(path);
     return;
   }

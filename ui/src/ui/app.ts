@@ -140,6 +140,127 @@ declare global {
 
 const bootAssistantIdentity = normalizeAssistantIdentity({});
 const bootLocalUserIdentity = loadLocalUserIdentity();
+const PLUGIN_UI_REQUEST_FORBIDDEN_HEADERS = new Set([
+  "authorization",
+  "cookie",
+  "host",
+  "set-cookie",
+  "x-openclaw-scopes",
+]);
+const PLUGIN_UI_REQUEST_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]);
+
+type PluginUiRequestMessage = {
+  type?: unknown;
+  id?: unknown;
+  path?: unknown;
+  init?: unknown;
+};
+
+function asStringRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+function normalizePluginUiRequestMethod(value: unknown): string {
+  if (typeof value !== "string") {
+    return "GET";
+  }
+  const method = value.trim().toUpperCase();
+  return PLUGIN_UI_REQUEST_METHODS.has(method) ? method : "GET";
+}
+
+function resolvePluginUiRequestPath(
+  entryPoint: PluginControlUiEntryPoint,
+  rawPath: unknown,
+): string | null {
+  if (typeof rawPath !== "string") {
+    return null;
+  }
+  try {
+    const url = new URL(rawPath, window.location.origin);
+    if (url.origin !== window.location.origin) {
+      return null;
+    }
+    const pluginRoot = `/plugins/${entryPoint.pluginId}`;
+    if (url.pathname !== pluginRoot && !url.pathname.startsWith(`${pluginRoot}/`)) {
+      return null;
+    }
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return null;
+  }
+}
+
+function buildPluginUiRequestInit(rawInit: unknown): RequestInit {
+  const init = asStringRecord(rawInit) ?? {};
+  const method = normalizePluginUiRequestMethod(init.method);
+  const headers = new Headers();
+  const rawHeaders = asStringRecord(init.headers);
+  if (rawHeaders) {
+    for (const [name, value] of Object.entries(rawHeaders)) {
+      const normalizedName = name.trim().toLowerCase();
+      if (
+        !normalizedName ||
+        PLUGIN_UI_REQUEST_FORBIDDEN_HEADERS.has(normalizedName) ||
+        typeof value !== "string"
+      ) {
+        continue;
+      }
+      headers.set(name, value);
+    }
+  }
+  const requestInit: RequestInit = {
+    method,
+    credentials: "same-origin",
+    headers,
+  };
+  if (method !== "GET" && method !== "HEAD" && typeof init.body === "string") {
+    requestInit.body = init.body;
+  }
+  return requestInit;
+}
+
+async function proxyPluginUiFrameRequest(params: {
+  frame: HTMLIFrameElement;
+  entryPoint: PluginControlUiEntryPoint;
+  message: PluginUiRequestMessage;
+}): Promise<void> {
+  const id = typeof params.message.id === "string" ? params.message.id : "";
+  const reply = (payload: Record<string, unknown>) => {
+    params.frame.contentWindow?.postMessage(
+      { type: "openclaw.pluginUi.response", id, ...payload },
+      "*",
+    );
+  };
+  const path = resolvePluginUiRequestPath(params.entryPoint, params.message.path);
+  if (!path) {
+    reply({ ok: false, status: 400, statusText: "Bad Request", body: "Invalid plugin path" });
+    return;
+  }
+  try {
+    const response = await fetch(path, buildPluginUiRequestInit(params.message.init));
+    const headers: Record<string, string> = {};
+    response.headers.forEach((value, name) => {
+      headers[name] = value;
+    });
+    reply({
+      ok: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+      body: await response.text(),
+    });
+  } catch (error) {
+    reply({
+      ok: false,
+      status: 0,
+      statusText: "Network Error",
+      body: error instanceof Error ? error.message : "Plugin request failed",
+    });
+  }
+}
 
 function resolveOnboardingMode(): boolean {
   if (!window.location.search) {
@@ -643,15 +764,22 @@ export class OpenClawApp extends LitElement {
   };
   private pluginUiMessageHandler = (event: MessageEvent) => {
     const data = event.data as { type?: unknown; target?: unknown; sessionKey?: unknown } | null;
-    if (
-      !this.activePluginUiEntryPoint ||
-      data?.type !== "openclaw.pluginUi.navigate" ||
-      data.target !== "chat"
-    ) {
+    if (!this.activePluginUiEntryPoint) {
       return;
     }
     const frame = this.querySelector(".plugin-ui-entry-frame") as HTMLIFrameElement | null;
     if (frame?.contentWindow && event.source !== frame.contentWindow) {
+      return;
+    }
+    if (data?.type === "openclaw.pluginUi.request" && frame) {
+      void proxyPluginUiFrameRequest({
+        frame,
+        entryPoint: this.activePluginUiEntryPoint,
+        message: data,
+      });
+      return;
+    }
+    if (data?.type !== "openclaw.pluginUi.navigate" || data.target !== "chat") {
       return;
     }
     this.activePluginUiEntryPoint = null;
