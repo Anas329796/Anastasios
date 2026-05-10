@@ -12,6 +12,7 @@ import {
   parseLooseIpAddress,
 } from "../shared/net/ip.js";
 import { parseAudioTag } from "./audio-tags.js";
+import { logWarn } from "../logger.js";
 
 // Allow optional wrapping backticks and punctuation after the token; capture the core token.
 export const MEDIA_TOKEN_RE = /\bMEDIA:\s*`?([^\n]+)`?/gi;
@@ -526,8 +527,16 @@ export function splitMediaFromOutput(
 
   let lineOffset = 0; // Track character offset for fence checking
   for (const line of lines) {
-    // Skip MEDIA extraction if this line is inside a fenced code block
+    // Skip MEDIA extraction if this line is inside a fenced code block.
+    // Emit a warning so the silent-failure mode is at least visible in logs
+    // (fixes #41966 — MEDIA tokens in code fences are silently ignored).
     if (hasFenceMarkers && isInsideFence(fenceSpans, lineOffset)) {
+      if (line.trimStart().toUpperCase().startsWith("MEDIA:")) {
+        logWarn(
+          `media: MEDIA: token skipped — it is inside a fenced code block and will not be delivered. ` +
+            `Remove the surrounding backticks/fence to send this as media.`,
+        );
+      }
       keptLines.push(line);
       pushTextSegment(line);
       lineOffset += line.length + 1; // +1 for newline
