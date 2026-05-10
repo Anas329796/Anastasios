@@ -2292,7 +2292,7 @@ export const chatHandlers: GatewayRequestHandlers = {
                 provider: parseProvider,
                 model: parseModel,
                 imageModelConfig,
-                defaultProvider: modelRef.provider,
+                defaultProvider: imageModelProvider ?? modelRef.provider,
                 cfg,
                 loadModelCatalog: () => context.loadGatewayModelCatalog(),
               })
