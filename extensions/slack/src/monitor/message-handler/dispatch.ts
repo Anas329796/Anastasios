@@ -921,6 +921,7 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
         cfg,
         token: ctx.botToken,
         accountId: account.accountId,
+        identity: slackIdentity,
         maxChars: Math.min(ctx.textLimit, SLACK_TEXT_LIMIT),
         resolveThreadTs: () => {
           const ts = replyPlan.peekThreadTs();
@@ -1345,7 +1346,7 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
 
   if (!anyReplyDelivered) {
     await draftStream?.clear();
-    if (prepared.isRoomish) {
+    if (prepared.isRoomish && prepared.requireMention) {
       clearHistoryEntriesIfEnabled({
         historyMap: ctx.channelHistories,
         historyKey: prepared.historyKey,
@@ -1388,7 +1389,7 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
     });
   }
 
-  if (prepared.isRoomish) {
+  if (prepared.isRoomish && prepared.requireMention) {
     clearHistoryEntriesIfEnabled({
       historyMap: ctx.channelHistories,
       historyKey: prepared.historyKey,
