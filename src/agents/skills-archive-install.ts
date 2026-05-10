@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import type { ArchiveLogger } from "../infra/archive.js";
 import { formatErrorMessage } from "../infra/errors.js";
@@ -9,6 +10,7 @@ import {
   scanSkillInstallSource,
   type InstallSecurityScanResult,
 } from "../plugins/install-security-scan.js";
+import { runSkillSetupHook } from "./skills-setup.js";
 
 const VALID_SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i;
 const DEFAULT_SKILL_ARCHIVE_ROOT_MARKERS = ["SKILL.md"] as const;
@@ -184,6 +186,21 @@ export async function installExtractedSkillRoot(params: {
     if (!install.ok) {
       return installFailure(install.error, "unavailable");
     }
+
+    const setupResult = await runSkillSetupHook({
+      targetDir,
+      mode: params.mode,
+      logger: params.logger,
+    });
+    if (!setupResult.ok) {
+      try {
+        await fs.promises.rm(targetDir, { recursive: true, force: true });
+      } catch {
+        // Best-effort cleanup.
+      }
+      return installFailure(`Setup hook failed: ${setupResult.error}`, "unavailable");
+    }
+
     return { ok: true, targetDir };
   } catch (err) {
     return installFailure(formatErrorMessage(err), "unavailable");
