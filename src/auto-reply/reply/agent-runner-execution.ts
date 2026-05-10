@@ -73,6 +73,7 @@ import type { GetReplyOptions, ReplyPayload } from "../types.js";
 import { resolveRunAuthProfile } from "./agent-runner-auth-profile.js";
 import {
   buildEmbeddedRunExecutionParams,
+  resolveAutoThreadingTargets,
   resolveQueuedReplyRuntimeConfig,
   resolveModelFallbackOptions,
 } from "./agent-runner-utils.js";
@@ -1144,7 +1145,7 @@ export async function runAgentTurnWithFallback(params: {
     didNotifyAgentRunStart = true;
     params.opts?.onAgentRunStart?.(runId);
   };
-  const currentMessageId = params.sessionCtx.MessageSidFull ?? params.sessionCtx.MessageSid;
+  const { currentMessageId, implicitReplyToId } = resolveAutoThreadingTargets(params.sessionCtx);
   const shouldNotifyUserAboutCompaction =
     runtimeConfig?.agents?.defaults?.compaction?.notifyUser === true;
   const sendCompactionNotice = async (phase: "start" | "end" | "incomplete") => {
@@ -1159,7 +1160,7 @@ export async function runAgentTurnWithFallback(params: {
           : "🧹 Compaction incomplete";
     const noticePayload = params.applyReplyToMode({
       text,
-      replyToId: currentMessageId,
+      replyToId: implicitReplyToId,
       replyToCurrent: true,
       isCompactionNotice: true,
     });
@@ -1404,7 +1405,8 @@ export async function runAgentTurnWithFallback(params: {
       const blockReplyHandler = params.opts?.onBlockReply
         ? createBlockReplyDeliveryHandler({
             onBlockReply: params.opts.onBlockReply,
-            currentMessageId: params.sessionCtx.MessageSidFull ?? params.sessionCtx.MessageSid,
+            currentMessageId,
+            implicitReplyToId,
             replyThreading: params.replyThreading,
             normalizeStreamingText,
             applyReplyToMode: params.applyReplyToMode,

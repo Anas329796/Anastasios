@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
     response: await fetch(params.url, params.init),
     release: async () => {},
   })),
+  directGaxiosCtor: vi.fn(),
   googleAuthCtor: vi.fn(),
   gaxiosCtor: vi.fn(),
   getAccessToken: vi.fn().mockResolvedValue({ token: "access-token" }),
@@ -34,21 +35,26 @@ vi.mock("openclaw/plugin-sdk/ssrf-runtime", () => {
 });
 
 vi.mock("gaxios", () => ({
-  Gaxios: class {
-    defaults: unknown;
-    interceptors = {
-      request: { add: vi.fn() },
-      response: { add: vi.fn() },
-    };
-
-    constructor(defaults?: unknown) {
-      this.defaults = defaults;
-      mocks.gaxiosCtor(defaults);
-    }
+  Gaxios: function MockDirectGaxios(defaults?: unknown) {
+    mocks.directGaxiosCtor(defaults);
   },
 }));
 
 vi.mock("google-auth-library", () => ({
+  gaxios: {
+    Gaxios: class {
+      defaults: unknown;
+      interceptors = {
+        request: { add: vi.fn() },
+        response: { add: vi.fn() },
+      };
+
+      constructor(defaults?: unknown) {
+        this.defaults = defaults;
+        mocks.gaxiosCtor(defaults);
+      }
+    },
+  },
   GoogleAuth: class {
     constructor(options?: unknown) {
       mocks.googleAuthCtor(options);
@@ -235,6 +241,44 @@ describe("sendGoogleChatMessage", () => {
     const [url] = fetchMock.mock.calls[0] ?? [];
     expect(String(url)).not.toContain("messageReplyOption=");
   });
+
+  it("rejects message resources passed as thread names", async () => {
+    const fetchMock = stubSuccessfulSend("spaces/AAA/messages/125");
+
+    await expect(
+      sendGoogleChatMessage({
+        account,
+        space: "spaces/AAA",
+        text: "hello",
+        thread: "spaces/AAA/messages/123",
+      }),
+    ).rejects.toThrow(
+      "Google Chat thread must be a thread resource name, got spaces/AAA/messages/123",
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["space resource without /threads/", "spaces/AAA"],
+    ["thread name with empty thread id", "spaces/AAA/threads/"],
+    ["thread name with empty space id", "spaces//threads/xyz"],
+    ["thread name with extra path segments", "spaces/AAA/threads/xyz/messages/abc"],
+    ["bare thread id without resource path", "xyz"],
+  ])("rejects %s before sending", async (_label, badThread) => {
+    const fetchMock = stubSuccessfulSend("spaces/AAA/messages/126");
+
+    await expect(
+      sendGoogleChatMessage({
+        account,
+        space: "spaces/AAA",
+        text: "hello",
+        thread: badThread,
+      }),
+    ).rejects.toThrow(`Google Chat thread must be a thread resource name, got ${badThread}`);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 function mockTicket(payload: Record<string, unknown>) {
@@ -246,6 +290,7 @@ function mockTicket(payload: Record<string, unknown>) {
 describe("verifyGoogleChatRequest", () => {
   afterEach(() => {
     authTesting.resetGoogleChatAuthForTests();
+    mocks.directGaxiosCtor.mockClear();
     mocks.getAccessToken.mockClear();
     mocks.gaxiosCtor.mockClear();
     mocks.googleAuthCtor.mockClear();
@@ -274,6 +319,7 @@ describe("verifyGoogleChatRequest", () => {
     };
 
     expect(mocks.gaxiosCtor).toHaveBeenCalledOnce();
+    expect(mocks.directGaxiosCtor).not.toHaveBeenCalled();
     expect(googleAuthOptions).toMatchObject({
       credentials: {
         client_email: "bot@example.iam.gserviceaccount.com",

@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
     hostnameAllowlist: hosts,
   })),
   fetchWithSsrFGuard: vi.fn(),
+  directGaxiosCtor: vi.fn(),
   gaxiosCtor: vi.fn(
     function MockGaxios(
       this: {
@@ -34,8 +35,16 @@ vi.mock("openclaw/plugin-sdk/ssrf-runtime", () => ({
   fetchWithSsrFGuard: mocks.fetchWithSsrFGuard,
 }));
 
+vi.mock("google-auth-library", () => ({
+  GoogleAuth: function MockGoogleAuth() {},
+  OAuth2Client: function MockOAuth2Client() {},
+  gaxios: {
+    Gaxios: mocks.gaxiosCtor,
+  },
+}));
+
 vi.mock("gaxios", () => ({
-  Gaxios: mocks.gaxiosCtor,
+  Gaxios: mocks.directGaxiosCtor,
 }));
 
 let __testing: typeof import("./google-auth.runtime.js").__testing;
@@ -56,6 +65,7 @@ beforeEach(() => {
   __testing.resetGoogleAuthRuntimeForTests();
   mocks.buildHostnameAllowlistPolicyFromSuffixAllowlist.mockClear();
   mocks.fetchWithSsrFGuard.mockReset();
+  mocks.directGaxiosCtor.mockClear();
   mocks.gaxiosCtor.mockClear();
 });
 
@@ -360,6 +370,7 @@ describe("googlechat google auth runtime", () => {
         | undefined;
 
       expect(mocks.gaxiosCtor).toHaveBeenCalledOnce();
+      expect(mocks.directGaxiosCtor).not.toHaveBeenCalled();
       expect(typeof transportDefaults.fetchImplementation).toBe("function");
       expect(requestInterceptorAdd).toHaveBeenCalledOnce();
       expect(typeof requestInterceptor?.resolved).toBe("function");
@@ -379,6 +390,7 @@ describe("googlechat google auth runtime", () => {
 
     expect(first).not.toBe(second);
     expect(mocks.gaxiosCtor).toHaveBeenCalledTimes(2);
+    expect(mocks.directGaxiosCtor).not.toHaveBeenCalled();
     expect(first.interceptors.request.add).toHaveBeenCalledOnce();
     expect(first.interceptors.response.add).toHaveBeenCalledOnce();
     expect(second.interceptors.request.add).toHaveBeenCalledOnce();
