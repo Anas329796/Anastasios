@@ -27,6 +27,7 @@ import { stripReasoningTagsFromText } from "../../shared/text/reasoning-tags.js"
 import { normalizeMessageChannel } from "../../utils/message-channel.js";
 import { resolveSessionAgentId } from "../agent-scope.js";
 import { listAllChannelSupportedActions, listChannelSupportedActions } from "../channel-tools.js";
+import type { ExplicitMessageSendTracker } from "../command/types.js";
 import { channelTargetSchema, channelTargetsSchema, stringEnum } from "../schema/typebox.js";
 import type { AnyAgentTool } from "./common.js";
 import { jsonResult, readNumberParam, readStringParam } from "./common.js";
@@ -541,6 +542,7 @@ type MessageToolOptions = {
   currentMessageId?: string | number;
   replyToMode?: "off" | "first" | "all" | "batched";
   hasRepliedRef?: { value: boolean };
+  explicitMessageSends?: ExplicitMessageSendTracker;
   sandboxRoot?: string;
   requireExplicitTarget?: boolean;
   sourceReplyDeliveryMode?: SourceReplyDeliveryMode;
@@ -731,6 +733,52 @@ function buildMessageToolDescription(options?: {
     resolvedOptions.sourceReplyDeliveryMode,
     resolvedOptions.requireExplicitTarget,
   );
+}
+
+function normalizeRoutePart(value: unknown): string | undefined {
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+  const text = String(value).trim();
+  return text ? text : undefined;
+}
+
+function recordCurrentChannelExplicitSend(params: {
+  result: Awaited<ReturnType<typeof runMessageAction>>;
+  actionParams: Record<string, unknown>;
+  currentChannelProvider?: string;
+  currentChannelId?: string;
+  currentThreadTs?: string;
+  accountId?: string;
+  explicitMessageSends?: ExplicitMessageSendTracker;
+}) {
+  const tracker = params.explicitMessageSends;
+  if (!tracker || params.result.kind !== "send" || params.result.dryRun) {
+    return;
+  }
+  const currentChannel = normalizeMessageChannel(params.currentChannelProvider);
+  if (!currentChannel || params.result.channel !== currentChannel) {
+    return;
+  }
+  const currentTarget = normalizeRoutePart(params.currentChannelId);
+  if (!currentTarget || normalizeRoutePart(params.result.to) !== currentTarget) {
+    return;
+  }
+  const text =
+    normalizeRoutePart(params.actionParams.message) ??
+    normalizeRoutePart(params.actionParams.caption) ??
+    undefined;
+  const threadId = normalizeRoutePart(params.actionParams.threadId) ?? params.currentThreadTs;
+  tracker.entries.push({
+    channel: params.result.channel,
+    to: params.result.to,
+    ...(params.accountId ? { accountId: params.accountId } : {}),
+    ...(threadId !== undefined ? { threadId } : {}),
+    ...(text !== undefined ? { text } : {}),
+  });
+  if (tracker.entries.length > 20) {
+    tracker.entries.splice(0, tracker.entries.length - 20);
+  }
 }
 
 function appendMessageToolVisibleReplyHint(
@@ -934,6 +982,16 @@ export function createMessageTool(options?: MessageToolOptions): AnyAgentTool {
         agentId: resolvedAgentId,
         sandboxRoot: options?.sandboxRoot,
         abortSignal: signal,
+      });
+
+      recordCurrentChannelExplicitSend({
+        result,
+        actionParams: params,
+        currentChannelProvider: options?.currentChannelProvider,
+        currentChannelId: options?.currentChannelId,
+        currentThreadTs,
+        accountId: accountId ?? undefined,
+        explicitMessageSends: options?.explicitMessageSends,
       });
 
       const toolResult = getToolResult(result);
