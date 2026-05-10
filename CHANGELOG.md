@@ -7,19 +7,28 @@ Docs: https://docs.openclaw.ai
 ### Changes
 
 - Auto-reply: add `typingTtlSeconds` config for session and agent defaults, and raise the typing keepalive default to 300 seconds. (#72009) Thanks @suntp.
+- Talk: add `talk.realtime.instructions` so operators can append realtime voice style instructions while preserving OpenClaw's built-in agent-consult guidance. (#79081) Thanks @VACInc.
 - Gateway/skills: add an opt-in private skill archive upload install path gated by `skills.install.allowUploadedArchives`, so trusted Gateway clients can stage and install zip-backed skills only when operators explicitly enable the code-install surface. (#74430) Thanks @samzong.
+- Dependencies: refresh workspace pins and patch targets, including ACPX `@agentclientprotocol/claude-agent-acp` `0.33.1`, Codex ACP `0.14.0`, Baileys `7.0.0-rc10`, Google GenAI `2.0.1`, OpenAI `6.37.0`, AWS SDK `3.1045.0`, Kysely `0.29.0`, Tlon skill `0.3.6`, Aimock `1.19.5`, and tsdown `0.22.0`.
 - Agents/compaction: preserve scoped background exec/process session references across embedded compaction and after-turn runtime contexts without exposing sessions from unrelated scopes. Fixes #79284. (#79307) Thanks @TurboTheTurtle.
 - CLI/onboarding: improve setup, onboarding, configure, and channel command wayfinding so terminal flows explain the next useful command instead of relying on terse setup labels.
 
 ### Fixes
 
+- CLI/agent: let `openclaw agent --model` use the backend/admin Gateway scope without cached device-token scopes silently downscoping the request. (#78837) Thanks @VACInc.
+- Ollama: keep DeepSeek V4 cloud models thinking-capable even when Ollama Cloud `/api/show` omits the `thinking` capability, so `/think high` no longer rejects `ollama/deepseek-v4-*:cloud`.
+- ACPX/Claude ACP: keep foreground prompts waiting for their own result when autonomous task-notification results arrive during the same session, and retarget the patch for Claude Agent ACP `0.33.1`.
+- WhatsApp: keep Baileys media uploads from passing non-Dispatcher agents to undici in `7.0.0-rc10`, and patch the bundled Baileys declaration so the latest tsdown build stays warning-clean.
+- Build: keep tsdown `0.22.0` warning-clean by externalizing known third-party declaration edges and replacing relative channel config module augmentations with explicit built-in channel fields.
 - ACP sessions: map canonical runtime options to backend-advertised ACP config keys like Claude's `effort` while keeping persisted OpenClaw state canonical. (#79926) Thanks @InTheCloudDan.
 - Gateway/watch: rebuild or restage missing bundled-plugin dist and runtime-postbuild outputs before launching the Gateway from a source checkout, preventing incomplete watch-mode runtime trees. (#70805) Thanks @rubencu.
 - CLI/update: allow restart health probes from the previous gateway protocol during self-update, and make plugin dry-runs report exact npm target versions instead of `unknown` while preserving unchanged status.
+- OpenAI/Codex: forward persisted `openai-codex` OAuth profile metadata into Codex plugin harness attempts after canonical `openai/*` migration, so OAuth-only installs keep using native Codex auth instead of falling through to direct OpenAI API-key auth. Fixes #79978.
 - OpenAI/Codex: point gateway missing-key recovery and wizard docs at the canonical `openai/gpt-5.5` plus Codex OAuth route, and fix trajectory export errors so they suggest the valid `openclaw sessions` command.
 - Google/Gemini: normalize retired `google/gemini-3-pro-preview` primary, fallback, and model-map refs during config load and unrelated config writes so saved config keeps targeting Gemini 3.1 Pro Preview.
 - Google/Gemini: normalize retired Gemini 3 Pro Preview ids inside emitted Google provider model config, so regenerated models.json rows test `google/gemini-3.1-pro-preview`.
 - Plugins/doctor: drop stale managed npm install records when `openclaw doctor --fix` removes npm packages that shadow bundled plugins, so the rebuilt registry no longer resurrects the removed package metadata.
+- Discord/voice: reuse or suppress late realtime consult tool calls without stealing newer speaker context or speaking forced fallback answers twice.
 - Discord/voice: synthesize realtime playback timestamps from emitted Discord PCM so OpenAI realtime barge-in truncation no longer sees `audioEndMs=0` and skips legitimate interruptions.
 - Plugin SDK: keep activated linked plugin runtime facades loadable when bundled plugin fallback is disabled. Thanks @shakkernerd.
 - Feishu: auto-thread `message(action="send")` replies inside the topic when the active session is group_topic or group_topic_sender, and propagate `replyInThread` through text, card, and media outbound adapters so topic-scoped sessions no longer post at the group root. Fixes #74903. (#77151) Thanks @ai-hpc.
@@ -49,7 +58,9 @@ Docs: https://docs.openclaw.ai
 - GitHub Copilot: refresh the model catalog from `${baseUrl}/models` so per-account entitlement and accurate context windows surface at runtime; static manifest catalog (now including `gpt-5.5`) remains the fallback when discovery is disabled or the API is unreachable.
 - Active Memory: support concrete `plugins.entries.active-memory.config.toolsAllow` recall tool names for custom memory plugins while keeping the built-in memory-core default on `memory_search`/`memory_get` and preserving `memory_recall` automatically for `plugins.slots.memory: "memory-lancedb"`.
 - Telegram: share the grammY API throttler across polling and ad hoc send clients for the same bot token, so visible draft previews and CLI sends use one quota gate. Thanks @anagnorisis2peripeteia.
+- Feishu: resolve group policy/tool context from the trusted chat target for group turns while keeping the speaker in `From`, so @mention replies do not drop the configured group id. Fixes #79457. Thanks @greyxiong.
 - Telegram/Feishu: honor configured per-agent and global `reasoningDefault` values when deciding whether channel reasoning previews should stream or stay hidden, addressing the preview-default part of #73182. Thanks @anagnorisis2peripeteia.
+- QQBot: mark recognized framework slash commands as text-command turns before reply dispatch so `/models`, `/status`, and `/new` responses stay visible in QQ Bot C2C conversations. Fixes #79310. Thanks @rollingshmily.
 - Docker: run the runtime image under `tini` so long-lived containers reap orphaned child processes and forward signals correctly. (#77885) Thanks @VintageAyu.
 - Logging/redaction: redact quoted HTTP client secret fields and auth/cookie headers in shared log and formatted error output. Related #71211 and #65623. (#75033) Thanks @liaoandi.
 - Gateway/SDK: document and stabilize the task ledger RPC surface for `tasks.list`, `tasks.get`, and `tasks.cancel`, including generated Swift model typing for optional task summaries. Thanks @BunsDev.
@@ -232,6 +243,7 @@ Docs: https://docs.openclaw.ai
 - Gateway/sessions: rotate generated transcript paths when gateway sessions reset, complementing the daily-rollover transcript persistence. (#79076) Thanks @vincentkoc.
 - Dependencies: pin the transitive `fast-uri` production dependency to `3.1.2` so the production dependency audit no longer resolves the vulnerable `<=3.1.1` range. Thanks @shakkernerd.
 - Plugins/install: fail managed npm plugin installs when OpenClaw cannot repair a required plugin-local `node_modules/openclaw` peer link, preventing that peer-link failure mode from producing unusable `@openclaw/codex` installs. Refs #79462. Thanks @ai-hpc.
+- xAI/tools: register and execute `x_search` and `code_execution` when the xAI API key comes from an auth profile, keeping the plugin tool gate aligned with `openclaw onboard --auth-choice xai-api-key`. Fixes #79353. Thanks @dbernaltbn.
 - Cron/agents: recognize same-target `edit`↔`write` recovery in `isSameToolMutationAction`, so a successful `write` to a path clears an earlier failed `edit` on the same path. Stops cron from reporting fatal failures when an agent self-heals across `edit` and `write`, while preserving same-tool fingerprint matching, blocking different-target writes, and excluding tools (including `apply_patch`) whose real call args do not produce a stable `path` fingerprint segment. Fixes #79024. Thanks @RenzoMXD.
 - Gateway/Tailscale: add opt-in `gateway.tailscale.preserveFunnel` so when `tailscale.mode = "serve"` and an externally configured Tailscale Funnel route already covers the gateway port, OpenClaw skips re-applying `tailscale serve` on startup and skips the `resetOnExit` teardown for that run, keeping operator-managed Funnel exposure alive across gateway restarts. Fixes #57241. Thanks @RenzoMXD.
 - CLI/router: when `openclaw <name>` does not match a CLI subcommand, check plugin tool manifests first so names like `lcm_recent` get an agent-tool diagnostic instead of the misleading suggestion to add the tool name to `plugins.allow`. Fixes #77214. Thanks @100yenadmin.
@@ -660,6 +672,7 @@ Docs: https://docs.openclaw.ai
 - CLI/launcher: forward termination signals to compile-cache respawn children, so killing a wrapper process no longer leaves the security audit worker orphaned. Fixes #77458. Thanks @jaikharbanda.
 - Plugins/registry: recover managed-npm external plugins from the owned npm root when a stale persisted registry would otherwise hide them after package-manager upgrades. Fixes #77266. Thanks @p3nchan.
 - fix(gateway): clamp unbound websocket auth scopes [AI]. (#77413) Thanks @pgondhi987.
+- Diffs plugin: accept `defaults.ttlSeconds` as a plugin-wide artifact lifetime default, so LAN-viewable diff links can keep their configured six-hour TTL without doctor quarantining the plugin entry. (#77456) Thanks @VACInc.
 - Gate zalouser startup name matching [AI]. (#77411) Thanks @pgondhi987.
 - Active Memory: send a bounded latest-message search query to the recall worker so channel/runtime metadata does not become the memory search string. Fixes #65309. Thanks @joeykrug, @westley3601, @pimenov, and @tasi333.
 - fix(device-pair): require pairing scope for pair command [AI]. (#76377) Thanks @pgondhi987.
