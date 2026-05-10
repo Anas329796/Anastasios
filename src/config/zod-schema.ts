@@ -40,6 +40,8 @@ const BrowserSnapshotDefaultsSchema = z
   .strict()
   .optional();
 
+const MAX_NODE_TIMER_DELAY_MS = 2_147_483_647;
+
 const NodeHostSchema = z
   .object({
     browserProxy: z
@@ -627,6 +629,12 @@ export const OpenClawSchema = z
         defaultAgent: z.string().optional(),
         allowedAgents: z.array(z.string()).optional(),
         maxConcurrentSessions: z.number().int().positive().optional(),
+        sessionLane: z
+          .object({
+            taskTimeoutMs: z.number().int().nonnegative().max(MAX_NODE_TIMER_DELAY_MS).optional(),
+          })
+          .strict()
+          .optional(),
         stream: z
           .object({
             coalesceIdleMs: z.number().int().nonnegative().optional(),

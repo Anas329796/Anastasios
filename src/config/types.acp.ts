@@ -34,6 +34,11 @@ export type AcpRuntimeConfig = {
   installCommand?: string;
 };
 
+export type AcpSessionLaneConfig = {
+  /** Maximum time a single ACP session-lane task may hold the lane before cooperative abort and stale fencing; 0 disables. */
+  taskTimeoutMs?: number;
+};
+
 export type AcpConfig = {
   /** Global ACP runtime gate. */
   enabled?: boolean;
@@ -43,6 +48,7 @@ export type AcpConfig = {
   defaultAgent?: string;
   allowedAgents?: string[];
   maxConcurrentSessions?: number;
+  sessionLane?: AcpSessionLaneConfig;
   stream?: AcpStreamConfig;
   runtime?: AcpRuntimeConfig;
 };

@@ -49,6 +49,7 @@ export async function resolveManagerRuntimeCapabilities(params: {
   runtime: AcpRuntime;
   handle: AcpRuntimeHandle;
   includeStatusConfigOptionKeys?: boolean;
+  signal?: AbortSignal;
 }): Promise<AcpRuntimeCapabilities> {
   let reported: AcpRuntimeCapabilities | undefined;
   if (params.runtime.getCapabilities) {
@@ -79,7 +80,10 @@ export async function resolveManagerRuntimeCapabilities(params: {
     params.runtime.getStatus
   ) {
     try {
-      const status = await params.runtime.getStatus({ handle: params.handle });
+      const status = await params.runtime.getStatus({
+        handle: params.handle,
+        ...(params.signal ? { signal: params.signal } : {}),
+      });
       for (const key of extractRuntimeStatusConfigOptionKeys(status)) {
         normalizedKeys.add(key);
       }
