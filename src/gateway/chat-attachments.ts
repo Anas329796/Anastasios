@@ -267,11 +267,13 @@ export async function parseMessageWithAttachments(
       const trustedProvidedMime = shouldIgnoreProvidedImageMime({ sniffedMime, providedMime })
         ? undefined
         : providedMime;
-      // When content sniffing detects a generic/non-image container, the file
-      // name label is untrusted — a DOCX/ZIP uploaded as "report.png" would
-      // otherwise be classified as image/png through labelMime.
-      const trustedLabelMime =
-        sniffedMime && isGenericContainerMime(sniffedMime) ? undefined : labelMime;
+      // When content sniffing detects a generic container AND the file name
+      // label claims an image type, the label is untrusted — a DOCX/ZIP
+      // uploaded as "report.png" would otherwise be classified as image/png.
+      // But specific non-image labels (e.g., .xlsx -> spreadsheetml.sheet)
+      // should be preserved since OOXML documents legitimately sniff as zip.
+      const shouldIgnoreLabelMime = isGenericContainerMime(sniffedMime) && isImageMime(labelMime);
+      const trustedLabelMime = shouldIgnoreLabelMime ? undefined : labelMime;
 
       // Prefer specific MIME signals over generic container types. OOXML
       // documents (docx/xlsx/pptx) sniff as application/zip; without this
