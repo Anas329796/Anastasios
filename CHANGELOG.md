@@ -480,6 +480,7 @@ Docs: https://docs.openclaw.ai
 - OpenAI/realtime voice: avoid duplicate barge-in cancellation requests, log realtime model interruption/cutoff events in Discord voice logs, and treat OpenAI's no-active-response cancellation reply as a completed cancel so Discord voice sessions do not wedge pending speech after fast interruptions.
 - Agents/runtime: strip trailing assistant prefill for Claude-family OpenAI Responses routes, persist prompt/assistant profile cooldown marks before fallback, and show the configured container root in sandbox escape diagnostics. Fixes #79688 and #79712. Thanks @stainlu and @mushuiyu886.
 - Gateway: avoid false degraded event-loop health during rapid health/readiness/status probes unless sustained load has delay co-evidence, while keeping hard delay detection immediate. (#77028) Thanks @rubencu.
+- Gateway: share TLS certificate fingerprint bootstrap across local Gateway clients so ACP, MCP, and native approval handlers can connect to self-signed local WSS gateways without environment URL overrides.
 - Markdown: keep blockquote spans off trailing paragraph separators. Fixes #79646.
 - Plugin SDK/LM Studio: recover Harmony plain-text tool calls from LM Studio streams. Fixes #78326.
 - Control UI: refresh the model cache after `session_status(model=...)` changes a session model. Fixes #79613.
