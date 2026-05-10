@@ -5,6 +5,7 @@ import {
   resolveSessionAgentId,
   resolveAgentSkillsFilter,
 } from "../../agents/agent-scope.js";
+import { isModelKeyAllowedBySet } from "../../agents/model-selection-shared.js";
 import {
   buildAllowedModelSet,
   buildModelAliasIndex,
@@ -257,7 +258,7 @@ export async function getReplyFromConfig(
       });
       if (!allowAny) {
         const modelKeyStr = modelKey(modelRef.ref.provider, modelRef.ref.model);
-        if (!allowedKeys.has(modelKeyStr)) {
+        if (!isModelKeyAllowedBySet(allowedKeys, modelKeyStr)) {
           // Model not in allowlist, try fallbacks before skipping
           if (opts?.modelOverrideFallbacks?.length) {
             // Determine provider context for resolving providerless fallbacks.
@@ -285,7 +286,7 @@ export async function getReplyFromConfig(
               });
               if (fallbackRef) {
                 const fallbackKeyStr = modelKey(fallbackRef.ref.provider, fallbackRef.ref.model);
-                if (allowedKeys.has(fallbackKeyStr)) {
+                if (isModelKeyAllowedBySet(allowedKeys, fallbackKeyStr)) {
                   provider = fallbackRef.ref.provider;
                   model = fallbackRef.ref.model;
                   hasAppliedImageModelOverride = true;
