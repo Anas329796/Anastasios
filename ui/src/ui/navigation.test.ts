@@ -147,7 +147,7 @@ describe("pathForPluginUiEntryPoint", () => {
         path: "/plugins/notes-plugin/",
         basePath: "/ui",
       }),
-    ).toBe("/ui/plugins/notes-plugin/");
+    ).toBe("/plugins/notes-plugin/");
   });
 
   it("rejects external, contextual, or cross-plugin paths", () => {

@@ -148,8 +148,7 @@ export function pathForPluginUiEntryPoint(params: {
   if (path !== pluginRoot && !path.startsWith(`${pluginRoot}/`)) {
     return null;
   }
-  const base = normalizeBasePath(params.basePath ?? "");
-  return base ? `${base}${path}` : path;
+  return path;
 }
 
 export function tabFromPath(pathname: string, basePath = ""): Tab | null {
