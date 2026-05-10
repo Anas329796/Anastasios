@@ -26,6 +26,19 @@ export type CliStreamingDelta = {
   usage?: CliUsage;
 };
 
+export type CliToolUseStartDelta = {
+  toolCallId: string;
+  name: string;
+  args: Record<string, unknown>;
+};
+
+export type CliToolResultDelta = {
+  toolCallId: string;
+  name: string;
+  isError: boolean;
+  result?: unknown;
+};
+
 function isClaudeCliProvider(providerId: string): boolean {
   return normalizeLowercaseStringOrEmpty(providerId) === "claude-cli";
 }
@@ -379,10 +392,135 @@ function parseClaudeCliStreamingDelta(params: {
   };
 }
 
+type PendingToolUse = { toolCallId: string; name: string };
+
+type ToolUseTracker = {
+  // claude streams content_block_start (id + name, no args) before the
+  // post-block assistant snapshot carries the full input. start emission
+  // is held until args arrive so the event matches the embedded handler's
+  // `{phase: "start", name, toolCallId, args}` shape.
+  pendingByIndex: Map<number, PendingToolUse>;
+  // retained so tool_result events can carry `name` like the embedded handler.
+  nameById: Map<string, string>;
+  startedIds: Set<string>;
+  resultDeliveredIds: Set<string>;
+};
+
+function createToolUseTracker(): ToolUseTracker {
+  return {
+    pendingByIndex: new Map(),
+    nameById: new Map(),
+    startedIds: new Set(),
+    resultDeliveredIds: new Set(),
+  };
+}
+
+function emitToolStartOnce(
+  tracker: ToolUseTracker,
+  toolCallId: string,
+  name: string,
+  args: Record<string, unknown>,
+  onToolUseStart?: (delta: CliToolUseStartDelta) => void,
+): void {
+  if (tracker.startedIds.has(toolCallId)) {
+    return;
+  }
+  tracker.startedIds.add(toolCallId);
+  tracker.nameById.set(toolCallId, name);
+  onToolUseStart?.({ toolCallId, name, args });
+}
+
+function dispatchClaudeCliStreamingToolEvent(params: {
+  backend: CliBackendConfig;
+  providerId: string;
+  parsed: Record<string, unknown>;
+  tracker: ToolUseTracker;
+  onToolUseStart?: (delta: CliToolUseStartDelta) => void;
+  onToolResult?: (delta: CliToolResultDelta) => void;
+}): void {
+  if (!usesClaudeStreamJsonDialect(params)) {
+    return;
+  }
+  const tracker = params.tracker;
+
+  if (params.parsed.type === "stream_event" && isRecord(params.parsed.event)) {
+    const event = params.parsed.event;
+    if (
+      event.type === "content_block_start" &&
+      typeof event.index === "number" &&
+      isRecord(event.content_block)
+    ) {
+      const block = event.content_block;
+      if (block.type === "tool_use") {
+        const toolCallId = typeof block.id === "string" ? block.id.trim() : "";
+        const name = typeof block.name === "string" ? block.name.trim() : "";
+        if (toolCallId && name) {
+          tracker.pendingByIndex.set(event.index, { toolCallId, name });
+        }
+      }
+      return;
+    }
+    if (event.type === "content_block_stop" && typeof event.index === "number") {
+      // fallback: emit start with empty args if the post-block assistant
+      // snapshot never arrived (turn aborted, etc.); well-formed runs emit
+      // via the assistant branch below first and dedup ignores this.
+      const pending = tracker.pendingByIndex.get(event.index);
+      tracker.pendingByIndex.delete(event.index);
+      if (pending) {
+        emitToolStartOnce(tracker, pending.toolCallId, pending.name, {}, params.onToolUseStart);
+      }
+      return;
+    }
+    return;
+  }
+
+  if (params.parsed.type === "assistant" && isRecord(params.parsed.message)) {
+    const message = params.parsed.message;
+    const content = Array.isArray(message.content) ? message.content : [];
+    for (const block of content) {
+      if (!isRecord(block) || block.type !== "tool_use") {
+        continue;
+      }
+      const toolCallId = typeof block.id === "string" ? block.id.trim() : "";
+      const name = typeof block.name === "string" ? block.name.trim() : "";
+      if (!toolCallId || !name) {
+        continue;
+      }
+      const args: Record<string, unknown> = isRecord(block.input) ? block.input : {};
+      emitToolStartOnce(tracker, toolCallId, name, args, params.onToolUseStart);
+    }
+    return;
+  }
+
+  if (params.parsed.type === "user" && isRecord(params.parsed.message)) {
+    const message = params.parsed.message;
+    const content = Array.isArray(message.content) ? message.content : [];
+    for (const block of content) {
+      if (!isRecord(block) || block.type !== "tool_result") {
+        continue;
+      }
+      const toolCallId = typeof block.tool_use_id === "string" ? block.tool_use_id.trim() : "";
+      if (!toolCallId || tracker.resultDeliveredIds.has(toolCallId)) {
+        continue;
+      }
+      tracker.resultDeliveredIds.add(toolCallId);
+      params.onToolResult?.({
+        toolCallId,
+        name: tracker.nameById.get(toolCallId) ?? "",
+        isError: block.is_error === true,
+        result: block.content,
+      });
+    }
+    return;
+  }
+}
+
 export function createCliJsonlStreamingParser(params: {
   backend: CliBackendConfig;
   providerId: string;
   onAssistantDelta: (delta: CliStreamingDelta) => void;
+  onToolUseStart?: (delta: CliToolUseStartDelta) => void;
+  onToolResult?: (delta: CliToolResultDelta) => void;
 }) {
   let lineBuffer = "";
   let assistantText = "";
@@ -390,6 +528,7 @@ export function createCliJsonlStreamingParser(params: {
   let usage: CliUsage | undefined;
   let output: CliOutput | null = null;
   const texts: string[] = [];
+  const toolTracker = createToolUseTracker();
 
   const handleParsedRecord = (parsed: Record<string, unknown>) => {
     sessionId = pickCliSessionId(parsed, params.backend) ?? sessionId;
@@ -416,6 +555,17 @@ export function createCliJsonlStreamingParser(params: {
       if (!type || type.includes("message")) {
         texts.push(item.text);
       }
+    }
+
+    if (params.onToolUseStart || params.onToolResult) {
+      dispatchClaudeCliStreamingToolEvent({
+        backend: params.backend,
+        providerId: params.providerId,
+        parsed,
+        tracker: toolTracker,
+        onToolUseStart: params.onToolUseStart,
+        onToolResult: params.onToolResult,
+      });
     }
 
     const delta = parseClaudeCliStreamingDelta({

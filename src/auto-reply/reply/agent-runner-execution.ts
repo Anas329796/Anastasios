@@ -1479,6 +1479,60 @@ export async function runAgentTurnWithFallback(params: {
                 assistantBridgeUnsubscribed = true;
                 rawUnsubscribeAssistantBridge();
               };
+              let toolBridgeUnsubscribed = false;
+              let toolBridgeDelivery: Promise<void> = Promise.resolve();
+              const deliverBridgedToolEvent = async (payload: {
+                name: string | undefined;
+                phase: "start" | "update";
+                args: Record<string, unknown> | undefined;
+              }): Promise<void> => {
+                if (typeof params.opts?.onToolStart !== "function") {
+                  return;
+                }
+                await params.opts.onToolStart({
+                  name: payload.name,
+                  phase: payload.phase,
+                  args: payload.args,
+                  detailMode: params.toolProgressDetail,
+                });
+              };
+              const queueBridgedToolEvent = (payload: {
+                name: string | undefined;
+                phase: "start" | "update";
+                args: Record<string, unknown> | undefined;
+              }) => {
+                toolBridgeDelivery = toolBridgeDelivery
+                  .then(() => deliverBridgedToolEvent(payload))
+                  .catch(() => undefined);
+              };
+              const drainToolBridgeDelivery = async (): Promise<void> => {
+                await toolBridgeDelivery;
+              };
+              const rawUnsubscribeToolBridge = onAgentEvent((evt) => {
+                if (evt.runId !== runId || evt.stream !== "tool") {
+                  return;
+                }
+                if (params.followupRun.run.silentExpected) {
+                  return;
+                }
+                const phase = typeof evt.data.phase === "string" ? evt.data.phase : "";
+                if (phase !== "start" && phase !== "update") {
+                  return;
+                }
+                const name = typeof evt.data.name === "string" ? evt.data.name : undefined;
+                const args =
+                  evt.data.args && typeof evt.data.args === "object"
+                    ? (evt.data.args as Record<string, unknown>)
+                    : undefined;
+                queueBridgedToolEvent({ name, phase, args });
+              });
+              const unsubscribeToolBridge = () => {
+                if (toolBridgeUnsubscribed) {
+                  return;
+                }
+                toolBridgeUnsubscribed = true;
+                rawUnsubscribeToolBridge();
+              };
               try {
                 const result = await runCliAgent({
                   sessionId: params.followupRun.run.sessionId,
@@ -1526,7 +1580,9 @@ export async function runAgentTurnWithFallback(params: {
                 );
 
                 unsubscribeAssistantBridge();
+                unsubscribeToolBridge();
                 await drainAssistantBridgeDelivery();
+                await drainToolBridgeDelivery();
 
                 // CLI backends don't emit streaming assistant events, so we need to
                 // emit one with the final text so server-chat can populate its buffer
@@ -1554,7 +1610,9 @@ export async function runAgentTurnWithFallback(params: {
                 return result;
               } catch (err) {
                 unsubscribeAssistantBridge();
+                unsubscribeToolBridge();
                 await drainAssistantBridgeDelivery();
+                await drainToolBridgeDelivery();
                 if (rollbackFallbackCandidateSelection) {
                   try {
                     await rollbackFallbackCandidateSelection();
@@ -1579,6 +1637,7 @@ export async function runAgentTurnWithFallback(params: {
                 throw err;
               } finally {
                 unsubscribeAssistantBridge();
+                unsubscribeToolBridge();
                 // Defensive backstop: never let a CLI run complete without a terminal
                 // lifecycle event, otherwise downstream consumers can hang.
                 if (!lifecycleTerminalEmitted) {
