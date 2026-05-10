@@ -175,12 +175,22 @@ function extractInputMessages(model: unknown): string[] {
   }
   const obj = model as Record<string, unknown>;
   const messages: string[] = [];
+  const shouldCaptureRole = (role: unknown): boolean => {
+    if (typeof role !== "string") {
+      return true;
+    }
+    const normalizedRole = role.trim().toLowerCase();
+    return normalizedRole !== "system" && normalizedRole !== "developer";
+  };
 
   // OpenAI chat completions: { messages: [{ role, content }] }
   const chatMessages = obj.messages;
   if (Array.isArray(chatMessages)) {
     for (const msg of chatMessages) {
       if (typeof msg === "object" && msg !== null) {
+        if (!shouldCaptureRole((msg as Record<string, unknown>).role)) {
+          continue;
+        }
         const content = (msg as Record<string, unknown>).content;
         if (typeof content === "string" && content.length > 0) {
           messages.push(content);
@@ -213,6 +223,9 @@ function extractInputMessages(model: unknown): string[] {
   if (Array.isArray(input)) {
     for (const item of input) {
       if (typeof item === "object" && item !== null) {
+        if (!shouldCaptureRole((item as Record<string, unknown>).role)) {
+          continue;
+        }
         const content = (item as Record<string, unknown>).content;
         if (typeof content === "string" && content.length > 0) {
           messages.push(content);
