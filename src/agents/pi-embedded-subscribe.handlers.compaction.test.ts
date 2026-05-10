@@ -34,6 +34,10 @@ function createCompactionContext(params: {
     state: {
       compactionInFlight: true,
       pendingCompactionRetry: 0,
+      messagingToolSentTexts: [],
+      messagingToolSentTextsNormalized: [],
+      messagingToolSentTargets: [],
+      messagingToolSentMediaUrls: [],
     } as never,
     log: {
       debug: vi.fn(),
