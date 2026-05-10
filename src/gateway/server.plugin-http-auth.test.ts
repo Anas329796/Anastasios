@@ -337,6 +337,18 @@ describe("gateway plugin HTTP auth boundary", () => {
         expect(nested.res.statusCode).toBe(200);
         expect(observedRuntimeScopes).toEqual([["operator.read"], ["operator.read"]]);
 
+        const malformedCookie = createResponse();
+        await dispatchRequest(
+          server,
+          createRequest({
+            path: "/plugins/notes-plugin/session/main",
+            headers: { cookie: "openclaw_plugin_entry=%" },
+          }),
+          malformedCookie.res,
+        );
+        expectUnauthorizedResponse(malformedCookie);
+        expect(observedRuntimeScopes).toEqual([["operator.read"], ["operator.read"]]);
+
         const replay = await sendRequest(server, { path: launchPath });
         expectUnauthorizedResponse(replay);
       },

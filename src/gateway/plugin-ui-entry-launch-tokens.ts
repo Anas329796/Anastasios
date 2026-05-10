@@ -83,7 +83,11 @@ function parseCookieHeader(header: string | string[] | undefined): Map<string, s
     if (separator <= 0) {
       continue;
     }
-    cookies.set(trimmed.slice(0, separator), decodeURIComponent(trimmed.slice(separator + 1)));
+    try {
+      cookies.set(trimmed.slice(0, separator), decodeURIComponent(trimmed.slice(separator + 1)));
+    } catch {
+      continue;
+    }
   }
   return cookies;
 }

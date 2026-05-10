@@ -22,6 +22,7 @@ import {
   titleForTab,
   type Tab,
 } from "./navigation.ts";
+import { openExternalUrlSafe } from "./open-external-url.ts";
 import {
   normalizeAgentId,
   parseAgentSessionKey,
@@ -293,7 +294,7 @@ function openPluginUiEntryPointPath(
   openMode: NonNullable<PluginControlUiEntryPoint["openMode"]>,
 ) {
   if (openMode === "new-window") {
-    window.open(path, "_blank", "noopener,noreferrer");
+    openExternalUrlSafe(path);
     return;
   }
   if (openMode === "same-window") {
