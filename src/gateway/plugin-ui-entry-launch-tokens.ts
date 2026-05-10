@@ -21,7 +21,7 @@ type LaunchTokenRecord = {
 
 type SessionTokenRecord = {
   expiresAtMs: number;
-  pathPrefix: string;
+  pathRoot: string;
   scopes: string[];
   sessionKey?: string;
   contextTokens?: number;
@@ -62,7 +62,7 @@ function appendTokenToPath(path: string, token: string): string {
   return `${path}${separator}${PLUGIN_UI_ENTRY_LAUNCH_TOKEN_PARAM}=${encodeURIComponent(token)}`;
 }
 
-function resolvePluginUiSessionPathPrefix(path: string): string | undefined {
+function resolvePluginUiSessionPathRoot(path: string): string | undefined {
   const pathname = path.split(/[?#]/, 1)[0] ?? "";
   if (!pathname.startsWith("/plugins/")) {
     return undefined;
@@ -79,7 +79,11 @@ function resolvePluginUiSessionPathPrefix(path: string): string | undefined {
   if (!pluginPath) {
     return undefined;
   }
-  return `/plugins/${pluginPath}/`;
+  return `/plugins/${pluginPath}`;
+}
+
+function matchesPluginUiSessionPath(params: { path: string; pathRoot: string }): boolean {
+  return params.path === params.pathRoot || params.path.startsWith(`${params.pathRoot}/`);
 }
 
 function parseCookieHeader(header: string | string[] | undefined): Map<string, string> {
@@ -110,14 +114,14 @@ function issuePluginUiEntryPointSession(params: {
   contextTokens?: number;
   nowMs: number;
 }): { cookieHeader: string } | undefined {
-  const pathPrefix = resolvePluginUiSessionPathPrefix(params.path);
-  if (!pathPrefix) {
+  const pathRoot = resolvePluginUiSessionPathRoot(params.path);
+  if (!pathRoot) {
     return undefined;
   }
   const token = randomUUID();
   sessionTokens.set(token, {
     expiresAtMs: params.nowMs + SESSION_TTL_MS,
-    pathPrefix,
+    pathRoot,
     scopes: [...params.scopes],
     ...(params.sessionKey ? { sessionKey: params.sessionKey } : {}),
     ...(params.contextTokens ? { contextTokens: params.contextTokens } : {}),
@@ -125,7 +129,7 @@ function issuePluginUiEntryPointSession(params: {
   return {
     cookieHeader: [
       `${PLUGIN_UI_ENTRY_SESSION_COOKIE}=${encodeURIComponent(token)}`,
-      `Path=${pathPrefix}`,
+      `Path=${pathRoot}`,
       `Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`,
       "HttpOnly",
       "SameSite=Lax",
@@ -212,7 +216,11 @@ export function resolvePluginUiEntryPointSessionCookie(params: {
     return { ok: false };
   }
   const record = sessionTokens.get(token);
-  if (!record || record.expiresAtMs <= nowMs || !params.path.startsWith(record.pathPrefix)) {
+  if (
+    !record ||
+    record.expiresAtMs <= nowMs ||
+    !matchesPluginUiSessionPath({ path: params.path, pathRoot: record.pathRoot })
+  ) {
     if (record?.expiresAtMs !== undefined && record.expiresAtMs <= nowMs) {
       sessionTokens.delete(token);
     }

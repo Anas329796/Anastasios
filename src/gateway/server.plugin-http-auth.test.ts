@@ -309,7 +309,7 @@ describe("gateway plugin HTTP auth boundary", () => {
       },
       run: async (server) => {
         const launchPath = issuePluginUiEntryPointLaunchPath({
-          path: "/plugins/notes-plugin/",
+          path: "/plugins/notes-plugin",
           scopes: ["operator.read"],
         });
 
@@ -321,10 +321,22 @@ describe("gateway plugin HTTP auth boundary", () => {
           ([name]) => name === "Set-Cookie",
         )?.[1] as string | undefined;
         expect(setCookie).toContain("openclaw_plugin_entry=");
-        expect(setCookie).toContain("Path=/plugins/notes-plugin/");
+        expect(setCookie).toContain("Path=/plugins/notes-plugin");
         expect(setCookie).toContain("HttpOnly");
 
         const cookie = setCookie?.split(";")[0];
+        const root = createResponse();
+        await dispatchRequest(
+          server,
+          createRequest({
+            path: "/plugins/notes-plugin",
+            ...(cookie ? { headers: { cookie } } : {}),
+          }),
+          root.res,
+        );
+        expect(root.res.statusCode).toBe(200);
+        expect(observedRuntimeScopes).toEqual([["operator.read"], ["operator.read"]]);
+
         const nested = createResponse();
         await dispatchRequest(
           server,
@@ -335,7 +347,11 @@ describe("gateway plugin HTTP auth boundary", () => {
           nested.res,
         );
         expect(nested.res.statusCode).toBe(200);
-        expect(observedRuntimeScopes).toEqual([["operator.read"], ["operator.read"]]);
+        expect(observedRuntimeScopes).toEqual([
+          ["operator.read"],
+          ["operator.read"],
+          ["operator.read"],
+        ]);
 
         const malformedCookie = createResponse();
         await dispatchRequest(
@@ -347,7 +363,11 @@ describe("gateway plugin HTTP auth boundary", () => {
           malformedCookie.res,
         );
         expectUnauthorizedResponse(malformedCookie);
-        expect(observedRuntimeScopes).toEqual([["operator.read"], ["operator.read"]]);
+        expect(observedRuntimeScopes).toEqual([
+          ["operator.read"],
+          ["operator.read"],
+          ["operator.read"],
+        ]);
 
         const replay = await sendRequest(server, { path: launchPath });
         expectUnauthorizedResponse(replay);
@@ -360,6 +380,7 @@ describe("gateway plugin HTTP auth boundary", () => {
     const handlePluginRequest = vi.fn(async (req: IncomingMessage, res: ServerResponse) => {
       const pathname = new URL(req.url ?? "/", "http://localhost").pathname;
       if (
+        pathname === "/plugins/@team/one" ||
         pathname.startsWith("/plugins/@team/one/") ||
         pathname.startsWith("/plugins/@team/two/")
       ) {
@@ -392,10 +413,21 @@ describe("gateway plugin HTTP auth boundary", () => {
           ([name]) => name === "Set-Cookie",
         )?.[1] as string | undefined;
         expect(setCookie).toContain("openclaw_plugin_entry=");
-        expect(setCookie).toContain("Path=/plugins/@team/one/");
+        expect(setCookie).toContain("Path=/plugins/@team/one");
 
         const cookie = setCookie?.split(";")[0];
         expect(cookie).toBeDefined();
+
+        const root = createResponse();
+        await dispatchRequest(
+          server,
+          createRequest({
+            path: "/plugins/@team/one",
+            ...(cookie ? { headers: { cookie } } : {}),
+          }),
+          root.res,
+        );
+        expect(root.res.statusCode).toBe(200);
 
         const nested = createResponse();
         await dispatchRequest(
@@ -418,7 +450,11 @@ describe("gateway plugin HTTP auth boundary", () => {
           sibling.res,
         );
         expectUnauthorizedResponse(sibling);
-        expect(handledPaths).toEqual(["/plugins/@team/one/", "/plugins/@team/one/session/main"]);
+        expect(handledPaths).toEqual([
+          "/plugins/@team/one/",
+          "/plugins/@team/one",
+          "/plugins/@team/one/session/main",
+        ]);
       },
     });
   });
