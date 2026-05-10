@@ -953,6 +953,7 @@ export async function startGatewayServer(
         transcriptUnsub: runtimeState.transcriptUnsub,
         lifecycleUnsub: runtimeState.lifecycleUnsub,
         chatRunState,
+        chatRunRegistry: chatRunState.registry,
         clients,
         configReloader: runtimeState.configReloader,
         wss,
