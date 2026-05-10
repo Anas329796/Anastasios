@@ -47,7 +47,11 @@ export async function resolveStatusSecurityAudit(params: {
 
 export async function resolveStatusUsageSummary(timeoutMs?: number) {
   const { loadProviderUsageSummary } = await loadProviderUsage();
-  return await loadProviderUsageSummary({ timeoutMs });
+  return await loadProviderUsageSummary({
+    timeoutMs,
+    skipPluginAuthWithoutCredentialSource: true,
+    allowOAuthRefresh: false,
+  });
 }
 
 export async function loadStatusProviderUsageModule() {
