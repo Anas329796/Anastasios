@@ -329,6 +329,20 @@ function toolExecutionLabels(evt: {
   };
 }
 
+function skillLabels(evt: {
+  activation: string;
+  agentId?: string;
+  skillName: string;
+  skillSource?: string;
+}): LabelSet {
+  return {
+    activation: lowCardinalityLabel(evt.activation, "unknown"),
+    agent: lowCardinalityLabel(evt.agentId),
+    skill: lowCardinalityLabel(evt.skillName, "skill"),
+    source: lowCardinalityLabel(evt.skillSource),
+  };
+}
+
 function harnessLabels(evt: {
   channel?: string;
   errorCategory?: string;
@@ -496,6 +510,9 @@ function recordDiagnosticEvent(
         "Tool executions completed by outcome.",
         toolExecutionLabels(evt),
       );
+      return;
+    case "skill.used":
+      store.counter("openclaw_skill_used_total", "Skills used by agent runs.", skillLabels(evt));
       return;
     case "harness.run.completed":
     case "harness.run.error":

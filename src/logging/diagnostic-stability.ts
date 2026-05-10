@@ -32,6 +32,7 @@ export type DiagnosticStabilityEventRecord = {
   transport?: string;
   brain?: string;
   toolName?: string;
+  skillName?: string;
   activeWorkKind?: string;
   pairedToolName?: string;
   provider?: string;
@@ -374,6 +375,12 @@ function sanitizeDiagnosticEvent(event: DiagnosticEventPayload): DiagnosticStabi
       record.toolName = event.toolName;
       record.outcome = "blocked";
       assignReasonCode(record, event.deniedReason);
+      break;
+    case "skill.used":
+      record.skillName = event.skillName;
+      record.source = event.skillSource;
+      record.action = event.activation;
+      record.toolName = event.toolName;
       break;
     case "exec.process.completed":
       record.target = event.target;

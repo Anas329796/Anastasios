@@ -300,12 +300,37 @@ describe("runEmbeddedAttempt context engine sessionKey forwarding", () => {
       workspaceAccess: "ro",
       workspaceDir: sandboxWorkspace,
     });
+    const sandboxSkillPath = path.join(sandboxWorkspace, ".agents/skills/smaug/SKILL.md");
+    hoisted.resolveEmbeddedRunSkillEntriesMock.mockReturnValueOnce({
+      shouldLoadSkillEntries: true,
+      skillEntries: [
+        {
+          skill: {
+            name: "smaug",
+            description: "Sandbox copy",
+            disableModelInvocation: false,
+            filePath: sandboxSkillPath,
+            baseDir: path.dirname(sandboxSkillPath),
+            source: "workspace",
+            sourceInfo: {
+              path: sandboxSkillPath,
+              source: "workspace",
+              scope: "project",
+              origin: "top-level",
+              baseDir: path.dirname(sandboxSkillPath),
+            },
+          },
+          frontmatter: {},
+        },
+      ],
+    });
 
     await createContextEngineAttemptRunner({
       contextEngine: createContextEngineBootstrapAndAssemble(),
       sessionKey,
       tempPaths,
       attemptOverrides: {
+        disableTools: false,
         skillsSnapshot: {
           prompt:
             "<available_skills><skill><location>~/.openclaw/skills/smaug/SKILL.md</location></skill></available_skills>",
@@ -342,6 +367,12 @@ describe("runEmbeddedAttempt context engine sessionKey forwarding", () => {
       workspaceDir: sandboxWorkspace,
       skillsSnapshot: undefined,
     });
+    const toolParams = mockParams(
+      hoisted.createOpenClawCodingToolsMock,
+      0,
+      "createOpenClawCodingTools params",
+    );
+    expect(toolParams.skillsSnapshot?.resolvedSkills?.[0]?.filePath).toBe(sandboxSkillPath);
   });
 
   it("keeps before_prompt_build prependContext out of system prompt on transcriptPrompt runs", async () => {

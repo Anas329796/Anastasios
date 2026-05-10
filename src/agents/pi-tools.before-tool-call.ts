@@ -1,3 +1,6 @@
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { ToolLoopDetectionConfig } from "../config/types.tools.js";
 import {
@@ -29,6 +32,7 @@ import { isPlainObject } from "../utils.js";
 import { copyChannelAgentToolMeta } from "./channel-tools.js";
 import { adjustedParamsByToolCallId } from "./pi-tools.before-tool-call.state.js";
 import type { SandboxFsBridge } from "./sandbox/fs-bridge.js";
+import type { Skill, SkillSnapshot } from "./skills/types.js";
 import { normalizeToolName } from "./tool-policy.js";
 import type { AnyAgentTool } from "./tools/common.js";
 import { callGatewayTool } from "./tools/gateway.js";
@@ -68,6 +72,8 @@ export type HookContext = {
     root: string;
     bridge: SandboxFsBridge;
   };
+  skillsSnapshot?: SkillSnapshot;
+  workspaceDir?: string;
 };
 
 type HookBlockedKind = "veto" | "failure";
@@ -91,6 +97,12 @@ const MAX_TRACKED_ADJUSTED_PARAMS = 1024;
 const LOOP_WARNING_BUCKET_SIZE = 10;
 const MAX_LOOP_WARNING_KEYS = 256;
 
+type SkillUsageMatch = {
+  skill: Skill;
+  activation: "read" | "command";
+  toolName?: string;
+};
+
 /**
  * Error used when before_tool_call intentionally vetoes a tool call.
  */
@@ -106,6 +118,181 @@ export class BeforeToolCallBlockedError extends Error {
  */
 export function isBeforeToolCallBlockedError(err: unknown): err is BeforeToolCallBlockedError {
   return err instanceof BeforeToolCallBlockedError;
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function resolveSkillSourceForTelemetry(skill: Skill): "workspace" | "bundled" | "unknown" {
+  const direct = nonEmptyString((skill as { source?: unknown }).source);
+  const sourceInfo = (skill as { sourceInfo?: { source?: unknown } }).sourceInfo;
+  const source = direct ?? nonEmptyString(sourceInfo?.source);
+  return source === "workspace" || source === "bundled" ? source : "unknown";
+}
+
+function expandHomePath(value: string): string {
+  if (value !== "~" && !value.startsWith("~/")) {
+    return value;
+  }
+  const home = nonEmptyString(process.env.HOME) ?? nonEmptyString(os.homedir());
+  if (!home) {
+    return value;
+  }
+  return value === "~" ? home : path.join(home, value.slice(2));
+}
+
+function maybeFileUrlPath(value: string): string | undefined {
+  if (!value.toLowerCase().startsWith("file://")) {
+    return undefined;
+  }
+  try {
+    return fileURLToPath(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function addPathMatchCandidate(
+  candidates: Set<string>,
+  value: string | undefined,
+  workspaceDir?: string,
+): void {
+  const raw = nonEmptyString(value);
+  if (!raw) {
+    return;
+  }
+  candidates.add(raw);
+  const expanded = expandHomePath(raw);
+  candidates.add(expanded);
+  if (path.isAbsolute(expanded)) {
+    candidates.add(path.normalize(expanded));
+    candidates.add(path.resolve(expanded));
+    return;
+  }
+  if (workspaceDir) {
+    candidates.add(path.resolve(workspaceDir, expanded));
+  }
+}
+
+function pathMatchCandidates(value: string, workspaceDir?: string): Set<string> {
+  const candidates = new Set<string>();
+  const trimmed = value.trim();
+  addPathMatchCandidate(candidates, trimmed, workspaceDir);
+  if (trimmed.startsWith("@")) {
+    const withoutAt = trimmed.slice(1).trim();
+    addPathMatchCandidate(candidates, withoutAt, workspaceDir);
+    addPathMatchCandidate(candidates, maybeFileUrlPath(withoutAt), workspaceDir);
+  }
+  addPathMatchCandidate(candidates, maybeFileUrlPath(trimmed), workspaceDir);
+  return candidates;
+}
+
+function commandSkillNameFromParams(params: unknown): string | undefined {
+  if (!isPlainObject(params)) {
+    return undefined;
+  }
+  if (!nonEmptyString(params.commandName)) {
+    return undefined;
+  }
+  return nonEmptyString(params.skillName);
+}
+
+function readPathFromParams(params: unknown): string | undefined {
+  if (!isPlainObject(params)) {
+    return undefined;
+  }
+  return nonEmptyString(params.path);
+}
+
+function findResolvedSkillByName(snapshot: SkillSnapshot | undefined, skillName: string) {
+  const resolvedSkills = snapshot?.resolvedSkills ?? [];
+  return resolvedSkills.find((skill) => skill.name === skillName);
+}
+
+function findSkillUsageByCommand(params: unknown, ctx?: HookContext): SkillUsageMatch | undefined {
+  const skillName = commandSkillNameFromParams(params);
+  if (!skillName) {
+    return undefined;
+  }
+  const resolvedSkill = findResolvedSkillByName(ctx?.skillsSnapshot, skillName);
+  if (!resolvedSkill) {
+    return undefined;
+  }
+  return { skill: resolvedSkill, activation: "command" };
+}
+
+function findSkillUsageByRead(params: unknown, ctx?: HookContext): SkillUsageMatch | undefined {
+  const readPath = readPathFromParams(params);
+  const resolvedSkills = ctx?.skillsSnapshot?.resolvedSkills ?? [];
+  if (!readPath || resolvedSkills.length === 0) {
+    return undefined;
+  }
+  const readCandidates = pathMatchCandidates(readPath, ctx?.workspaceDir);
+  for (const skill of resolvedSkills) {
+    const skillPath = nonEmptyString(skill.filePath);
+    if (!skillPath) {
+      continue;
+    }
+    const skillCandidates = pathMatchCandidates(skillPath, ctx?.workspaceDir);
+    for (const candidate of readCandidates) {
+      if (skillCandidates.has(candidate)) {
+        return { skill, activation: "read" };
+      }
+    }
+  }
+  return undefined;
+}
+
+function findSkillUsageMatch(params: {
+  toolName: string;
+  toolParams: unknown;
+  ctx?: HookContext;
+}): SkillUsageMatch | undefined {
+  const commandUsage = findSkillUsageByCommand(params.toolParams, params.ctx);
+  if (commandUsage) {
+    return commandUsage;
+  }
+  if (params.toolName !== "read") {
+    return undefined;
+  }
+  return findSkillUsageByRead(params.toolParams, params.ctx);
+}
+
+function emitSkillUsedDiagnostic(params: {
+  ctx?: HookContext;
+  toolName: string;
+  toolCallId?: string;
+  toolParams: unknown;
+}): void {
+  const match = findSkillUsageMatch({
+    toolName: params.toolName,
+    toolParams: params.toolParams,
+    ctx: params.ctx,
+  });
+  if (!match) {
+    return;
+  }
+  const trace = params.ctx?.trace
+    ? freezeDiagnosticTraceContext(createChildDiagnosticTraceContext(params.ctx.trace))
+    : undefined;
+  emitTrustedDiagnosticEvent({
+    type: "skill.used",
+    ...(params.ctx?.agentId && { agentId: params.ctx.agentId }),
+    ...(params.ctx?.runId && { runId: params.ctx.runId }),
+    ...(params.ctx?.sessionKey && { sessionKey: params.ctx.sessionKey }),
+    ...(params.ctx?.sessionId && { sessionId: params.ctx.sessionId }),
+    ...(trace && { trace }),
+    skillName: match.skill.name,
+    skillSource: resolveSkillSourceForTelemetry(match.skill),
+    activation: match.activation,
+    toolName: params.toolName,
+    ...(params.toolCallId && { toolCallId: params.toolCallId }),
+  });
 }
 
 const loadBeforeToolCallRuntime = createLazyRuntimeSurface(
@@ -751,6 +938,12 @@ export function wrapToolWithBeforeToolCallHook(
           toolParams: outcome.params,
           toolCallId,
           result,
+        });
+        emitSkillUsedDiagnostic({
+          ctx,
+          toolName: normalizedToolName,
+          toolCallId,
+          toolParams: outcome.params,
         });
         emitTrustedDiagnosticEvent({
           type: "tool.execution.completed",

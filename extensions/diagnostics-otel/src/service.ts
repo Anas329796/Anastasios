@@ -866,6 +866,10 @@ export function createDiagnosticsOtelService(): OpenClawPluginService {
         unit: "1",
         description: "Detected repetitive tool-call loop events",
       });
+      const skillUsedCounter = meter.createCounter("openclaw.skill.used", {
+        unit: "1",
+        description: "Skills used by agent runs",
+      });
       const modelCallDurationHistogram = meter.createHistogram("openclaw.model_call.duration_ms", {
         unit: "ms",
         description: "Model call duration",
@@ -2170,6 +2174,35 @@ export function createDiagnosticsOtelService(): OpenClawPluginService {
         span.end(evt.ts);
       };
 
+      const skillUsedAttrs = (
+        evt: Extract<DiagnosticEventPayload, { type: "skill.used" }>,
+      ): Record<string, string | number | boolean> => ({
+        "openclaw.skill.name": lowCardinalityAttr(evt.skillName, "skill"),
+        "openclaw.skill.source": lowCardinalityAttr(evt.skillSource),
+        "openclaw.skill.activation": lowCardinalityAttr(evt.activation),
+        ...(evt.agentId ? { "openclaw.agent": lowCardinalityAttr(evt.agentId) } : {}),
+        ...(evt.toolName ? { "openclaw.toolName": lowCardinalityAttr(evt.toolName, "tool") } : {}),
+      });
+
+      const recordSkillUsed = (
+        evt: Extract<DiagnosticEventPayload, { type: "skill.used" }>,
+        metadata: DiagnosticEventMetadata,
+      ) => {
+        const attrs = skillUsedAttrs(evt);
+        skillUsedCounter.add(1, attrs);
+        if (!tracesEnabled || !metadata.trusted) {
+          return;
+        }
+        const spanAttrs: Record<string, string | number | boolean> = { ...attrs };
+        addRunAttrs(spanAttrs, evt);
+        const span = spanWithDuration("openclaw.skill.used", spanAttrs, 0, {
+          parentContext: activeTrustedParentContext(evt, metadata),
+          endTimeMs: evt.ts,
+        });
+        setSpanAttrs(span, spanAttrs);
+        span.end(evt.ts);
+      };
+
       const recordExecProcessCompleted = (
         evt: Extract<DiagnosticEventPayload, { type: "exec.process.completed" }>,
       ) => {
@@ -2439,6 +2472,9 @@ export function createDiagnosticsOtelService(): OpenClawPluginService {
               return;
             case "tool.execution.blocked":
               recordToolExecutionBlocked(evt, metadata);
+              return;
+            case "skill.used":
+              recordSkillUsed(evt, metadata);
               return;
             case "exec.process.completed":
               recordExecProcessCompleted(evt);

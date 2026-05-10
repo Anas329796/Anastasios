@@ -153,6 +153,7 @@ import { detectRuntimeShell } from "../../shell-utils.js";
 import {
   applySkillEnvOverrides,
   applySkillEnvOverridesFromSnapshot,
+  buildWorkspaceSkillSnapshot,
   resolveSkillsPromptForRun,
 } from "../../skills.js";
 import { buildActiveSubagentSystemPromptAddition } from "../../subagent-active-context.js";
@@ -885,23 +886,34 @@ export async function runEmbeddedAttempt(
       agentId: sessionAgentId,
       skillsSnapshot: skillsSnapshotForRun,
     });
+    const skillEntriesForRun = skillEntries ?? [];
     restoreSkillEnv = skillsSnapshotForRun
       ? applySkillEnvOverridesFromSnapshot({
           snapshot: skillsSnapshotForRun,
           config: params.config,
         })
       : applySkillEnvOverrides({
-          skills: skillEntries ?? [],
+          skills: skillEntriesForRun,
           config: params.config,
         });
 
     const skillsPrompt = resolveSkillsPromptForRun({
       skillsSnapshot: skillsSnapshotForRun,
-      entries: shouldLoadSkillEntries ? skillEntries : undefined,
+      entries: shouldLoadSkillEntries ? skillEntriesForRun : undefined,
       config: params.config,
       workspaceDir: effectiveWorkspace,
       agentId: sessionAgentId,
     });
+    const skillsSnapshotForToolTelemetry =
+      skillsSnapshotForRun?.resolvedSkills !== undefined
+        ? skillsSnapshotForRun
+        : skillEntriesForRun.length > 0
+          ? buildWorkspaceSkillSnapshot(effectiveWorkspace, {
+              entries: skillEntriesForRun,
+              config: params.config,
+              agentId: sessionAgentId,
+            })
+          : skillsSnapshotForRun;
     prepStages.mark("skills");
 
     const sessionLabel = params.sessionKey ?? params.sessionId;
@@ -1017,6 +1029,7 @@ export async function runEmbeddedAttempt(
             toolSearchCatalogRef,
             agentDir,
             workspaceDir: effectiveWorkspace,
+            skillsSnapshot: skillsSnapshotForToolTelemetry,
             // When sandboxing uses a copied workspace (`ro` or `none`), effectiveWorkspace points
             // at the sandbox copy. Spawned subagents should inherit the real workspace instead.
             spawnWorkspaceDir: resolveAttemptSpawnWorkspaceDir({

@@ -368,6 +368,14 @@ vi.mock("../../bootstrap-files.js", async () => {
 vi.mock("../../skills.js", () => ({
   applySkillEnvOverrides: () => () => {},
   applySkillEnvOverridesFromSnapshot: () => () => {},
+  buildWorkspaceSkillSnapshot: (
+    _workspaceDir: string,
+    opts?: { entries?: Array<{ skill: { name: string } & Record<string, unknown> }> },
+  ) => ({
+    prompt: "",
+    skills: (opts?.entries ?? []).map((entry) => ({ name: entry.skill.name })),
+    resolvedSkills: (opts?.entries ?? []).map((entry) => entry.skill),
+  }),
   resolveSkillsPromptForRun: (...args: unknown[]) => hoisted.resolveSkillsPromptForRunMock(...args),
 }));
 

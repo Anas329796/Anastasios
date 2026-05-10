@@ -59,6 +59,7 @@ import type { AnyAgentTool } from "./pi-tools.types.js";
 import type { SandboxContext } from "./sandbox.js";
 import { SANDBOX_AGENT_WORKSPACE_MOUNT } from "./sandbox/constants.js";
 import { resolveSenderToolPolicy } from "./sender-tool-policy.js";
+import type { SkillSnapshot } from "./skills/types.js";
 import {
   isSubagentEnvelopeSession,
   resolveSubagentCapabilityStore,
@@ -439,6 +440,8 @@ export function createOpenClawCodingTools(options?: {
   recordToolPrepStage?: (name: string) => void;
   /** Live observer called after wrapped tool outcomes are recorded. */
   onToolOutcome?: ToolOutcomeObserver;
+  /** Active runtime skill catalog used by diagnostics to identify skill usage. */
+  skillsSnapshot?: SkillSnapshot;
 }): AnyAgentTool[] {
   const execToolName = "exec";
   const sandbox = options?.sandbox?.enabled ? options.sandbox : undefined;
@@ -988,6 +991,8 @@ export function createOpenClawCodingTools(options?: {
       ...(options?.trace ? { trace: options.trace } : {}),
       loopDetection: resolveToolLoopDetectionConfig({ cfg: options?.config, agentId }),
       onToolOutcome: options?.onToolOutcome,
+      ...(options?.skillsSnapshot ? { skillsSnapshot: options.skillsSnapshot } : {}),
+      ...(options?.workspaceDir ? { workspaceDir: options.workspaceDir } : {}),
     }),
   );
   options?.recordToolPrepStage?.("tool-hooks");
