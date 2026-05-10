@@ -1479,6 +1479,7 @@ describe("buildStatusMessage", () => {
       sessionKey: "agent:main:main",
       sessionScope: "per-sender",
       queue: { mode: "collect", depth: 0 },
+      modelAuth: "api-key",
       activeModelAuth: "oauth",
     });
 
