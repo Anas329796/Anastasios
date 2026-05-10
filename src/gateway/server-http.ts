@@ -72,6 +72,10 @@ function applyPluginUiEntryContextHeaders(
   }
 }
 
+function applyPluginUiEntryScopeHeader(req: IncomingMessage, scopes: readonly string[]): void {
+  req.headers["x-openclaw-scopes"] = scopes.join(",");
+}
+
 type PluginHttpUpgradeHandler = (
   req: IncomingMessage,
   socket: import("node:stream").Duplex,
@@ -454,6 +458,7 @@ function buildPluginRequestStages(params: {
             trustDeclaredOperatorScopes: true,
           };
           pluginRequestOperatorScopes = launchAuth.scopes;
+          applyPluginUiEntryScopeHeader(params.req, launchAuth.scopes);
           applyPluginUiEntryContextHeaders(params.req, launchAuth);
           if (launchAuth.setCookieHeader) {
             params.res.setHeader("Set-Cookie", launchAuth.setCookieHeader);
@@ -471,6 +476,7 @@ function buildPluginRequestStages(params: {
             trustDeclaredOperatorScopes: true,
           };
           pluginRequestOperatorScopes = sessionAuth.scopes;
+          applyPluginUiEntryScopeHeader(params.req, sessionAuth.scopes);
           applyPluginUiEntryContextHeaders(params.req, sessionAuth);
           return false;
         }

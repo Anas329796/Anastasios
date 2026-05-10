@@ -355,6 +355,69 @@ describe("gateway plugin HTTP auth boundary", () => {
     });
   });
 
+  test("preserves Plugin UI Entry Point scopes for trusted-operator plugin routes", async () => {
+    const observedRuntimeScopes: string[][] = [];
+    const adminAllowedResults: boolean[] = [];
+    const handlePluginRequest = createRuntimeScopeRecorderHandler({
+      pluginId: "notes-plugin",
+      path: "/plugins/notes-plugin",
+      method: "set-heartbeats",
+      observedRuntimeScopes,
+      allowedResults: adminAllowedResults,
+      match: "prefix",
+      gatewayRuntimeScopeSurface: "trusted-operator",
+    });
+
+    await withGatewayServer({
+      prefix: "openclaw-plugin-http-entry-trusted-operator-scope-test-",
+      resolvedAuth: AUTH_TOKEN,
+      overrides: {
+        handlePluginRequest,
+        shouldEnforcePluginGatewayAuth: (pathContext) =>
+          pathContext.pathname.startsWith("/plugins/notes-plugin"),
+      },
+      run: async (server) => {
+        const launchPath = issuePluginUiEntryPointLaunchPath({
+          path: "/plugins/notes-plugin/",
+          scopes: ["operator.read"],
+        });
+
+        const authenticated = createResponse();
+        await dispatchRequest(
+          server,
+          createRequest({
+            path: launchPath,
+            headers: {
+              "x-openclaw-scopes": "operator.admin,operator.write",
+            },
+          }),
+          authenticated.res,
+        );
+        expect(authenticated.res.statusCode).toBe(200);
+        expect(authenticated.getBody()).toBe("ok");
+        expect(observedRuntimeScopes).toEqual([["operator.read"]]);
+        expect(adminAllowedResults).toEqual([false]);
+
+        const setCookie = authenticated.setHeader.mock.calls.find(
+          ([name]) => name === "Set-Cookie",
+        )?.[1] as string | undefined;
+        const cookie = setCookie?.split(";")[0];
+        const nested = createResponse();
+        await dispatchRequest(
+          server,
+          createRequest({
+            path: "/plugins/notes-plugin/session/main",
+            ...(cookie ? { headers: { cookie, "x-openclaw-scopes": "operator.admin" } } : {}),
+          }),
+          nested.res,
+        );
+        expect(nested.res.statusCode).toBe(200);
+        expect(observedRuntimeScopes).toEqual([["operator.read"], ["operator.read"]]);
+        expect(adminAllowedResults).toEqual([false, false]);
+      },
+    });
+  });
+
   test("preserves trusted-proxy read scopes for gateway-auth plugin runtime routes", async () => {
     const observedRuntimeScopes: string[][] = [];
     const writeAllowedResults: boolean[] = [];
