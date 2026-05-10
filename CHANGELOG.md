@@ -14,6 +14,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Agents/CLI: parse `tool_use` content blocks and `tool_result` user-messages from the claude-cli stream-json dialect, emit them as `agent-event` records on the `tool` stream, and bridge those events through `params.opts.onToolStart` so channel preview tool-progress lights up for `claude-cli`-backed runs the same way it does for the embedded native runtime. Mirrors the assistant-text bridge from #76914.
 - Agents: surface concise default-visible warnings when `exec`/`bash` tool calls fail after the assistant claims success, while keeping raw stderr hidden unless verbose details are enabled. Fixes #60497. (#80003) Thanks @jbetala7.
 - CLI/agent: let `openclaw agent --model` use the backend/admin Gateway scope without cached device-token scopes silently downscoping the request. (#78837) Thanks @VACInc.
 - Ollama: keep DeepSeek V4 cloud models thinking-capable even when Ollama Cloud `/api/show` omits the `thinking` capability, so `/think high` no longer rejects `ollama/deepseek-v4-*:cloud`.

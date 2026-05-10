@@ -16,6 +16,7 @@ import {
 } from "../cli-output.js";
 import { FailoverError, resolveFailoverStatus } from "../failover-error.js";
 import { classifyFailoverReason } from "../pi-embedded-helpers.js";
+import { sanitizeToolArgs, sanitizeToolResult } from "../pi-embedded-subscribe.tools.js";
 import { applyPluginTextReplacements } from "../plugin-text-transforms.js";
 import { applySkillEnvOverridesFromSnapshot } from "../skills.js";
 import { runClaudeLiveSessionTurn, shouldUseClaudeLiveSession } from "./claude-live-session.js";
@@ -475,6 +476,31 @@ export async function executePreparedCliRun(
                 },
               });
             },
+            onToolUseStart: ({ toolCallId, name, args }) => {
+              emitAgentEvent({
+                runId: params.runId,
+                stream: "tool",
+                data: {
+                  phase: "start",
+                  name,
+                  toolCallId,
+                  args: sanitizeToolArgs(args) as Record<string, unknown>,
+                },
+              });
+            },
+            onToolResult: ({ toolCallId, name, isError, result }) => {
+              emitAgentEvent({
+                runId: params.runId,
+                stream: "tool",
+                data: {
+                  phase: "result",
+                  name,
+                  toolCallId,
+                  isError,
+                  result: sanitizeToolResult(result),
+                },
+              });
+            },
             cleanup: async () => {
               try {
                 await claudeSkillsPlugin.cleanup();
@@ -511,6 +537,31 @@ export async function executePreparedCliRun(
                       delta,
                       context.backendResolved.textTransforms?.output,
                     ),
+                  },
+                });
+              },
+              onToolUseStart: ({ toolCallId, name, args }) => {
+                emitAgentEvent({
+                  runId: params.runId,
+                  stream: "tool",
+                  data: {
+                    phase: "start",
+                    name,
+                    toolCallId,
+                    args: sanitizeToolArgs(args) as Record<string, unknown>,
+                  },
+                });
+              },
+              onToolResult: ({ toolCallId, name, isError, result }) => {
+                emitAgentEvent({
+                  runId: params.runId,
+                  stream: "tool",
+                  data: {
+                    phase: "result",
+                    name,
+                    toolCallId,
+                    isError,
+                    result: sanitizeToolResult(result),
                   },
                 });
               },
