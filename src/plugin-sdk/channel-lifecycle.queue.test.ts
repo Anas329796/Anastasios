@@ -100,12 +100,13 @@ describe("createChannelRunQueue", () => {
   it("skips queued work after deactivation", async () => {
     const first = createDeferred();
     const task = vi.fn();
+    const onSkip = vi.fn();
     const queue = createChannelRunQueue({});
 
     queue.enqueue("key", async () => {
       await first.promise;
     });
-    queue.enqueue("key", task);
+    queue.enqueue("key", task, { onSkip });
     await flushAsyncWork();
 
     queue.deactivate();
@@ -114,5 +115,6 @@ describe("createChannelRunQueue", () => {
     await flushAsyncWork();
 
     expect(task).not.toHaveBeenCalled();
+    expect(onSkip).toHaveBeenCalledTimes(1);
   });
 });

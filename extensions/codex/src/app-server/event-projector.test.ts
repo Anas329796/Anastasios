@@ -452,7 +452,6 @@ describe("CodexAppServerEventProjector", () => {
     expect(result.lastAssistant).toBeUndefined();
   });
 
-
   it("does not fail a completed reply after a retryable app-server error notification", async () => {
     const projector = await createProjector();
 
