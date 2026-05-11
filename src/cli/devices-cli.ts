@@ -186,6 +186,34 @@ function buildFallbackStateMismatchError(details: ConnectPairingRequiredDetails)
   );
 }
 
+async function buildStaleApproveRequestIdError(
+  opts: DevicesRpcOpts,
+  staleRequestId: string,
+): Promise<Error> {
+  const lines = [
+    `Pairing requestId "${staleRequestId}" is not in the local pending state.`,
+    "It may have been superseded by a fresh request during the gateway dial, expired (5-minute TTL), or never been created in this profile.",
+  ];
+  try {
+    const list = await listDevicePairing();
+    const latest = selectLatestPendingRequest(list.pending);
+    if (latest?.requestId && latest.requestId !== staleRequestId) {
+      lines.push(
+        `Most recent pending request in this profile: ${latest.requestId}.`,
+        `Rerun: ${buildExplicitApproveCommand(opts, latest.requestId)}`,
+      );
+    } else {
+      lines.push(
+        "No other pending requests are visible in this profile. List pending requests with: openclaw devices list",
+      );
+    }
+  } catch {
+    // diagnostic-only — never replace the primary failure mode with a
+    // local-state read error
+  }
+  return new Error(lines.join("\n"));
+}
+
 function assertLocalFallbackMatchesGatewayRequest(
   details: ConnectPairingRequiredDetails,
   list: DevicePairingList,
@@ -269,10 +297,22 @@ async function approvePairingWithFallback(
       if (gatewayRequestId && gatewayRequestId === requestId) {
         throw buildFallbackStateMismatchError(fallback.details);
       }
-      return null;
+      // The user-supplied requestId is not in local pending state and the
+      // gateway error did not surface a distinct alternative. The most common
+      // cause is supersession: the gateway dial just replaced the pending
+      // entry (`reconcilePendingPairingRequests` builds a fresh requestId
+      // when the incoming scope set diverges from the stored one — see
+      // `src/infra/device-pairing.ts:533-570`). Other causes are the 5-minute
+      // TTL prune (`PENDING_TTL_MS` in device-pairing.ts:132) or invoking
+      // approve under a different profile/state-dir. Surface the current
+      // local pending entry so the operator has a concrete rerun command
+      // instead of the bare "unknown requestId" emitted by the caller.
+      throw await buildStaleApproveRequestIdError(opts, requestId);
     }
     if (approved.status === "forbidden") {
-      throw new Error(formatDevicePairingForbiddenMessage(approved), { cause: error });
+      throw new Error(formatDevicePairingForbiddenMessage(approved), {
+        cause: error,
+      });
     }
     if (opts.json !== true) {
       defaultRuntime.log(theme.warn(FALLBACK_NOTICE));
@@ -542,8 +582,18 @@ export function registerDevicesCli(program: Command) {
               columns: [
                 { key: "Request", header: "Request", minWidth: 10 },
                 { key: "Device", header: "Device", minWidth: 16, flex: true },
-                { key: "Requested", header: "Requested", minWidth: 20, flex: true },
-                { key: "Approved", header: "Approved", minWidth: 20, flex: true },
+                {
+                  key: "Requested",
+                  header: "Requested",
+                  minWidth: 20,
+                  flex: true,
+                },
+                {
+                  key: "Approved",
+                  header: "Approved",
+                  minWidth: 20,
+                  flex: true,
+                },
                 { key: "Age", header: "Age", minWidth: 8 },
                 { key: "Status", header: "Status", minWidth: 12 },
               ],
@@ -617,7 +667,9 @@ export function registerDevicesCli(program: Command) {
           defaultRuntime.exit(1);
           return;
         }
-        const result = await callGatewayCli("device.pair.remove", opts, { deviceId: trimmed });
+        const result = await callGatewayCli("device.pair.remove", opts, {
+          deviceId: trimmed,
+        });
         if (opts.json) {
           defaultRuntime.writeJson(result);
           return;
@@ -788,7 +840,9 @@ export function registerDevicesCli(program: Command) {
       .description("Reject a pending device pairing request")
       .argument("<requestId>", "Pending request id")
       .action(async (requestId: string, opts: DevicesRpcOpts) => {
-        const result = await callGatewayCli("device.pair.reject", opts, { requestId });
+        const result = await callGatewayCli("device.pair.reject", opts, {
+          requestId,
+        });
         if (opts.json) {
           defaultRuntime.writeJson(result);
           return;
