@@ -13,7 +13,11 @@ import type {
   HealthCheckContext,
   HealthRepairContext,
 } from "../../../../src/flows/health-checks.js";
-import { createPolicyAttestation, policyDocumentHash } from "../policy-state.js";
+import {
+  collectPolicyEvidence,
+  createPolicyAttestation,
+  policyDocumentHash,
+} from "../policy-state.js";
 import { registerPolicyDoctorChecks, resetPolicyDoctorChecksForTest } from "./register.js";
 
 let workspaceDir: string;
@@ -74,6 +78,7 @@ describe("registerPolicyDoctorChecks", () => {
       "policy/attestation-hash-mismatch",
       "policy/channels-denied-provider",
       "policy/tools-missing-risk-level",
+      "policy/tools-unknown-risk-level",
       "policy/tools-missing-sensitivity-token",
       "policy/tools-unknown-sensitivity-token",
     ]);
@@ -263,7 +268,7 @@ describe("registerPolicyDoctorChecks", () => {
       checkedAt: "2026-05-10T20:00:00.000Z",
       policyPath: "policy.jsonc",
       policyHash,
-      evidence: { channels: [] },
+      evidence: collectPolicyEvidence({}),
       findings: [],
     }).attestationHash;
     await fs.writeFile(configPath, "{}", "utf-8");
@@ -493,6 +498,33 @@ describe("registerPolicyDoctorChecks", () => {
       }),
       expect.objectContaining({
         checkId: "policy/tools-missing-sensitivity-token",
+        severity: "error",
+        path: "TOOLS.md",
+        ocPath: "oc://TOOLS.md/tools/deploy",
+      }),
+    ]);
+  });
+
+  it("reports unknown governed tool risk metadata", async () => {
+    const configPath = join(workspaceDir, "openclaw.jsonc");
+    await fs.writeFile(configPath, "{}", "utf-8");
+    await fs.writeFile(
+      join(workspaceDir, "policy.jsonc"),
+      JSON.stringify({ tools: { settings: { requireRisk: true } } }),
+      "utf-8",
+    );
+    await fs.writeFile(
+      join(workspaceDir, "TOOLS.md"),
+      "## Tools\n\n### deploy risk:critcal\n",
+      "utf-8",
+    );
+
+    registerPolicyDoctorChecks();
+    const result = await runDoctorLintChecks(ctx(configPath, cfgWithPolicy()));
+
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        checkId: "policy/tools-unknown-risk-level",
         severity: "error",
         path: "TOOLS.md",
         ocPath: "oc://TOOLS.md/tools/deploy",

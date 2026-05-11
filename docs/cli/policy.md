@@ -40,10 +40,11 @@ Enable the bundled policy extension before first use:
 openclaw plugins enable policy
 ```
 
-When policy is enabled, doctor can load the policy health checks through a
-bounded public API without activating arbitrary plugins. The extension remains
-enabled even if `policy.jsonc` is missing, so doctor can report that the policy
-artifact needs to be restored or added.
+When policy is enabled, the extension registers policy health checks with the
+shared health registry. Doctor then runs registered checks; doctor does not
+load plugins itself. The extension remains enabled even if `policy.jsonc` is
+missing, so doctor can report that the policy artifact needs to be restored or
+added.
 
 ## Author Policy
 
@@ -119,7 +120,7 @@ Example JSON output:
     "tools": [
       {
         "id": "deploy",
-        "ocPath": "oc://TOOLS.md/tools/deploy",
+        "source": "oc://TOOLS.md/tools/deploy",
         "line": 12,
         "risk": "critical",
         "sensitivity": "restricted",
@@ -157,6 +158,11 @@ policy evidence changes. A stale watch result means the workspace should run
 `policy check`, review the new attestation, and update the out-of-band accepted
 attestation before relying on the previous approval.
 
+The tool runtime gate also includes structured approval metadata on approval
+requests: policy path/hash, configured expected hash when present, the policy
+evidence hash, and the target tool reference. That keeps audit values separate
+from the human-readable approval message.
+
 Policy findings can include both `target` and `requirement`. `target` is the
 observed workspace thing that does not conform. `requirement` is the authored
 policy rule that made it a finding. Both values are addresses today, usually
@@ -177,6 +183,7 @@ Policy config lives under `plugins.entries.policy.config`:
           "enabled": true,
           "requireRisk": true,
           "requireSensitivity": true,
+          "runtimeToolPolicy": false,
           "workspaceRepairs": false,
           "expectedHash": "sha256:...",
           "expectedAttestationHash": "sha256:...",
@@ -193,6 +200,7 @@ Policy config lives under `plugins.entries.policy.config`:
 | `enabled`            | Enable policy checks even before `policy.jsonc` exists.             |
 | `requireRisk`        | Require governed tool declarations to include risk metadata.        |
 | `requireSensitivity` | Require governed tool declarations to include sensitivity metadata. |
+| `runtimeToolPolicy`  | Apply enabled tool requirements through the trusted tool hook.      |
 | `workspaceRepairs`   | Allow `doctor --fix` to edit policy-managed workspace settings.     |
 | `expectedHash`       | Optional hash-lock for the approved policy artifact.                |
 | `expectedAttestationHash` | Optional hash-lock for the last accepted clean policy check. |
@@ -261,6 +269,47 @@ report what they would repair and leave settings unchanged.
 
 In this version, repair can disable channels that are enabled in OpenClaw config
 but denied by `channels.denyRules`.
+
+## Runtime Tool Policy
+
+OpenClaw config can also opt into a small runtime tool gate:
+
+```jsonc
+{
+  "plugins": {
+    "entries": {
+      "policy": {
+        "enabled": true,
+        "config": {
+          "enabled": true,
+          "runtimeToolPolicy": true,
+        },
+      },
+    },
+  },
+}
+```
+
+When `runtimeToolPolicy` is enabled, the bundled policy extension registers an
+OpenClaw trusted tool policy. It uses the same `policy.jsonc` requirements and
+`TOOLS.md` evidence as `policy check`.
+
+The runtime gate is enabled from OpenClaw config, not from `policy.jsonc`, so a
+missing policy artifact still fails closed instead of disabling the gate.
+
+The runtime gate:
+
+- blocks tool calls if the enabled policy artifact is missing or does not match
+  `expectedHash`;
+- blocks governed tool calls whose required metadata is missing or invalid;
+- asks for approval for governed tools marked `risk:critical` or
+  `IRREVERSIBLE_EXTERNAL`;
+- otherwise lets the normal tool call path continue.
+
+This is not a separate plugin loader path for doctor. The extension registers
+the trusted tool policy when the policy extension is enabled, and the existing
+tool runtime invokes the registered policy before regular `before_tool_call`
+hooks.
 
 ## Exit Codes
 

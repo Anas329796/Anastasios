@@ -186,6 +186,7 @@ async function requestPluginToolApproval(params: {
         title: approval.title,
         description: approval.description,
         severity: approval.severity,
+        metadata: approval.metadata,
         allowedDecisions: approval.allowedDecisions,
         toolName: params.toolName,
         toolCallId: params.toolCallId,
