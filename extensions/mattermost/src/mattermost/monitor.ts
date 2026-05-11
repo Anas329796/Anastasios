@@ -1,6 +1,7 @@
 import {
   defineFinalizableLivePreviewAdapter,
   deliverWithFinalizableLivePreviewAdapter,
+  type LivePreviewFinalizerResultKind,
 } from "openclaw/plugin-sdk/channel-message";
 import { resolveChannelStreamingPreviewToolProgress } from "openclaw/plugin-sdk/channel-streaming";
 import { isLoopbackHost } from "openclaw/plugin-sdk/gateway-runtime";
@@ -288,6 +289,12 @@ export function shouldClearMattermostDraftPreview(params: {
   return params.finalReplyDelivered && !params.finalizedViaPreviewPost;
 }
 
+export function didMattermostDeliverVisibleReply(
+  resultKind: LivePreviewFinalizerResultKind,
+): boolean {
+  return resultKind === "normal-delivered" || resultKind === "preview-finalized";
+}
+
 export function shouldFinalizeMattermostPreviewAfterDispatch(params: {
   finalCount: number;
   canFinalizeInPlace: boolean;
@@ -331,12 +338,12 @@ type MattermostDraftPreviewDeliverParams = {
 
 export async function deliverMattermostReplyWithDraftPreview(
   params: MattermostDraftPreviewDeliverParams,
-): Promise<void> {
+): Promise<{ kind: LivePreviewFinalizerResultKind }> {
   if (isReasoningReplyPayload(params.payload)) {
-    return;
+    return { kind: "normal-skipped" };
   }
 
-  await deliverWithFinalizableLivePreviewAdapter({
+  return await deliverWithFinalizableLivePreviewAdapter({
     kind: params.info.kind,
     payload: params.payload,
     adapter: defineFinalizableLivePreviewAdapter<ReplyPayload, string, { message: string }>({
@@ -1729,7 +1736,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
                   runtime.log?.(`delivered reply to ${to}`);
                 },
               });
-              anyReplyDelivered = true;
+              anyReplyDelivered = didMattermostDeliverVisibleReply(result.kind);
             },
             onError: (err, info) => {
               runtime.error?.(`mattermost ${info.kind} reply failed: ${String(err)}`);

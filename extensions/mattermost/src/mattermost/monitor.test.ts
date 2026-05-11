@@ -7,6 +7,7 @@ import type { MattermostClient } from "./client.js";
 import {
   buildMattermostModelPickerSelectMessageSid,
   canFinalizeMattermostPreviewInPlace,
+  didMattermostDeliverVisibleReply,
   deliverMattermostReplyWithDraftPreview,
   evaluateMattermostMentionGate,
   MattermostRetryableInboundError,
@@ -377,12 +378,21 @@ describe("shouldClearMattermostDraftPreview", () => {
   });
 });
 
+describe("didMattermostDeliverVisibleReply", () => {
+  it("only counts visible final delivery outcomes", () => {
+    expect(didMattermostDeliverVisibleReply("normal-delivered")).toBe(true);
+    expect(didMattermostDeliverVisibleReply("preview-finalized")).toBe(true);
+    expect(didMattermostDeliverVisibleReply("normal-skipped")).toBe(false);
+    expect(didMattermostDeliverVisibleReply("preview-retained")).toBe(false);
+  });
+});
+
 describe("deliverMattermostReplyWithDraftPreview", () => {
   it("suppresses reasoning-prefixed finals before preview finalization", async () => {
     const draftStream = createDraftStreamMock();
     const deliverFinal = vi.fn(async () => {});
 
-    await deliverMattermostReplyWithDraftPreview({
+    const result = await deliverMattermostReplyWithDraftPreview({
       payload: { text: "  \n > Reasoning:\n> _hidden_" } as never,
       info: { kind: "final" },
       kind: "channel",
@@ -395,6 +405,7 @@ describe("deliverMattermostReplyWithDraftPreview", () => {
       deliverFinal,
     });
 
+    expect(result.kind).toBe("normal-skipped");
     expect(deliverFinal).not.toHaveBeenCalled();
     expect(draftStream.flush).not.toHaveBeenCalled();
     expect(draftStream.discardPending).not.toHaveBeenCalled();
@@ -406,7 +417,7 @@ describe("deliverMattermostReplyWithDraftPreview", () => {
     const draftStream = createDraftStreamMock();
     const deliverFinal = vi.fn(async () => {});
 
-    await deliverMattermostReplyWithDraftPreview({
+    const result = await deliverMattermostReplyWithDraftPreview({
       payload: { text: "All good", replyToId: "reply-1" } as never,
       info: { kind: "final" },
       kind: "channel",
@@ -418,6 +429,7 @@ describe("deliverMattermostReplyWithDraftPreview", () => {
       deliverFinal,
     });
 
+    expect(result.kind).toBe("normal-delivered");
     expect(deliverFinal).toHaveBeenCalledTimes(1);
     expect(draftStream.flush).not.toHaveBeenCalled();
     expect(draftStream.discardPending).toHaveBeenCalledTimes(1);
@@ -479,7 +491,7 @@ describe("deliverMattermostReplyWithDraftPreview", () => {
     const deliverFinal = vi.fn(async () => {});
     const client = createMattermostClientMock();
 
-    await deliverMattermostReplyWithDraftPreview({
+    const result = await deliverMattermostReplyWithDraftPreview({
       payload: { text: "Final answer", replyToId: "child-post-789" } as never,
       info: { kind: "final" },
       kind: "channel",
@@ -492,6 +504,7 @@ describe("deliverMattermostReplyWithDraftPreview", () => {
       deliverFinal,
     });
 
+    expect(result.kind).toBe("preview-finalized");
     expect(updateMattermostPostSpy).toHaveBeenCalledTimes(1);
     const [updateClient, updatePostId, updateParams] =
       updateMattermostPostSpy.mock.calls.at(0) ?? [];
