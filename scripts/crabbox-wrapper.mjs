@@ -22,9 +22,12 @@ function checkedOutput(command, commandArgs) {
     cwd: repoRoot,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
+    timeout: 5_000,
+    killSignal: "SIGKILL",
   });
+  const timedOut = result.error?.name === "Error" && result.signal === "SIGKILL";
   return {
-    status: result.status ?? 1,
+    status: timedOut ? 124 : (result.status ?? 1),
     text: `${result.stdout ?? ""}${result.stderr ?? ""}`.trim(),
   };
 }
