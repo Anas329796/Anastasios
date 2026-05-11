@@ -27,7 +27,8 @@ describe("image-ops temp dir", () => {
     await getImageMetadata(Buffer.from("image"));
 
     expect(fs.mkdtemp).toHaveBeenCalledTimes(1);
-    const [prefix] = vi.mocked(fs.mkdtemp).mock.calls[0] ?? [];
+    const mkdtempCalls = vi.mocked(fs.mkdtemp).mock.calls as Array<[string]>;
+    const prefix = mkdtempCalls[0]?.[0];
     expect(prefix).toEqual(expect.stringMatching(/^.+openclaw-img-[0-9a-f-]+-$/u));
     expect(path.dirname(prefix ?? "")).toBe(secureRoot);
     expect(createdTempDir.startsWith(prefix ?? "")).toBe(true);
