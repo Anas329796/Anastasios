@@ -5,6 +5,7 @@ Docs: https://docs.openclaw.ai
 ## Unreleased
 
 ### Changes
+- Sessions: recover store from backup and tmp artifacts. Thanks @wAngByg.
 
 - Providers/fal: route GPT Image 2 and Nano Banana 2 reference-image edit requests to `/edit` with `image_urls` array, enforce NB2 edit geometry using `aspect_ratio` and `resolution` params, lift Fal edit mode input-image caps to 10 for GPT Image 2 and 14 for Nano Banana 2, and allow aspect-ratio hints in edit mode. (#77295) Thanks @leoge007.
 
