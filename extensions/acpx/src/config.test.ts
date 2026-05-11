@@ -8,11 +8,21 @@ const requireFromTest = createRequire(import.meta.url);
 const TSX_IMPORT = requireFromTest.resolve("tsx");
 
 function expectedMcpServerArgs(entrypoint: string): string[] {
-  const distEntry = entrypoint.replace("/src/", "/dist/").replace(/\.ts$/, ".js");
+  const pluginRoot = resolveAcpxPluginRoot(import.meta.url);
+  const parent = path.dirname(pluginRoot);
+  const openClawRoot = path.basename(parent) === "extensions"
+    ? path.dirname(parent)
+    : path.resolve(pluginRoot, "..");
+  const sourceEntry = path.join(openClawRoot, entrypoint);
+  const distEntry = path.join(
+    openClawRoot,
+    "dist",
+    path.relative(path.join(openClawRoot, "src"), sourceEntry)
+  ).replace(/\.ts$/, ".js");
   if (fs.existsSync(distEntry)) {
     return [distEntry];
   }
-  return ["--import", TSX_IMPORT, path.resolve(entrypoint)];
+  return ["--import", TSX_IMPORT, sourceEntry];
 }
 
 describe("embedded acpx plugin config", () => {
