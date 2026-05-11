@@ -1541,7 +1541,7 @@ export function renderApp(state: AppViewState) {
                           ${!navCollapsed
                             ? html`
                                 <div class="nav-section__label nav-section__label--static">
-                                  <span class="nav-section__label-text">Plugins</span>
+                                  <span class="nav-section__label-text">${t("nav.plugins")}</span>
                                 </div>
                               `
                             : nothing}
