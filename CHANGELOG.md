@@ -50,6 +50,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Channels/Slack: add per-channel `ignoreOtherMentions` (default `false`). When set, drop channel messages that mention another user or subteam but not this bot — the inverse of `requireMention`. Useful in busy channels where the bot would otherwise reply to side conversations. Only applies to channels/groups/MPIMs (not DMs) and requires a resolvable bot user id so the bot/non-bot mention split can be detected reliably. Mirrors the existing Discord `ignoreOtherMentions` option. Thanks @hanamizuki.
 - Infra/retry: keep jittered retry delays at or above server-supplied Retry-After lower bounds when the hint can be honored. Fixes #68541. (#68543) Thanks @Feelw00.
 - Redact persisted secret-shaped payloads [AI]. (#79006) Thanks @pgondhi987.
 - Agents: label `.openclaw/sandboxes` exec workdirs as sandbox runs in compact tool summaries instead of showing the full path.
