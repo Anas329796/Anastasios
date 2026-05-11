@@ -74,7 +74,7 @@ vi.mock("openclaw/plugin-sdk/agent-runtime", async (importOriginal) => {
         return null;
       }
       let oauthCredential = credential;
-      if ((oauthCredential.expires ?? 0) <= Date.now()) {
+      if (params.forceRefresh || (oauthCredential.expires ?? 0) <= Date.now()) {
         const refreshed = await providerRuntimeMocks.refreshProviderOAuthCredentialWithPlugin({
           provider: oauthCredential.provider,
           context: oauthCredential,

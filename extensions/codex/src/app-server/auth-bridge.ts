@@ -475,7 +475,6 @@ async function resolveOAuthCredentialForCodexAppServer(
     isCodexAppServerAuthProvider(ownerCredential.provider, params.config)
       ? ownerCredential
       : undefined;
-  const credentialForOwner = persistedOAuthCredential ?? overlaidOAuthCredential ?? credential;
   if (params.forceRefresh && !persistedOAuthCredential && overlaidOAuthCredential) {
     const refreshedRuntimeCredential = await refreshOAuthCredentialForRuntime({
       credential: overlaidOAuthCredential,
@@ -486,23 +485,14 @@ async function resolveOAuthCredentialForCodexAppServer(
     store.profiles[profileId] = refreshedRuntimeCredential;
     return refreshedRuntimeCredential;
   }
-  const refreshStore =
-    params.forceRefresh && persistedOAuthCredential
-      ? {
-          ...store,
-          profiles: {
-            ...store.profiles,
-            [profileId]: { ...credentialForOwner, expires: 0 },
-          },
-        }
-      : store;
   const resolved = await resolveApiKeyForProfile({
-    store: refreshStore,
+    store,
     profileId,
     agentDir: ownerAgentDir,
+    forceRefresh: params.forceRefresh && Boolean(persistedOAuthCredential),
   });
   const refreshed = loadAuthProfileStoreForSecretsRuntime(ownerAgentDir).profiles[profileId];
-  const storedCredential = refreshStore.profiles[profileId];
+  const storedCredential = store.profiles[profileId];
   const candidate =
     refreshed?.type === "oauth" && isCodexAppServerAuthProvider(refreshed.provider, params.config)
       ? refreshed
