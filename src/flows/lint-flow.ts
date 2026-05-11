@@ -1,30 +1,30 @@
+import { listDiagnosticChecks } from "./diagnostic-registry.js";
 import {
-  HEALTH_FINDING_SEVERITY_RANK,
-  healthFindingMeetsSeverity,
-  type HealthCheck,
-  type HealthCheckContext,
-  type HealthFinding,
-  type HealthFindingSeverity,
-} from "./health-checks.js";
-import { listHealthChecks } from "./health-check-registry.js";
+  DIAGNOSTIC_SEVERITY_RANK,
+  diagnosticMeetsSeverity,
+  type DiagnosticCheck,
+  type DiagnosticContext,
+  type DiagnosticFinding,
+  type DiagnosticSeverity,
+} from "./diagnostics.js";
 
-export interface DoctorLintRunOptions {
-  readonly checks?: readonly HealthCheck[];
+export interface LintRunOptions {
+  readonly checks?: readonly DiagnosticCheck[];
   readonly skipIds?: ReadonlySet<string> | readonly string[];
   readonly onlyIds?: ReadonlySet<string> | readonly string[];
 }
 
-export interface DoctorLintRunResult {
-  readonly findings: readonly HealthFinding[];
+export interface LintRunResult {
+  readonly findings: readonly DiagnosticFinding[];
   readonly checksRun: number;
   readonly checksSkipped: number;
 }
 
-export async function runDoctorLintChecks(
-  ctx: HealthCheckContext,
-  opts: DoctorLintRunOptions = {},
-): Promise<DoctorLintRunResult> {
-  const all = opts.checks ?? listHealthChecks();
+export async function runLintChecks(
+  ctx: DiagnosticContext,
+  opts: LintRunOptions = {},
+): Promise<LintRunResult> {
+  const all = opts.checks ?? listDiagnosticChecks();
   const skip = opts.skipIds instanceof Set ? opts.skipIds : new Set(opts.skipIds ?? []);
   const only = opts.onlyIds instanceof Set ? opts.onlyIds : new Set(opts.onlyIds ?? []);
 
@@ -38,7 +38,7 @@ export async function runDoctorLintChecks(
     return true;
   });
 
-  const findings: HealthFinding[] = [];
+  const findings: DiagnosticFinding[] = [];
   for (const check of selected) {
     try {
       const out = await check.detect(ctx);
@@ -49,7 +49,7 @@ export async function runDoctorLintChecks(
       findings.push({
         checkId: check.id,
         severity: "error",
-        message: `health check threw: ${scrubErrorMessage(err)}`,
+        message: `diagnostic check threw: ${scrubErrorMessage(err)}`,
       });
     }
   }
@@ -63,9 +63,8 @@ export async function runDoctorLintChecks(
   };
 }
 
-function compareFindings(a: HealthFinding, b: HealthFinding): number {
-  const sevDelta =
-    HEALTH_FINDING_SEVERITY_RANK[b.severity] - HEALTH_FINDING_SEVERITY_RANK[a.severity];
+function compareFindings(a: DiagnosticFinding, b: DiagnosticFinding): number {
+  const sevDelta = DIAGNOSTIC_SEVERITY_RANK[b.severity] - DIAGNOSTIC_SEVERITY_RANK[a.severity];
   if (sevDelta !== 0) {
     return sevDelta;
   }
@@ -93,8 +92,8 @@ function scrubErrorMessage(err: unknown): string {
 }
 
 export function exitCodeFromFindings(
-  findings: readonly HealthFinding[],
-  severityMin: HealthFindingSeverity = "warning",
+  findings: readonly DiagnosticFinding[],
+  severityMin: DiagnosticSeverity = "warning",
 ): 0 | 1 {
-  return findings.some((f) => healthFindingMeetsSeverity(f, severityMin)) ? 1 : 0;
+  return findings.some((f) => diagnosticMeetsSeverity(f, severityMin)) ? 1 : 0;
 }

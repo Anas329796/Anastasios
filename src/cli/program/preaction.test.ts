@@ -134,7 +134,11 @@ describe("registerPreActionHooks", () => {
       .command("create")
       .option("--json")
       .action(() => {});
-    program.command("doctor").option("--lint").action(() => {});
+    program.command("doctor").action(() => {});
+    program
+      .command("lint")
+      .option("--json")
+      .action(() => {});
     program.command("completion").action(() => {});
     program.command("secrets").action(() => {});
     program
@@ -313,10 +317,10 @@ describe("registerPreActionHooks", () => {
     expect(ensurePluginRegistryLoadedMock).not.toHaveBeenCalled();
   });
 
-  it("skips the config guard and plugin loading for doctor lint", async () => {
+  it("skips the config guard and plugin loading for lint", async () => {
     await runPreAction({
-      parseArgv: ["doctor"],
-      processArgv: ["node", "openclaw", "doctor", "--lint"],
+      parseArgv: ["lint"],
+      processArgv: ["node", "openclaw", "lint", "--json"],
     });
 
     expect(ensureConfigReadyMock).not.toHaveBeenCalled();

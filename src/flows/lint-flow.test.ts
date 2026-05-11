@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { HealthCheck, HealthCheckContext } from "./health-checks.js";
-import { exitCodeFromFindings, runDoctorLintChecks } from "./doctor-lint-flow.js";
+import type { DiagnosticCheck, DiagnosticContext } from "./diagnostics.js";
+import { exitCodeFromFindings, runLintChecks } from "./lint-flow.js";
 
-const ctx: HealthCheckContext = {
+const ctx: DiagnosticContext = {
   mode: "lint",
   runtime: {
     log() {},
@@ -12,7 +12,7 @@ const ctx: HealthCheckContext = {
   cfg: {},
 };
 
-function check(id: string, detect: HealthCheck["detect"]): HealthCheck {
+function check(id: string, detect: DiagnosticCheck["detect"]): DiagnosticCheck {
   return {
     id,
     kind: "core",
@@ -21,9 +21,9 @@ function check(id: string, detect: HealthCheck["detect"]): HealthCheck {
   };
 }
 
-describe("runDoctorLintChecks", () => {
+describe("runLintChecks", () => {
   it("filters selected checks and reports skipped count", async () => {
-    const result = await runDoctorLintChecks(ctx, {
+    const result = await runLintChecks(ctx, {
       checks: [
         check("a", async () => [{ checkId: "a", severity: "warning", message: "warn" }]),
         check("b", async () => [{ checkId: "b", severity: "error", message: "err" }]),
@@ -37,7 +37,7 @@ describe("runDoctorLintChecks", () => {
   });
 
   it("turns thrown checks into error findings", async () => {
-    const result = await runDoctorLintChecks(ctx, {
+    const result = await runLintChecks(ctx, {
       checks: [
         check("boom", async () => {
           throw new Error("nope");
@@ -49,7 +49,7 @@ describe("runDoctorLintChecks", () => {
       {
         checkId: "boom",
         severity: "error",
-        message: "health check threw: nope",
+        message: "diagnostic check threw: nope",
       },
     ]);
   });

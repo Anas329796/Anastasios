@@ -34,13 +34,13 @@ openclaw doctor
     Apply recommended repairs without prompting (repairs + restarts where safe).
 
   </Tab>
-  <Tab title="--lint">
+  <Tab title="lint">
     ```bash
-    openclaw doctor --lint
-    openclaw doctor --lint --json
+    openclaw lint
+    openclaw lint --json
     ```
 
-    Run structured health checks for CI or preflight automation. This mode is
+    Run structured diagnostic checks for CI or preflight automation. This mode is
     read-only: it does not prompt, repair, migrate config, restart services, or
     touch state.
 
@@ -77,35 +77,31 @@ If you want to review changes before writing, open the config file first:
 cat ~/.openclaw/openclaw.json
 ```
 
-## Read-only lint mode
+## Read-only diagnostics
 
-`openclaw doctor --lint` is the automation-friendly sibling of
-`openclaw doctor --fix`. Both use doctor health checks, but their posture is
-different:
+`openclaw lint` is the automation-friendly sibling of `openclaw doctor --fix`.
+Both use the structured diagnostic checks introduced for doctor repairs, but
+their posture is different:
 
-| Mode                     | Prompts   | Writes config/state     | Output                 | Use it for                      |
-| ------------------------ | --------- | ----------------------- | ---------------------- | ------------------------------- |
-| `openclaw doctor`        | yes       | no                      | friendly health report | a human checking status         |
-| `openclaw doctor --fix`  | sometimes | yes, with repair policy | friendly repair log    | applying approved repairs       |
-| `openclaw doctor --lint` | no        | no                      | structured findings    | CI, preflight, and review gates |
-
-Modernized health checks may provide an optional `repair()` implementation.
-`doctor --fix` applies those repairs when they exist and continues to use the
-existing doctor repair flow for checks that have not migrated yet.
+| Mode                    | Prompts   | Writes config/state     | Output                 | Use it for                      |
+| ----------------------- | --------- | ----------------------- | ---------------------- | ------------------------------- |
+| `openclaw doctor`       | yes       | no                      | friendly health report | a human checking status         |
+| `openclaw doctor --fix` | sometimes | yes, with repair policy | friendly repair log    | applying approved repairs       |
+| `openclaw lint`         | no        | no                      | structured findings    | CI, preflight, and review gates |
 
 Examples:
 
 ```bash
-openclaw doctor --lint
-openclaw doctor --lint --severity-min warning
-openclaw doctor --lint --json
-openclaw doctor --lint --only core/doctor/gateway-config --json
+openclaw lint
+openclaw lint --severity-min warning
+openclaw lint --json
+openclaw lint --only core/lint/gateway-config --json
 ```
 
 JSON output includes:
 
 - `ok`: whether any visible finding met the selected severity threshold
-- `checksRun`: number of health checks executed
+- `checksRun`: number of diagnostic checks executed
 - `checksSkipped`: checks skipped by `--only` or `--skip`
 - `findings`: structured diagnostics with `checkId`, `severity`, `message`, and
   optional `path`, `line`, `column`, `ocPath`, and `fixHint`

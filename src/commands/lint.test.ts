@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { resetCoreHealthChecksForTest } from "../flows/doctor-core-checks.js";
-import { clearHealthChecksForTest } from "../flows/health-check-registry.js";
-import { runDoctorLintCli } from "./doctor-lint.js";
+import { resetCoreDiagnosticChecksForTest } from "../flows/core-diagnostics.js";
+import { clearDiagnosticChecksForTest } from "../flows/diagnostic-registry.js";
+import { runLintCli } from "./lint.js";
 
 const mocks = vi.hoisted(() => ({
   readConfigFileSnapshot: vi.fn(),
@@ -17,11 +17,11 @@ const runtime = {
   exit: vi.fn(),
 };
 
-describe("runDoctorLintCli", () => {
+describe("runLintCli", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    clearHealthChecksForTest();
-    resetCoreHealthChecksForTest();
+    clearDiagnosticChecksForTest();
+    resetCoreDiagnosticChecksForTest();
   });
 
   it("bases exit code on the selected severity threshold", async () => {
@@ -34,7 +34,7 @@ describe("runDoctorLintCli", () => {
 
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     try {
-      const exitCode = await runDoctorLintCli(runtime, {
+      const exitCode = await runLintCli(runtime, {
         json: true,
         severityMin: "error",
       });
@@ -58,13 +58,13 @@ describe("runDoctorLintCli", () => {
     const originalIsTTY = process.stdout.isTTY;
     Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: true });
     try {
-      const exitCode = await runDoctorLintCli(runtime, {
+      const exitCode = await runLintCli(runtime, {
         severityMin: "error",
       });
 
       expect(exitCode).toBe(0);
       expect(String(stdout.mock.calls[0]?.[0])).toBe(
-        "doctor --lint: ran 5 check(s), 0 finding(s)\n",
+        "openclaw lint: ran 5 check(s), 0 finding(s)\n",
       );
       expect(String(stdout.mock.calls[1]?.[0])).toBe("  no findings\n");
     } finally {
@@ -84,7 +84,7 @@ describe("runDoctorLintCli", () => {
 
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     try {
-      const exitCode = await runDoctorLintCli(runtime, { json: true });
+      const exitCode = await runLintCli(runtime, { json: true });
 
       expect(exitCode).toBe(1);
       const payload = JSON.parse(String(stdout.mock.calls.at(-1)?.[0]));
@@ -93,7 +93,7 @@ describe("runDoctorLintCli", () => {
         checksRun: 1,
         findings: [
           {
-            checkId: "core/doctor/final-config-validation",
+            checkId: "core/lint/final-config-validation",
             severity: "error",
             message: "Required",
             path: "gateway.mode",
@@ -107,7 +107,7 @@ describe("runDoctorLintCli", () => {
   });
 
   it("rejects invalid severity thresholds", async () => {
-    await expect(runDoctorLintCli(runtime, { severityMin: "warnng" })).rejects.toThrow(
+    await expect(runLintCli(runtime, { severityMin: "warnng" })).rejects.toThrow(
       "Invalid --severity-min value",
     );
   });

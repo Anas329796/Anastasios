@@ -265,6 +265,13 @@ export const cliCommandCatalog: readonly CliCommandCatalogEntry[] = [
       loadPlugins: "never",
     },
   },
+  {
+    commandPath: ["lint"],
+    policy: {
+      bypassConfigGuard: true,
+      loadPlugins: "never",
+    },
+  },
   { commandPath: ["exec-policy"], policy: { networkProxy: "bypass" } },
   { commandPath: ["hooks"], policy: { networkProxy: "bypass" } },
   { commandPath: ["logs"], policy: { networkProxy: "bypass" } },

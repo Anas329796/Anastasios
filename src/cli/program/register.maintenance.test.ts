@@ -12,10 +12,10 @@ const mocks = vi.hoisted(() => ({
     error: vi.fn(),
     exit: vi.fn(),
   },
-  runDoctorLintCli: vi.fn(),
+  runLintCli: vi.fn(),
 }));
 
-const { doctorCommand, dashboardCommand, resetCommand, uninstallCommand, runtime, runDoctorLintCli } =
+const { doctorCommand, dashboardCommand, resetCommand, uninstallCommand, runtime, runLintCli } =
   mocks;
 
 vi.mock("../../commands/doctor.js", () => ({
@@ -34,8 +34,8 @@ vi.mock("../../commands/uninstall.js", () => ({
   uninstallCommand: mocks.uninstallCommand,
 }));
 
-vi.mock("../../commands/doctor-lint.js", () => ({
-  runDoctorLintCli: mocks.runDoctorLintCli,
+vi.mock("../../commands/lint.js", () => ({
+  runLintCli: mocks.runLintCli,
 }));
 
 vi.mock("../../runtime.js", () => ({
@@ -95,12 +95,11 @@ describe("registerMaintenanceCommands doctor action", () => {
     expect(options.repair).toBe(true);
   });
 
-  it("runs doctor lint mode without invoking repair doctor", async () => {
-    runDoctorLintCli.mockResolvedValue(1);
+  it("runs lint diagnostics without invoking repair doctor", async () => {
+    runLintCli.mockResolvedValue(1);
 
     await runMaintenanceCli([
-      "doctor",
-      "--lint",
+      "lint",
       "--json",
       "--severity-min",
       "error",
@@ -111,7 +110,7 @@ describe("registerMaintenanceCommands doctor action", () => {
     ]);
 
     expect(doctorCommand).not.toHaveBeenCalled();
-    expect(runDoctorLintCli).toHaveBeenCalledWith(runtime, {
+    expect(runLintCli).toHaveBeenCalledWith(runtime, {
       json: true,
       severityMin: "error",
       skipIds: ["a"],
@@ -120,10 +119,10 @@ describe("registerMaintenanceCommands doctor action", () => {
     expect(runtime.exit).toHaveBeenCalledWith(1);
   });
 
-  it("exits with code 2 when doctor lint mode fails before findings are emitted", async () => {
-    runDoctorLintCli.mockRejectedValue(new Error("lint failed"));
+  it("exits with code 2 when lint fails before findings are emitted", async () => {
+    runLintCli.mockRejectedValue(new Error("lint failed"));
 
-    await runMaintenanceCli(["doctor", "--lint"]);
+    await runMaintenanceCli(["lint"]);
 
     expect(runtime.error).toHaveBeenCalledWith("Error: lint failed");
     expect(runtime.exit).toHaveBeenCalledWith(2);

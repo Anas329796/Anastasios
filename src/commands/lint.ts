@@ -1,50 +1,44 @@
 import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope.js";
 import { readConfigFileSnapshot } from "../config/config.js";
 import {
-  healthFindingMeetsSeverity,
-  parseHealthFindingSeverity,
-  type HealthCheckContext,
-  type HealthFinding,
-} from "../flows/health-checks.js";
+  configValidationIssuesToDiagnosticFindings,
+  registerCoreDiagnosticChecks,
+} from "../flows/core-diagnostics.js";
 import {
-  configValidationIssuesToHealthFindings,
-  registerCoreHealthChecks,
-} from "../flows/doctor-core-checks.js";
-import {
-  exitCodeFromFindings,
-  runDoctorLintChecks,
-  type DoctorLintRunOptions,
-} from "../flows/doctor-lint-flow.js";
+  type DiagnosticContext,
+  type DiagnosticFinding,
+  diagnosticMeetsSeverity,
+  parseDiagnosticSeverity,
+} from "../flows/diagnostics.js";
+import { exitCodeFromFindings, runLintChecks, type LintRunOptions } from "../flows/lint-flow.js";
 import type { RuntimeEnv } from "../runtime.js";
 
-export interface DoctorLintCliOptions {
+export interface LintCliOptions {
   readonly json?: boolean;
   readonly severityMin?: string;
   readonly skipIds?: readonly string[];
   readonly onlyIds?: readonly string[];
 }
 
-function detectMode(opts: DoctorLintCliOptions): "human" | "json" {
+function detectMode(opts: LintCliOptions): "human" | "json" {
   if (opts.json === true) {
     return "json";
   }
   return process.stdout.isTTY ? "human" : "json";
 }
 
-export async function runDoctorLintCli(
-  runtime: RuntimeEnv,
-  opts: DoctorLintCliOptions,
-): Promise<number> {
-  registerCoreHealthChecks();
+export async function runLintCli(runtime: RuntimeEnv, opts: LintCliOptions): Promise<number> {
+  registerCoreDiagnosticChecks();
 
-  const sevMin = opts.severityMin === undefined ? "info" : parseHealthFindingSeverity(opts.severityMin);
+  const sevMin =
+    opts.severityMin === undefined ? "info" : parseDiagnosticSeverity(opts.severityMin);
   if (sevMin === null) {
     throw new Error("Invalid --severity-min value. Expected one of: info, warning, error.");
   }
   const snapshot = await readConfigFileSnapshot();
   if (snapshot.exists && !snapshot.valid) {
-    const findings = configValidationIssuesToHealthFindings(snapshot.issues);
-    const visible = findings.filter((finding) => healthFindingMeetsSeverity(finding, sevMin));
+    const findings = configValidationIssuesToDiagnosticFindings(snapshot.issues);
+    const visible = findings.filter((finding) => diagnosticMeetsSeverity(finding, sevMin));
     if (detectMode(opts) === "json") {
       writeJsonResult({
         ok: false,
@@ -53,7 +47,7 @@ export async function runDoctorLintCli(
         findings: visible,
       });
     } else {
-      runtime.error("doctor --lint: config file exists but does not parse cleanly.");
+      runtime.error("openclaw lint: config file exists but does not parse cleanly.");
       for (const issue of snapshot.issues) {
         const path = issue.path || "<root>";
         runtime.error(`- ${path}: ${issue.message}`);
@@ -62,7 +56,7 @@ export async function runDoctorLintCli(
     return exitCodeFromFindings(findings, sevMin);
   }
 
-  const ctx: HealthCheckContext = {
+  const ctx: DiagnosticContext = {
     mode: "lint",
     runtime,
     cfg: snapshot.config,
@@ -70,12 +64,12 @@ export async function runDoctorLintCli(
     ...(snapshot.path !== undefined ? { configPath: snapshot.path } : {}),
   };
 
-  const runOpts: DoctorLintRunOptions = {
+  const runOpts: LintRunOptions = {
     ...(opts.skipIds && opts.skipIds.length > 0 ? { skipIds: opts.skipIds } : {}),
     ...(opts.onlyIds && opts.onlyIds.length > 0 ? { onlyIds: opts.onlyIds } : {}),
   };
-  const result = await runDoctorLintChecks(ctx, runOpts);
-  const visible = result.findings.filter((finding) => healthFindingMeetsSeverity(finding, sevMin));
+  const result = await runLintChecks(ctx, runOpts);
+  const visible = result.findings.filter((finding) => diagnosticMeetsSeverity(finding, sevMin));
 
   const mode = detectMode(opts);
   if (mode === "json") {
@@ -87,7 +81,7 @@ export async function runDoctorLintCli(
     });
   } else {
     process.stdout.write(
-      `doctor --lint: ran ${result.checksRun} check(s), ${visible.length} finding(s)\n`,
+      `openclaw lint: ran ${result.checksRun} check(s), ${visible.length} finding(s)\n`,
     );
     if (visible.length === 0) {
       process.stdout.write("  no findings\n");
@@ -110,7 +104,7 @@ function writeJsonResult(result: {
   ok: boolean;
   checksRun: number;
   checksSkipped: number;
-  findings: readonly HealthFinding[];
+  findings: readonly DiagnosticFinding[];
 }): void {
   process.stdout.write(
     JSON.stringify({
@@ -122,7 +116,7 @@ function writeJsonResult(result: {
   );
 }
 
-function toJsonFinding(f: HealthFinding): Record<string, unknown> {
+function toJsonFinding(f: DiagnosticFinding): Record<string, unknown> {
   return {
     checkId: f.checkId,
     severity: f.severity,
