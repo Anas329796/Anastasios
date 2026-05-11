@@ -135,6 +135,7 @@ function configureTaskRegistryMaintenanceRuntimeForTest(params: {
     resolveStorePath: () => "",
     parseAgentSessionKey: () => null as ParsedAgentSessionKey | null,
     isCronJobActive: () => false,
+    isCronJobLivenessAuthoritative: () => true,
     getAgentRunContext: () => undefined,
     hasActiveTaskForChildSessionKey: ({ sessionKey, excludeTaskId }) => {
       const normalized = sessionKey.trim().toLowerCase();
@@ -2318,6 +2319,7 @@ describe("task-registry", () => {
         resolveStorePath: () => "",
         parseAgentSessionKey: () => null,
         isCronJobActive: () => false,
+        isCronJobLivenessAuthoritative: () => true,
         getAgentRunContext: () => undefined,
         hasActiveTaskForChildSessionKey: () => false,
         deleteTaskRecordById: () => false,
