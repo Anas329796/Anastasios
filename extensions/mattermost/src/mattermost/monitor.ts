@@ -1736,7 +1736,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
                   runtime.log?.(`delivered reply to ${to}`);
                 },
               });
-              anyReplyDelivered = didMattermostDeliverVisibleReply(result.kind);
+              anyReplyDelivered ||= didMattermostDeliverVisibleReply(result.kind);
             },
             onError: (err, info) => {
               runtime.error?.(`mattermost ${info.kind} reply failed: ${String(err)}`);
