@@ -154,14 +154,45 @@ function buildAdapterWrapperScript(params: {
   binName: string;
   installedBinPath?: string;
   envSetup: string;
+  stderrLogFileName?: string;
 }): string {
   return `#!/usr/bin/env node
-import { existsSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 ${params.envSetup}
+const stderrLogPath = ${params.stderrLogFileName ? `fileURLToPath(new URL("./${params.stderrLogFileName}", import.meta.url))` : "undefined"};
+const stderrLogMaxChars = 64 * 1024;
+
+function appendStderrLog(chunk) {
+  if (!stderrLogPath) {
+    return;
+  }
+  const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+  if (!text) {
+    return;
+  }
+  try {
+    appendFileSync(stderrLogPath, text, "utf8");
+    const current = readFileSync(stderrLogPath, "utf8");
+    if (current.length > stderrLogMaxChars) {
+      writeFileSync(stderrLogPath, current.slice(-stderrLogMaxChars), "utf8");
+    }
+  } catch {
+    // Stderr capture is diagnostic-only; never break the ACP adapter.
+  }
+}
+
+try {
+  if (stderrLogPath) {
+    writeFileSync(stderrLogPath, "", "utf8");
+  }
+} catch {
+  // Stderr capture is diagnostic-only; never break the ACP adapter.
+}
+
 const openClawWrapperArgs = new Set([
   ${quoteCommandPart(OPENCLAW_ACPX_LEASE_ID_ARG)},
   ${quoteCommandPart(OPENCLAW_GATEWAY_INSTANCE_ID_ARG)},
@@ -224,8 +255,13 @@ if (!command) {
 const child = spawn(command, args, {
   detached: process.platform !== "win32",
   env,
-  stdio: "inherit",
+  stdio: ["inherit", "inherit", "pipe"],
   windowsHide: true,
+});
+
+child.stderr?.on("data", (chunk) => {
+  appendStderrLog(chunk);
+  process.stderr.write(chunk);
 });
 
 let forceKillTimer;
@@ -308,6 +344,7 @@ function buildCodexAcpWrapperScript(installedBinPath?: string): string {
     packageSpec: `${CODEX_ACP_PACKAGE}@${CODEX_ACP_PACKAGE_VERSION}`,
     binName: CODEX_ACP_BIN,
     installedBinPath,
+    stderrLogFileName: "codex-acp-wrapper.stderr.log",
     envSetup: `const codexHome = fileURLToPath(new URL("./codex-home/", import.meta.url));
 const env = {
   ...process.env,
