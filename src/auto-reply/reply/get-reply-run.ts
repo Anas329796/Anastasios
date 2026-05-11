@@ -348,24 +348,6 @@ type RunPreparedReplyParams = {
   abortedLastRun: boolean;
 };
 
-function resolveCurrentTurnPromptContext(
-  ctx: TemplateContext,
-): CurrentTurnPromptContext | undefined {
-  const replyBody = normalizeOptionalString(ctx.ReplyToBody);
-  if (!replyBody) {
-    return undefined;
-  }
-  return {
-    reply: {
-      body: replyBody,
-      ...(normalizeOptionalString(ctx.ReplyToSender)
-        ? { senderLabel: normalizeOptionalString(ctx.ReplyToSender) }
-        : {}),
-      ...(ctx.ReplyToIsQuote === true ? { isQuote: true } : {}),
-    },
-  };
-}
-
 export async function runPreparedReply(
   params: RunPreparedReplyParams,
 ): Promise<ReplyPayload | ReplyPayload[] | undefined> {
@@ -645,7 +627,7 @@ export async function runPreparedReply(
       ]
         .filter(Boolean)
         .join("\n\n")
-    : [inboundUserContext, baseBodyFinal].filter(Boolean).join("\n\n");
+    : baseBodyFinal;
   const hasUserBody =
     baseBodyFinal.trim().length > 0 ||
     softResetTail.length > 0 ||
@@ -666,9 +648,7 @@ export async function runPreparedReply(
   }
   // When the user sends media without text, provide a minimal body so the agent
   // run proceeds and the image/document is injected by the embedded runner.
-  const effectiveBaseBody = hasUserBody
-    ? baseBodyForPrompt
-    : [inboundUserContext, "[User sent media without caption]"].filter(Boolean).join("\n\n");
+  const effectiveBaseBody = hasUserBody ? baseBodyForPrompt : "[User sent media without caption]";
   const transcriptBodyBase = isHeartbeat
     ? HEARTBEAT_TRANSCRIPT_PROMPT
     : isBareSessionReset
@@ -769,7 +749,8 @@ export async function runPreparedReply(
     "reply.build_prompt_bodies",
     () => rebuildPromptBodies(),
   );
-  const currentTurnContext = resolveCurrentTurnPromptContext(sessionCtx);
+  const currentTurnContext: CurrentTurnPromptContext | undefined =
+    !isBareSessionReset && inboundUserContext.trim() ? { text: inboundUserContext } : undefined;
   if (!resolvedThinkLevel) {
     resolvedThinkLevel = await modelState.resolveDefaultThinkingLevel();
   }
@@ -885,13 +866,11 @@ export async function runPreparedReply(
         agentId,
         sessionKey: runtimePolicySessionKey,
       });
-  const resolveAcceptedAuthProfileProviders = (entry: SessionEntry | undefined) =>
+  const resolveAcceptedAuthProfileProviders = () =>
     agentHarnessPolicy
       ? listOpenAIAuthProfileProvidersForAgentRuntime({
           provider,
           harnessRuntime: agentHarnessPolicy.runtime,
-          sessionAgentHarnessId: entry?.agentHarnessId,
-          sessionAgentRuntimeOverride: entry?.agentRuntimeOverride,
         })
       : [provider];
   let authProfileId = useFastReplyRuntime
@@ -900,9 +879,7 @@ export async function runPreparedReply(
         resolveSessionAuthProfileOverride({
           cfg,
           provider,
-          acceptedProviderIds: resolveAcceptedAuthProfileProviders(
-            preparedSessionState.sessionEntry,
-          ),
+          acceptedProviderIds: resolveAcceptedAuthProfileProviders(),
           agentDir,
           sessionEntry: preparedSessionState.sessionEntry,
           sessionStore,
@@ -961,9 +938,7 @@ export async function runPreparedReply(
           : await resolveSessionAuthProfileOverride({
               cfg,
               provider,
-              acceptedProviderIds: resolveAcceptedAuthProfileProviders(
-                preparedSessionState.sessionEntry,
-              ),
+              acceptedProviderIds: resolveAcceptedAuthProfileProviders(),
               agentDir,
               sessionEntry: preparedSessionState.sessionEntry,
               sessionStore,

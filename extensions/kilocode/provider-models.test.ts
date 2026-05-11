@@ -37,6 +37,13 @@ function requireModelById(
   return model;
 }
 
+function requireRecord(value: unknown, label: string): Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`expected ${label} to be a record`);
+  }
+  return value as Record<string, unknown>;
+}
+
 function makeGatewayModel(overrides: Record<string, unknown> = {}) {
   return {
     id: "anthropic/claude-sonnet-4",
@@ -121,7 +128,7 @@ describe("discoverKilocodeModels", () => {
   it("returns static catalog in test environment", async () => {
     const models = await discoverKilocodeModels();
     expect(models.length).toBeGreaterThan(0);
-    expect(models.some((m) => m.id === "kilo/auto")).toBe(true);
+    expect(requireModelById(models, "kilo/auto").id).toBe("kilo/auto");
   });
 
   it("static catalog has correct defaults for kilo/auto", async () => {
@@ -148,23 +155,22 @@ describe("discoverKilocodeModels (fetch path)", () => {
     await withFetchPathTest(mockFetch, async () => {
       const models = await discoverKilocodeModels();
 
-      expect(fetchWithSsrFGuardMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          url: KILOCODE_MODELS_URL,
-          init: expect.objectContaining({
-            headers: { Accept: "application/json" },
-          }),
-          policy: { allowedHostnames: ["api.kilo.ai"] },
-          timeoutMs: 5000,
-          auditContext: "kilocode.model_discovery",
-        }),
+      expect(fetchWithSsrFGuardMock).toHaveBeenCalledOnce();
+      const guardedFetch = requireRecord(
+        fetchWithSsrFGuardMock.mock.calls[0]?.[0],
+        "guarded fetch params",
       );
-      expect(mockFetch).toHaveBeenCalledWith(
-        KILOCODE_MODELS_URL,
-        expect.objectContaining({
-          headers: { Accept: "application/json" },
-        }),
-      );
+      expect(guardedFetch.url).toBe(KILOCODE_MODELS_URL);
+      const guardedInit = requireRecord(guardedFetch.init, "guarded fetch init");
+      expect(guardedInit.headers).toEqual({ Accept: "application/json" });
+      expect(guardedFetch.policy).toEqual({ allowedHostnames: ["api.kilo.ai"] });
+      expect(guardedFetch.timeoutMs).toBe(5000);
+      expect(guardedFetch.auditContext).toBe("kilocode.model_discovery");
+
+      expect(mockFetch).toHaveBeenCalledOnce();
+      expect(mockFetch.mock.calls[0]?.[0]).toBe(KILOCODE_MODELS_URL);
+      const fetchInit = requireRecord(mockFetch.mock.calls[0]?.[1], "mock fetch init");
+      expect(fetchInit.headers).toEqual({ Accept: "application/json" });
 
       expect(models.length).toBe(2);
 
@@ -175,8 +181,8 @@ describe("discoverKilocodeModels (fetch path)", () => {
       expect(sonnet.cost.cacheWrite).toBeCloseTo(3.75);
       expect(sonnet.input).toEqual(["text", "image"]);
       expect(sonnet.reasoning).toBe(true);
-      expect(sonnet?.contextWindow).toBe(200000);
-      expect(sonnet?.maxTokens).toBe(8192);
+      expect(sonnet.contextWindow).toBe(200000);
+      expect(sonnet.maxTokens).toBe(8192);
     });
   });
 
@@ -185,7 +191,7 @@ describe("discoverKilocodeModels (fetch path)", () => {
     await withFetchPathTest(mockFetch, async () => {
       const models = await discoverKilocodeModels();
       expect(models.length).toBeGreaterThan(0);
-      expect(models.some((m) => m.id === "kilo/auto")).toBe(true);
+      expect(requireModelById(models, "kilo/auto").id).toBe("kilo/auto");
     });
   });
 
@@ -197,7 +203,7 @@ describe("discoverKilocodeModels (fetch path)", () => {
     await withFetchPathTest(mockFetch, async () => {
       const models = await discoverKilocodeModels();
       expect(models.length).toBeGreaterThan(0);
-      expect(models.some((m) => m.id === "kilo/auto")).toBe(true);
+      expect(requireModelById(models, "kilo/auto").id).toBe("kilo/auto");
     });
   });
 
@@ -211,8 +217,10 @@ describe("discoverKilocodeModels (fetch path)", () => {
     });
     await withFetchPathTest(mockFetch, async () => {
       const models = await discoverKilocodeModels();
-      expect(models.some((m) => m.id === "kilo/auto")).toBe(true);
-      expect(models.some((m) => m.id === "anthropic/claude-sonnet-4")).toBe(true);
+      expect(requireModelById(models, "kilo/auto").id).toBe("kilo/auto");
+      expect(requireModelById(models, "anthropic/claude-sonnet-4").id).toBe(
+        "anthropic/claude-sonnet-4",
+      );
     });
   });
 
@@ -232,9 +240,9 @@ describe("discoverKilocodeModels (fetch path)", () => {
     });
     await withFetchPathTest(mockFetch, async () => {
       const models = await discoverKilocodeModels();
-      const textModel = models.find((m) => m.id === "some/text-model");
-      expect(textModel?.input).toEqual(["text"]);
-      expect(textModel?.reasoning).toBe(false);
+      const textModel = requireModelById(models, "some/text-model");
+      expect(textModel.input).toEqual(["text"]);
+      expect(textModel.reasoning).toBe(false);
     });
   });
 
@@ -256,7 +264,9 @@ describe("discoverKilocodeModels (fetch path)", () => {
       const auto = requireModelById(models, "kilo/auto");
       expect(auto.name).toBe("Kilo: Auto");
       expect(auto.cost.input).toBeCloseTo(5.0);
-      expect(models.some((m) => m.id === "anthropic/claude-sonnet-4")).toBe(true);
+      expect(requireModelById(models, "anthropic/claude-sonnet-4").id).toBe(
+        "anthropic/claude-sonnet-4",
+      );
     });
   });
 });
