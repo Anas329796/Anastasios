@@ -66,6 +66,7 @@ Docs: https://docs.openclaw.ai
 - Plugin SDK/media-understanding: add `extractStructuredWithModel(...)` plus the optional provider-side `extractStructured(...)` seam so trusted plugins can run bounded image-first structured extraction with optional supplemental text context through provider-owned runtimes such as Codex.
 - Exec approvals: add `tools.exec.commandHighlighting` so parser-derived command highlighting in approval prompts can be enabled globally or per agent. (#79348) Thanks @jesse-merhi.
 - Codex app-server: mirror native Codex subagent spawn lifecycle events into Task Registry so app-server child agents appear in task/status surfaces without relying on transcript text. (#79512) Thanks @mbelinky.
+- Exec: inject `OPENCLAW_AGENT_ID` and `OPENCLAW_SESSION_KEY` into child processes spawned by the exec tool, so scripts and skills can reliably identify their agent and session without relying on model parameter passing. Closes #66705. Thanks @name5566.
 
 ### Fixes
 
