@@ -18,6 +18,12 @@ import {
 } from "openclaw/plugin-sdk/hook-runtime";
 import { createMockPluginRegistry } from "openclaw/plugin-sdk/plugin-test-runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+function queueActiveRunMessageForTest(
+  ...args: Parameters<typeof queueAgentHarnessMessage>
+): boolean {
+  return queueAgentHarnessMessage(...args);
+}
 import { CODEX_GPT5_BEHAVIOR_CONTRACT } from "../../prompt-overlay.js";
 import {
   buildCodexAppInventoryCacheKey,
@@ -28,7 +34,10 @@ import {
   resolveCodexAppServerHomeDir,
 } from "./auth-bridge.js";
 import { readCodexPluginConfig, resolveCodexAppServerRuntimeOptions } from "./config.js";
-import { CODEX_OPENCLAW_DYNAMIC_TOOL_NAMESPACE } from "./dynamic-tools.js";
+import {
+  CODEX_OPENCLAW_DYNAMIC_TOOL_NAMESPACE,
+  createCodexDynamicToolBridge,
+} from "./dynamic-tools.js";
 import * as elicitationBridge from "./elicitation-bridge.js";
 import type { CodexServerNotification } from "./protocol.js";
 import { rememberCodexRateLimits, resetCodexRateLimitCacheForTests } from "./rate-limit-cache.js";
@@ -633,6 +642,44 @@ describe("runCodexAppServerAttempt", () => {
     }
   });
 
+  it("does not expose OpenClaw Tool Search controls through Codex dynamic tools", async () => {
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    const workspaceDir = path.join(tempDir, "workspace");
+    const params = createParams(sessionFile, workspaceDir);
+    params.disableTools = false;
+    params.config = {
+      tools: {
+        toolSearch: true,
+      },
+    };
+    const sandboxSessionKey = params.sessionKey;
+    if (!sandboxSessionKey) {
+      throw new Error("createParams must provide a sessionKey for Codex dynamic tool tests.");
+    }
+
+    const tools = await __testing.buildDynamicTools({
+      params,
+      resolvedWorkspace: workspaceDir,
+      effectiveWorkspace: workspaceDir,
+      sandboxSessionKey,
+      sandbox: null as never,
+      runAbortController: new AbortController(),
+      sessionAgentId: "main",
+      pluginConfig: {},
+      onYieldDetected: () => undefined,
+    });
+    const bridge = createCodexDynamicToolBridge({
+      tools,
+      signal: new AbortController().signal,
+      loading: "searchable",
+    });
+    const dynamicToolNames = bridge.specs.map((tool) => tool.name);
+
+    for (const toolName of ["tool_search_code", "tool_search", "tool_describe", "tool_call"]) {
+      expect(dynamicToolNames).not.toContain(toolName);
+    }
+  });
+
   it("normalizes Codex dynamic toolsAllow entries before filtering", () => {
     const tools = ["exec", "apply_patch", "read", "message"].map((name) => ({ name }));
 
@@ -691,6 +738,127 @@ describe("runCodexAppServerAttempt", () => {
     expect(webSearch?.deferLoading).toBe(true);
     expect(heartbeat?.namespace).toBe(CODEX_OPENCLAW_DYNAMIC_TOOL_NAMESPACE);
     expect(heartbeat?.deferLoading).toBe(true);
+  });
+
+  it("returns a run context report without deferred Codex dynamic tool schemas", async () => {
+    __testing.setOpenClawCodingToolsFactoryForTests(() => [
+      createRuntimeDynamicTool("message"),
+      createRuntimeDynamicTool("web_search"),
+    ]);
+    const harness = createStartedThreadHarness();
+    const params = createParams(
+      path.join(tempDir, "session.jsonl"),
+      path.join(tempDir, "workspace"),
+    );
+    params.disableTools = false;
+    params.runtimePlan = createCodexRuntimePlanFixture();
+    params.sourceReplyDeliveryMode = "message_tool_only";
+    params.toolsAllow = ["message", "web_search"];
+
+    const run = runCodexAppServerAttempt(params, {
+      pluginConfig: { appServer: { mode: "yolo" } },
+    });
+    await harness.waitForMethod("turn/start", 120_000);
+    await harness.completeTurn({ threadId: "thread-1", turnId: "turn-1" });
+    const result = await run;
+
+    const report = result.systemPromptReport;
+    expect(report?.source).toBe("run");
+    expect(report?.provider).toBe("codex");
+    expect(report?.model).toBe("gpt-5.4-codex");
+    expect(report?.systemPrompt.chars).toBeGreaterThan(0);
+
+    const message = report?.tools.entries.find((tool) => tool.name === "message");
+    const webSearch = report?.tools.entries.find((tool) => tool.name === "web_search");
+    expect(message?.schemaChars).toBeGreaterThan(0);
+    expect(webSearch?.schemaChars).toBe(0);
+    expect(report?.tools.schemaChars).toBe(message?.schemaChars);
+  });
+
+  it("keeps searchable Codex dynamic tools canonical in mirrored transcript snapshots", async () => {
+    __testing.setOpenClawCodingToolsFactoryForTests(() => [
+      createRuntimeDynamicTool("wiki_status"),
+    ]);
+    const harness = createStartedThreadHarness();
+    const params = createParams(
+      path.join(tempDir, "session.jsonl"),
+      path.join(tempDir, "workspace"),
+    );
+    params.disableTools = false;
+    params.runtimePlan = createCodexRuntimePlanFixture();
+    params.toolsAllow = ["wiki_status"];
+
+    const run = runCodexAppServerAttempt(params, {
+      pluginConfig: {
+        codexDynamicToolsLoading: "searchable",
+        appServer: { mode: "yolo" },
+      },
+    });
+    await harness.waitForMethod("turn/start", 120_000);
+
+    const toolResult = (await harness.handleServerRequest({
+      id: "request-tool-wiki-status",
+      method: "item/tool/call",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        callId: "call-wiki-status-1",
+        namespace: CODEX_OPENCLAW_DYNAMIC_TOOL_NAMESPACE,
+        tool: "wiki_status",
+        arguments: { topic: "README.md" },
+      },
+    })) as {
+      contentItems?: Array<{ text?: string; type?: string }>;
+      success?: boolean;
+    };
+    expect(toolResult).toEqual({
+      success: true,
+      contentItems: [{ type: "inputText", text: "wiki_status done" }],
+    });
+
+    await harness.completeTurn({ threadId: "thread-1", turnId: "turn-1" });
+    const result = await run;
+
+    expect(result.messagesSnapshot.map((message) => message.role)).toEqual([
+      "user",
+      "assistant",
+      "toolResult",
+    ]);
+    const assistantMessage = result.messagesSnapshot[1];
+    if (assistantMessage?.role !== "assistant") {
+      throw new Error("expected mirrored assistant tool-call message");
+    }
+    expect(assistantMessage.content).toStrictEqual([
+      {
+        type: "toolCall",
+        id: "call-wiki-status-1",
+        name: "wiki_status",
+        arguments: { topic: "README.md" },
+        input: { topic: "README.md" },
+      },
+    ]);
+    const toolResultMessage = result.messagesSnapshot[2];
+    if (toolResultMessage?.role !== "toolResult") {
+      throw new Error("expected mirrored tool-result message");
+    }
+    expect(toolResultMessage.toolCallId).toBe("call-wiki-status-1");
+    expect(toolResultMessage.toolName).toBe("wiki_status");
+    expect(toolResultMessage.isError).toBe(false);
+    expect(toolResultMessage.content).toStrictEqual([
+      {
+        type: "toolResult",
+        id: "call-wiki-status-1",
+        name: "wiki_status",
+        toolName: "wiki_status",
+        toolCallId: "call-wiki-status-1",
+        toolUseId: "call-wiki-status-1",
+        tool_use_id: "call-wiki-status-1",
+        content: "wiki_status done",
+        text: "wiki_status done",
+      },
+    ]);
+    expect(JSON.stringify(result.messagesSnapshot)).not.toContain("tool_search");
+    expect(JSON.stringify(result.messagesSnapshot)).not.toContain("function_call_output");
   });
 
   it("passes the live run session key to Codex dynamic tools when sandbox policy uses another key", () => {
@@ -1053,7 +1221,7 @@ describe("runCodexAppServerAttempt", () => {
         }),
       { interval: 1 },
     );
-    expect(queueAgentHarnessMessage("session-1", "after timeout")).toBe(false);
+    expect(queueActiveRunMessageForTest("session-1", "after timeout")).toBe(false);
   });
 
   it("does not count account rate-limit updates as turn completion activity", async () => {
@@ -1362,7 +1530,7 @@ describe("runCodexAppServerAttempt", () => {
         }),
       { interval: 1 },
     );
-    expect(queueAgentHarnessMessage("session-1", "after silent turn")).toBe(false);
+    expect(queueActiveRunMessageForTest("session-1", "after silent turn")).toBe(false);
   });
 
   it("applies before_prompt_build to Codex developer instructions and turn input", async () => {
@@ -2043,6 +2211,36 @@ describe("runCodexAppServerAttempt", () => {
     expect((error as Error).message).toContain("Next reset in");
   });
 
+  it("refreshes Codex account rate limits when turn/start omits reset details", async () => {
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    const workspaceDir = path.join(tempDir, "workspace");
+    const resetsAt = Math.ceil(Date.now() / 1000) + 120;
+    const harness = createStartedThreadHarness(async (method) => {
+      if (method === "turn/start") {
+        throw Object.assign(new Error("You've reached your usage limit."), {
+          data: { codexErrorInfo: "usageLimitExceeded" },
+        });
+      }
+      if (method === "account/rateLimits/read") {
+        return rateLimitsUpdated(resetsAt).params;
+      }
+      return undefined;
+    });
+
+    const runError = runCodexAppServerAttempt(createParams(sessionFile, workspaceDir)).catch(
+      (error: unknown) => error,
+    );
+    await harness.waitForMethod("account/rateLimits/read");
+
+    const error = await runError;
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain(
+      "You've reached your Codex subscription usage limit.",
+    );
+    expect((error as Error).message).toContain("Next reset in");
+    expect((error as Error).message).not.toContain("Codex did not return a reset time");
+  });
+
   it("cleans up native hook relay state when the Codex turn aborts", async () => {
     const sessionFile = path.join(tempDir, "session.jsonl");
     const workspaceDir = path.join(tempDir, "workspace");
@@ -2060,6 +2258,45 @@ describe("runCodexAppServerAttempt", () => {
 
     expect(result.aborted).toBe(true);
     expect(nativeHookRelayTesting.getNativeHookRelayRegistrationForTests(relayId)).toBeUndefined();
+  });
+
+  it("refreshes Codex account rate limits when a failed turn omits reset details", async () => {
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    const workspaceDir = path.join(tempDir, "workspace");
+    const resetsAt = Math.ceil(Date.now() / 1000) + 120;
+    const harness = createStartedThreadHarness(async (method) => {
+      if (method === "account/rateLimits/read") {
+        return rateLimitsUpdated(resetsAt).params;
+      }
+      return undefined;
+    });
+
+    const run = runCodexAppServerAttempt(createParams(sessionFile, workspaceDir));
+    await harness.waitForMethod("turn/start");
+    await harness.notify({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        turn: {
+          id: "turn-1",
+          status: "failed",
+          error: {
+            message: "You've reached your usage limit.",
+            codexErrorInfo: "usageLimitExceeded",
+          },
+        },
+      },
+    });
+
+    const result = await run;
+
+    expect(result.promptError).toContain("You've reached your Codex subscription usage limit.");
+    expect(result.promptError).toContain("Next reset in");
+    expect(result.promptError).not.toContain("Codex did not return a reset time");
+    expect(harness.requests.some((request) => request.method === "account/rateLimits/read")).toBe(
+      true,
+    );
   });
 
   it("fires agent_end with failure metadata when the codex turn fails", async () => {
@@ -2208,7 +2445,7 @@ describe("runCodexAppServerAttempt", () => {
     );
     await waitForMethod("turn/start");
 
-    expect(queueAgentHarnessMessage("session-1", "more context", { debounceMs: 1 })).toBe(true);
+    expect(queueActiveRunMessageForTest("session-1", "more context", { debounceMs: 1 })).toBe(true);
     await vi.waitFor(() => expect(requests.map((entry) => entry.method)).toContain("turn/steer"), {
       interval: 1,
     });
@@ -2253,8 +2490,8 @@ describe("runCodexAppServerAttempt", () => {
     );
     await waitForMethod("turn/start");
 
-    expect(queueAgentHarnessMessage("session-1", "first", { debounceMs: 5 })).toBe(true);
-    expect(queueAgentHarnessMessage("session-1", "second", { debounceMs: 5 })).toBe(true);
+    expect(queueActiveRunMessageForTest("session-1", "first", { debounceMs: 5 })).toBe(true);
+    expect(queueActiveRunMessageForTest("session-1", "second", { debounceMs: 5 })).toBe(true);
 
     await vi.waitFor(
       () =>
@@ -2286,7 +2523,9 @@ describe("runCodexAppServerAttempt", () => {
     );
     await waitForMethod("turn/start");
 
-    expect(queueAgentHarnessMessage("session-1", "late steer", { debounceMs: 30_000 })).toBe(true);
+    expect(queueActiveRunMessageForTest("session-1", "late steer", { debounceMs: 30_000 })).toBe(
+      true,
+    );
 
     await completeTurn({ threadId: "thread-1", turnId: "turn-1" });
     await run;
@@ -2311,12 +2550,12 @@ describe("runCodexAppServerAttempt", () => {
     );
     await waitForMethod("turn/start");
 
-    expect(queueAgentHarnessMessage("session-1", "first", { steeringMode: "one-at-a-time" })).toBe(
-      true,
-    );
-    expect(queueAgentHarnessMessage("session-1", "second", { steeringMode: "one-at-a-time" })).toBe(
-      true,
-    );
+    expect(
+      queueActiveRunMessageForTest("session-1", "first", { steeringMode: "one-at-a-time" }),
+    ).toBe(true);
+    expect(
+      queueActiveRunMessageForTest("session-1", "second", { steeringMode: "one-at-a-time" }),
+    ).toBe(true);
 
     await vi.waitFor(
       () =>
@@ -2416,7 +2655,7 @@ describe("runCodexAppServerAttempt", () => {
     });
 
     await vi.waitFor(() => expect(params.onBlockReply).toHaveBeenCalledTimes(1), { interval: 1 });
-    expect(queueAgentHarnessMessage("session-1", "2")).toBe(true);
+    expect(queueActiveRunMessageForTest("session-1", "2")).toBe(true);
     await expect(response).resolves.toEqual({
       answers: { mode: { answers: ["Deep"] } },
     });
@@ -2547,6 +2786,43 @@ describe("runCodexAppServerAttempt", () => {
     expect(result.assistantTexts).toEqual(["done from response"]);
     expect(result.aborted).toBe(false);
     expect(result.timedOut).toBe(false);
+  });
+
+  it("surfaces Codex-native image generation saved paths as reply media", async () => {
+    const harness = createStartedThreadHarness();
+    const params = createParams(
+      path.join(tempDir, "session.jsonl"),
+      path.join(tempDir, "workspace"),
+    );
+
+    const run = runCodexAppServerAttempt(params);
+    await harness.waitForMethod("turn/start");
+    await harness.notify({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        turn: {
+          id: "turn-1",
+          status: "completed",
+          items: [
+            {
+              type: "imageGeneration",
+              id: "ig_123",
+              status: "completed",
+              revisedPrompt: "A tiny blue square",
+              result: "Zm9v",
+              savedPath: "/tmp/codex-home/generated_images/session-1/ig_123.png",
+            },
+          ],
+        },
+      },
+    });
+
+    await expect(run).resolves.toMatchObject({
+      assistantTexts: [],
+      toolMediaUrls: ["/tmp/codex-home/generated_images/session-1/ig_123.png"],
+    });
   });
 
   it("does not complete on unscoped turn/completed notifications", async () => {
@@ -3227,7 +3503,7 @@ describe("runCodexAppServerAttempt", () => {
     await expect(runCodexAppServerAttempt(params, { startupTimeoutFloorMs: 1 })).rejects.toThrow(
       "codex app-server startup timed out",
     );
-    expect(queueAgentHarnessMessage("session-1", "after timeout")).toBe(false);
+    expect(queueActiveRunMessageForTest("session-1", "after timeout")).toBe(false);
   });
 
   it("passes the selected auth profile into app-server startup", async () => {
@@ -3289,7 +3565,7 @@ describe("runCodexAppServerAttempt", () => {
     params.timeoutMs = 1;
 
     await expect(runCodexAppServerAttempt(params)).rejects.toThrow("turn/start timed out");
-    expect(queueAgentHarnessMessage("session-1", "after timeout")).toBe(false);
+    expect(queueActiveRunMessageForTest("session-1", "after timeout")).toBe(false);
   });
 
   it("keeps extended history enabled when resuming a bound Codex thread", async () => {
@@ -3584,6 +3860,11 @@ describe("runCodexAppServerAttempt", () => {
       "features.codex_hooks": true,
       "hooks.PreToolUse": [],
     };
+    const expectedConfig = {
+      ...config,
+      "features.code_mode": true,
+      "features.code_mode_only": true,
+    };
 
     await startOrResumeThread({
       client: { request } as never,
@@ -3604,8 +3885,8 @@ describe("runCodexAppServerAttempt", () => {
 
     const requestCalls = request.mock.calls as unknown as Array<[string, { config?: unknown }]>;
     expect(requestCalls.map(([method]) => method)).toEqual(["thread/start", "thread/resume"]);
-    expect(requestCalls[0]?.[1].config).toEqual(config);
-    expect(requestCalls[1]?.[1].config).toEqual(config);
+    expect(requestCalls[0]?.[1].config).toEqual(expectedConfig);
+    expect(requestCalls[1]?.[1].config).toEqual(expectedConfig);
   });
 
   it("merges native hook relay config with plugin app config when starting a thread", async () => {
@@ -3649,6 +3930,8 @@ describe("runCodexAppServerAttempt", () => {
     expect(requestCalls.map(([method]) => method)).toEqual(["thread/start"]);
     expect(requestCalls[0]?.[1].config).toEqual({
       "features.codex_hooks": true,
+      "features.code_mode": true,
+      "features.code_mode_only": true,
       hooks: { PreToolUse: [] },
       ...createPluginAppConfigPatch(),
     });
@@ -3714,9 +3997,15 @@ describe("runCodexAppServerAttempt", () => {
     expect(requestCalls.map(([method]) => method)).toEqual(["thread/start", "thread/resume"]);
     expect(requestCalls[0]?.[1].config).toEqual({
       "features.codex_hooks": true,
+      "features.code_mode": true,
+      "features.code_mode_only": true,
       ...createPluginAppConfigPatch(),
     });
-    expect(requestCalls[1]?.[1].config).toEqual({ "features.codex_hooks": true });
+    expect(requestCalls[1]?.[1].config).toEqual({
+      "features.codex_hooks": true,
+      "features.code_mode": true,
+      "features.code_mode_only": true,
+    });
   });
 
   it("starts a new plugin app thread when full binding revalidation removes an app", async () => {
@@ -3772,6 +4061,8 @@ describe("runCodexAppServerAttempt", () => {
     const requestCalls = request.mock.calls as unknown as Array<[string, { config?: unknown }]>;
     expect(requestCalls.map(([method]) => method)).toEqual(["thread/start"]);
     expect(requestCalls[0]?.[1].config).toEqual({
+      "features.code_mode": true,
+      "features.code_mode_only": true,
       apps: {
         _default: {
           enabled: false,
@@ -3823,7 +4114,10 @@ describe("runCodexAppServerAttempt", () => {
 
     const requestCalls = request.mock.calls as unknown as Array<[string, { config?: unknown }]>;
     expect(requestCalls.map(([method]) => method)).toEqual(["thread/resume"]);
-    expect("config" in (requestCalls[0]?.[1] ?? {})).toBe(false);
+    expect(requestCalls[0]?.[1].config).toEqual({
+      "features.code_mode": true,
+      "features.code_mode_only": true,
+    });
     const binding = await readCodexAppServerBinding(sessionFile);
     expect(binding?.threadId).toBe("thread-existing");
     expect(binding?.pluginAppsFingerprint).toBe("plugin-apps-config-1");
@@ -3874,7 +4168,11 @@ describe("runCodexAppServerAttempt", () => {
     expect(buildPluginThreadConfig).toHaveBeenCalledTimes(1);
     const requestCalls = request.mock.calls as unknown as Array<[string, { config?: unknown }]>;
     expect(requestCalls.map(([method]) => method)).toEqual(["thread/start"]);
-    expect(requestCalls[0]?.[1].config).toEqual(createPluginAppConfigPatch());
+    expect(requestCalls[0]?.[1].config).toEqual({
+      ...createPluginAppConfigPatch(),
+      "features.code_mode": true,
+      "features.code_mode_only": true,
+    });
     const binding = await readCodexAppServerBinding(sessionFile);
     expect(binding?.threadId).toBe("thread-recovered");
     expect(binding?.pluginAppsFingerprint).toBe("plugin-apps-config-1");
@@ -3932,7 +4230,10 @@ describe("runCodexAppServerAttempt", () => {
     expect(buildPluginThreadConfig).toHaveBeenCalledTimes(1);
     const requestCalls = request.mock.calls as unknown as Array<[string, { config?: unknown }]>;
     expect(requestCalls.map(([method]) => method)).toEqual(["thread/resume"]);
-    expect("config" in (requestCalls[0]?.[1] ?? {})).toBe(false);
+    expect(requestCalls[0]?.[1].config).toEqual({
+      "features.code_mode": true,
+      "features.code_mode_only": true,
+    });
   });
 
   it("rebuilds a partial plugin app binding after another plugin recovers", async () => {
@@ -3979,7 +4280,11 @@ describe("runCodexAppServerAttempt", () => {
     expect(buildPluginThreadConfig).toHaveBeenCalledTimes(1);
     const requestCalls = request.mock.calls as unknown as Array<[string, { config?: unknown }]>;
     expect(requestCalls.map(([method]) => method)).toEqual(["thread/start"]);
-    expect(requestCalls[0]?.[1].config).toEqual(createTwoPluginAppConfigPatch());
+    expect(requestCalls[0]?.[1].config).toEqual({
+      ...createTwoPluginAppConfigPatch(),
+      "features.code_mode": true,
+      "features.code_mode_only": true,
+    });
     const binding = await readCodexAppServerBinding(sessionFile);
     expect(binding?.threadId).toBe("thread-recovered");
     expect(binding?.pluginAppsFingerprint).toBe("plugin-apps-config-2");
@@ -4035,7 +4340,11 @@ describe("runCodexAppServerAttempt", () => {
     expect(buildPluginThreadConfig).toHaveBeenCalledTimes(1);
     const requestCalls = request.mock.calls as unknown as Array<[string, { config?: unknown }]>;
     expect(requestCalls.map(([method]) => method)).toEqual(["thread/start"]);
-    expect(requestCalls[0]?.[1].config).toEqual(createTwoCalendarAppConfigPatch());
+    expect(requestCalls[0]?.[1].config).toEqual({
+      ...createTwoCalendarAppConfigPatch(),
+      "features.code_mode": true,
+      "features.code_mode_only": true,
+    });
     const binding = await readCodexAppServerBinding(sessionFile);
     expect(binding?.threadId).toBe("thread-recovered");
     expect(binding?.pluginAppsFingerprint).toBe("plugin-apps-config-calendar-2");
@@ -4078,7 +4387,11 @@ describe("runCodexAppServerAttempt", () => {
 
     const requestCalls = request.mock.calls as unknown as Array<[string, { config?: unknown }]>;
     expect(requestCalls.map(([method]) => method)).toEqual(["thread/start"]);
-    expect(requestCalls[0]?.[1].config).toEqual(createPluginAppConfigPatch());
+    expect(requestCalls[0]?.[1].config).toEqual({
+      ...createPluginAppConfigPatch(),
+      "features.code_mode": true,
+      "features.code_mode_only": true,
+    });
     const binding = await readCodexAppServerBinding(sessionFile);
     expect(binding?.threadId).toBe("thread-plugins");
     expect(binding?.pluginAppsFingerprint).toBe("plugin-apps-config-1");
@@ -4142,6 +4455,11 @@ describe("runCodexAppServerAttempt", () => {
       model: "gpt-5.4-codex",
       approvalPolicy: "on-request",
       approvalsReviewer: "guardian_subagent",
+      config: expect.objectContaining({
+        "features.codex_hooks": true,
+        "features.code_mode": true,
+        "features.code_mode_only": true,
+      }),
       sandbox: "danger-full-access",
       serviceTier: "priority",
       developerInstructions: expect.stringContaining(CODEX_GPT5_BEHAVIOR_CONTRACT),
@@ -4244,6 +4562,10 @@ describe("runCodexAppServerAttempt", () => {
       model: "gpt-5.4-codex",
       approvalPolicy: "on-request",
       approvalsReviewer: "guardian_subagent",
+      config: {
+        "features.code_mode": true,
+        "features.code_mode_only": true,
+      },
       sandbox: "danger-full-access",
       serviceTier: "flex",
       developerInstructions: expect.stringContaining(CODEX_GPT5_BEHAVIOR_CONTRACT),
@@ -4286,7 +4608,7 @@ describe("runCodexAppServerAttempt", () => {
       },
     });
     expect(buildTurnCollaborationMode(params).settings.developer_instructions).toContain(
-      "The purpose of heartbeats is to make you feel magical and proactive.",
+      "Use heartbeats to create useful proactive progress",
     );
     expect(buildTurnCollaborationMode(params).settings.developer_instructions).toContain(
       "If `heartbeat_respond` is not already available and `tool_search` is available",
