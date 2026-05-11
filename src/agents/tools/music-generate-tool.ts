@@ -562,9 +562,11 @@ export function createMusicGenerateTool(options?: {
   sandbox?: MusicGenerateSandboxConfig;
   fsPolicy?: ToolFsPolicy;
   scheduleBackgroundWork?: MusicGenerateBackgroundScheduler;
+  availabilityResolved?: boolean;
 }): AnyAgentTool | null {
   const cfg: OpenClawConfig = options?.config ?? getRuntimeConfig();
   if (
+    options?.availabilityResolved !== true &&
     !hasGenerationToolAvailability({
       cfg,
       agentDir: options?.agentDir,

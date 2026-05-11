@@ -197,6 +197,7 @@ describe("optional media tool factory planning", () => {
         authStore: createAuthStore(["github-copilot"]),
       }),
     ).toEqual({
+      image: false,
       imageGenerate: false,
       videoGenerate: false,
       musicGenerate: false,
@@ -223,6 +224,7 @@ describe("optional media tool factory planning", () => {
         authStore: createAuthStore(),
       }),
     ).toEqual({
+      image: false,
       imageGenerate: true,
       videoGenerate: true,
       musicGenerate: true,
@@ -242,6 +244,7 @@ describe("optional media tool factory planning", () => {
       },
     };
     const allowlistFromAlsoAllowOnlyPolicy = ["group:memory", DEFAULT_PLUGIN_TOOLS_ALLOWLIST_ENTRY];
+
     installSnapshot(config, []);
 
     expect(
@@ -251,6 +254,7 @@ describe("optional media tool factory planning", () => {
         toolAllowlist: allowlistFromAlsoAllowOnlyPolicy,
       }),
     ).toEqual({
+      image: false,
       imageGenerate: true,
       videoGenerate: true,
       musicGenerate: true,
@@ -269,6 +273,22 @@ describe("optional media tool factory planning", () => {
     expect(toolNames).toContain("video_generate");
     expect(toolNames).toContain("music_generate");
     expect(toolNames).toContain("pdf");
+  });
+
+  it("plans the image tool from already resolved vision evidence", () => {
+    const config: OpenClawConfig = {};
+    installSnapshot(config, []);
+
+    expect(
+      resolveOptionalMediaToolFactoryPlan({
+        config,
+        agentDir: "/tmp/openclaw-agent",
+        modelHasVision: true,
+        authStore: createAuthStore(),
+      }),
+    ).toMatchObject({
+      image: true,
+    });
   });
 
   it("keeps denylists authoritative when alsoAllow-only policies preserve factory construction", () => {
@@ -292,9 +312,51 @@ describe("optional media tool factory planning", () => {
         toolDenylist: ["video_generate", "pdf"],
       }),
     ).toEqual({
+      image: false,
       imageGenerate: true,
       videoGenerate: false,
       musicGenerate: true,
+      pdf: false,
+    });
+  });
+
+  it("does not plan the image tool without an agent directory", () => {
+    const config: OpenClawConfig = {};
+    installSnapshot(config, [
+      createPlugin({
+        id: "media-owner",
+        contracts: { mediaUnderstandingProviders: ["media-owner"] },
+        setupProviders: [{ id: "media-owner", envVars: ["MEDIA_OWNER_API_KEY"] }],
+      }),
+    ]);
+
+    expect(
+      resolveOptionalMediaToolFactoryPlan({
+        config,
+        authStore: createAuthStore(["media-owner"]),
+      }),
+    ).toMatchObject({
+      image: false,
+      pdf: true,
+    });
+  });
+
+  it("keeps model vision image planning when plugin tools are disabled", () => {
+    const config: OpenClawConfig = { plugins: { enabled: false } };
+    installSnapshot(config, []);
+
+    expect(
+      resolveOptionalMediaToolFactoryPlan({
+        config,
+        agentDir: "/tmp/openclaw-agent",
+        modelHasVision: true,
+        authStore: createAuthStore(),
+      }),
+    ).toEqual({
+      image: true,
+      imageGenerate: false,
+      videoGenerate: false,
+      musicGenerate: false,
       pdf: false,
     });
   });
@@ -321,6 +383,7 @@ describe("optional media tool factory planning", () => {
         toolAllowlist: ["image_generate"],
       }),
     ).toEqual({
+      image: false,
       imageGenerate: true,
       videoGenerate: false,
       musicGenerate: false,
@@ -350,6 +413,7 @@ describe("optional media tool factory planning", () => {
         toolDenylist: ["image_generate", "pdf"],
       }),
     ).toEqual({
+      image: false,
       imageGenerate: false,
       videoGenerate: false,
       musicGenerate: false,
@@ -407,6 +471,7 @@ describe("optional media tool factory planning", () => {
         toolDenylist: ["*_generate", "p*"],
       }),
     ).toEqual({
+      image: false,
       imageGenerate: false,
       videoGenerate: false,
       musicGenerate: false,
@@ -446,6 +511,7 @@ describe("optional media tool factory planning", () => {
         authStore: createAuthStore(["image-owner", "music-owner", "media-owner"]),
       }),
     ).toEqual({
+      image: false,
       imageGenerate: true,
       videoGenerate: true,
       musicGenerate: true,
@@ -530,6 +596,7 @@ describe("optional media tool factory planning", () => {
         ]),
       }),
     ).toEqual({
+      image: false,
       imageGenerate: true,
       videoGenerate: true,
       musicGenerate: true,
@@ -691,6 +758,7 @@ describe("optional media tool factory planning", () => {
         authStore: createAuthStore(),
       }),
     ).toEqual({
+      image: false,
       imageGenerate: false,
       videoGenerate: false,
       musicGenerate: false,
@@ -768,6 +836,7 @@ describe("optional media tool factory planning", () => {
         authStore: createAuthStore(),
       }),
     ).toEqual({
+      image: false,
       imageGenerate: false,
       videoGenerate: false,
       musicGenerate: false,
@@ -986,6 +1055,7 @@ describe("optional media tool factory planning", () => {
         authStore: createAuthStore(["external-image"]),
       }),
     ).toEqual({
+      image: false,
       imageGenerate: false,
       videoGenerate: false,
       musicGenerate: false,
@@ -1003,6 +1073,7 @@ describe("optional media tool factory planning", () => {
         authStore: createAuthStore(),
       }),
     ).toEqual({
+      image: false,
       imageGenerate: false,
       videoGenerate: false,
       musicGenerate: false,

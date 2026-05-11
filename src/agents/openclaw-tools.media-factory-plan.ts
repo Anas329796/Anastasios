@@ -10,12 +10,14 @@ import type { AuthProfileStore } from "./auth-profiles/types.js";
 import { isToolAllowedByPolicyName } from "./tool-policy-match.js";
 import { DEFAULT_PLUGIN_TOOLS_ALLOWLIST_ENTRY } from "./tool-policy.js";
 import {
+  getCurrentCapabilityMetadataSnapshot,
   hasSnapshotCapabilityAvailability,
   hasSnapshotProviderEnvAvailability,
   loadCapabilityMetadataSnapshot,
 } from "./tools/manifest-capability-availability.js";
 
 export type OptionalMediaToolFactoryPlan = {
+  image: boolean;
   imageGenerate: boolean;
   videoGenerate: boolean;
   musicGenerate: boolean;
@@ -104,25 +106,41 @@ export function resolveImageToolFactoryAvailable(params: {
   modelHasVision?: boolean;
   authStore?: AuthProfileStore;
 }): boolean {
+  const snapshot = loadCapabilityMetadataSnapshot({
+    config: params.config,
+  });
+  return resolveImageToolFactoryAvailableFromSnapshot({
+    ...params,
+    snapshot,
+  });
+}
+
+function resolveImageToolFactoryAvailableFromSnapshot(params: {
+  config?: OpenClawConfig;
+  agentDir?: string;
+  modelHasVision?: boolean;
+  authStore?: AuthProfileStore;
+  snapshot?: Pick<PluginMetadataSnapshot, "index" | "plugins">;
+}): boolean {
   if (!params.agentDir?.trim()) {
     return false;
   }
   if (params.modelHasVision || hasExplicitImageModelConfig(params.config)) {
     return true;
   }
-  const snapshot = loadCapabilityMetadataSnapshot({
-    config: params.config,
-  });
+  if (!params.snapshot) {
+    return false;
+  }
   return (
     hasSnapshotCapabilityAvailability({
-      snapshot,
+      snapshot: params.snapshot,
       authStore: params.authStore,
       key: "mediaUnderstandingProviders",
       config: params.config,
     }) ||
     hasConfiguredVisionModelAuthSignal({
       config: params.config,
-      snapshot,
+      snapshot: params.snapshot,
       authStore: params.authStore,
     })
   );
@@ -163,6 +181,8 @@ function hasConfiguredVisionModelAuthSignal(params: {
 
 export function resolveOptionalMediaToolFactoryPlan(params: {
   config?: OpenClawConfig;
+  agentDir?: string;
+  modelHasVision?: boolean;
   workspaceDir?: string;
   authStore?: AuthProfileStore;
   toolAllowlist?: string[];
@@ -198,24 +218,54 @@ export function resolveOptionalMediaToolFactoryPlan(params: {
   const explicitVideoGeneration = hasExplicitToolModelConfig(defaults?.videoGenerationModel);
   const explicitMusicGeneration = hasExplicitToolModelConfig(defaults?.musicGenerationModel);
   const explicitPdf = hasExplicitPdfModelConfig(params.config);
+  const snapshot =
+    params.config?.plugins?.enabled === false
+      ? undefined
+      : loadCapabilityMetadataSnapshot({
+          config: params.config,
+          ...(params.workspaceDir ? { workspaceDir: params.workspaceDir } : {}),
+        });
+  const imageSnapshot = getCurrentCapabilityMetadataSnapshot({ config: params.config }) ?? snapshot;
+  const image = imageSnapshot
+    ? resolveImageToolFactoryAvailableFromSnapshot({
+        config: params.config,
+        agentDir: params.agentDir,
+        modelHasVision: params.modelHasVision,
+        authStore: params.authStore,
+        snapshot: imageSnapshot,
+      })
+    : resolveImageToolFactoryAvailableFromSnapshot({
+        config: params.config,
+        agentDir: params.agentDir,
+        modelHasVision: params.modelHasVision,
+        authStore: params.authStore,
+      });
   if (params.config?.plugins?.enabled === false) {
     return {
+      image,
       imageGenerate: false,
       videoGenerate: false,
       musicGenerate: false,
       pdf: false,
     };
   }
-  const snapshot = loadCapabilityMetadataSnapshot({
-    config: params.config,
-    ...(params.workspaceDir ? { workspaceDir: params.workspaceDir } : {}),
-  });
+  if (!snapshot) {
+    return {
+      image,
+      imageGenerate: false,
+      videoGenerate: false,
+      musicGenerate: false,
+      pdf: false,
+    };
+  }
+  const availabilitySnapshot = snapshot;
   return {
+    image,
     imageGenerate:
       allowImageGenerate &&
       (explicitImageGeneration ||
         hasSnapshotCapabilityAvailability({
-          snapshot,
+          snapshot: availabilitySnapshot,
           authStore: params.authStore,
           key: "imageGenerationProviders",
           config: params.config,
@@ -224,7 +274,7 @@ export function resolveOptionalMediaToolFactoryPlan(params: {
       allowVideoGenerate &&
       (explicitVideoGeneration ||
         hasSnapshotCapabilityAvailability({
-          snapshot,
+          snapshot: availabilitySnapshot,
           authStore: params.authStore,
           key: "videoGenerationProviders",
           config: params.config,
@@ -233,7 +283,7 @@ export function resolveOptionalMediaToolFactoryPlan(params: {
       allowMusicGenerate &&
       (explicitMusicGeneration ||
         hasSnapshotCapabilityAvailability({
-          snapshot,
+          snapshot: availabilitySnapshot,
           authStore: params.authStore,
           key: "musicGenerationProviders",
           config: params.config,
@@ -242,14 +292,14 @@ export function resolveOptionalMediaToolFactoryPlan(params: {
       allowPdf &&
       (explicitPdf ||
         hasSnapshotCapabilityAvailability({
-          snapshot,
+          snapshot: availabilitySnapshot,
           authStore: params.authStore,
           key: "mediaUnderstandingProviders",
           config: params.config,
         }) ||
         hasConfiguredVisionModelAuthSignal({
           config: params.config,
-          snapshot,
+          snapshot: availabilitySnapshot,
           authStore: params.authStore,
         })),
   };
