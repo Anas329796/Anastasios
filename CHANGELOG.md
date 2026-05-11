@@ -50,6 +50,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- CLI/lazy-runtime: await dynamic-import-driven eager registration in `registerCommandGroups` so `OPENCLAW_DISABLE_LAZY_SUBCOMMANDS=1` actually works. The previous fire-and-forget `void entry.register(program)` returned before any sub-command handler was attached, so commander's subsequent `parseAsync` raced the imports and rejected legitimate calls with `error: too many arguments for '<group>'`. The fix propagates async through `registerBrowserCli`, `registerCoreCliCommands`, `registerSubCliCommands`, `registerProgramCommands`, and `buildProgram`; all CLI bootstrap callsites are already in await contexts (`startupTrace.measure(...)`), so there is no behavior change in lazy mode. Thanks @hanamizuki.
 - Infra/retry: keep jittered retry delays at or above server-supplied Retry-After lower bounds when the hint can be honored. Fixes #68541. (#68543) Thanks @Feelw00.
 - Redact persisted secret-shaped payloads [AI]. (#79006) Thanks @pgondhi987.
 - Agents: label `.openclaw/sandboxes` exec workdirs as sandbox runs in compact tool summaries instead of showing the full path.
