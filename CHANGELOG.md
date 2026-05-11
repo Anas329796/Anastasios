@@ -52,6 +52,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Discord/auto-thread-title: raise `DISCORD_THREAD_TITLE_MAX_TOKENS` from 512 to 4096 and `DEFAULT_THREAD_TITLE_TIMEOUT_MS` from 10 s to 60 s so reasoning models with sizable thinking budgets can emit a short title within budget. 512 still starved reasoning models when the thinking block alone exceeded the budget; 10 s missed ~15% of production samples (observed MiniMax M2.7 thinking latency p95 ≈ 17 s). Both headrooms are safe because `maybeRenameDiscordAutoThread` is fire-and-forget — a longer rename cannot block message delivery.
 - Infra/retry: keep jittered retry delays at or above server-supplied Retry-After lower bounds when the hint can be honored. Fixes #68541. (#68543) Thanks @Feelw00.
 - Redact persisted secret-shaped payloads [AI]. (#79006) Thanks @pgondhi987.
 - Agents: label `.openclaw/sandboxes` exec workdirs as sandbox runs in compact tool summaries instead of showing the full path.
