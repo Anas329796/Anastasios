@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => {
   return {
     stubTool,
     createCronToolOptions: vi.fn(),
+    createImageToolOptions: vi.fn(),
+    createPdfToolOptions: vi.fn(),
     textToSpeech: vi.fn(async () => ({
       success: true,
       audioPath: "/tmp/openclaw/tts-config-test.opus",
@@ -54,7 +56,10 @@ vi.mock("./tools/image-generate-tool.js", () => ({
 }));
 
 vi.mock("./tools/image-tool.js", () => ({
-  createImageTool: () => mocks.stubTool("image"),
+  createImageTool: (options: unknown) => {
+    mocks.createImageToolOptions(options);
+    return mocks.stubTool("image");
+  },
 }));
 
 vi.mock("./tools/message-tool.js", () => ({
@@ -70,7 +75,10 @@ vi.mock("./tools/nodes-tool.js", () => ({
 }));
 
 vi.mock("./tools/pdf-tool.js", () => ({
-  createPdfTool: () => mocks.stubTool("pdf"),
+  createPdfTool: (options: unknown) => {
+    mocks.createPdfToolOptions(options);
+    return mocks.stubTool("pdf");
+  },
 }));
 
 vi.mock("./tools/session-status-tool.js", () => ({
@@ -134,6 +142,8 @@ function getTextToSpeechParams() {
 describe("createOpenClawTools TTS config wiring", () => {
   beforeEach(() => {
     mocks.createCronToolOptions.mockClear();
+    mocks.createImageToolOptions.mockClear();
+    mocks.createPdfToolOptions.mockClear();
     mocks.textToSpeech.mockClear();
   });
 
@@ -219,6 +229,51 @@ describe("createOpenClawTools TTS config wiring", () => {
       const ttsParams = getTextToSpeechParams();
       expect(ttsParams?.text).toBe("hello from reader");
       expect(ttsParams?.agentId).toBe("reader");
+    } finally {
+      __testing.setDepsForTest();
+    }
+  });
+
+  it("passes session agent includedWorkDirs into image and PDF tools", async () => {
+    const includedDir = "/tmp/openclaw-included-media-root";
+    const injectedConfig = {
+      agents: {
+        defaults: {
+          pdfModel: { primary: "media-owner/model" },
+        },
+        list: [
+          {
+            id: "reader",
+            workspace: "/tmp/openclaw-reader-workspace",
+            includedWorkDirs: [includedDir],
+          },
+          { id: "main" },
+        ],
+      },
+    } satisfies OpenClawConfig;
+
+    const { __testing, createOpenClawTools } = await import("./openclaw-tools.js");
+    __testing.setDepsForTest({ config: injectedConfig });
+
+    try {
+      createOpenClawTools({
+        agentDir: "/tmp/openclaw-agent-reader",
+        agentSessionKey: "agent:reader:telegram:chat:123",
+        disableMessageTool: true,
+        disablePluginTools: true,
+        modelHasVision: true,
+      });
+
+      expect(mocks.createImageToolOptions).toHaveBeenCalledWith(
+        expect.objectContaining({
+          includedWorkDirs: [includedDir],
+        }),
+      );
+      expect(mocks.createPdfToolOptions).toHaveBeenCalledWith(
+        expect.objectContaining({
+          includedWorkDirs: [includedDir],
+        }),
+      );
     } finally {
       __testing.setDepsForTest();
     }

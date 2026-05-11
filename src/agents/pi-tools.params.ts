@@ -64,7 +64,7 @@ function isValidEditReplacement(value: unknown): value is EditReplacement {
   const record = value as Record<string, unknown>;
   return (
     typeof record.oldText === "string" &&
-    record.oldText.trim().length > 0 &&
+    record.oldText.length > 0 &&
     typeof record.newText === "string"
   );
 }

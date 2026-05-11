@@ -13,7 +13,7 @@ import {
   normalizeOptionalLowercaseString,
 } from "../shared/string-coerce.js";
 import { resolveGatewayMessageChannel } from "../utils/message-channel.js";
-import { resolveAgentConfig } from "./agent-scope.js";
+import { resolveAgentConfig, resolveAgentIncludedWorkDirs } from "./agent-scope.js";
 import { createApplyPatchTool } from "./apply-patch.js";
 import type { AuthProfileStore } from "./auth-profiles/types.js";
 import { describeExecTool, describeProcessTool } from "./bash-tools.descriptions.js";
@@ -49,7 +49,6 @@ import {
   createSandboxedWriteTool,
   getToolParamsRecord,
   wrapToolMemoryFlushAppendOnlyWrite,
-  wrapToolWorkspaceRootGuard,
   wrapToolWorkspaceRootGuardWithOptions,
   wrapToolParamValidation,
 } from "./pi-tools.read.js";
@@ -541,6 +540,8 @@ export function createOpenClawCodingTools(options?: {
   const fsPolicy = createToolFsPolicy({
     workspaceOnly: isMemoryFlushRun || fsConfig.workspaceOnly,
   });
+  const includedWorkDirs =
+    options?.config && agentId ? resolveAgentIncludedWorkDirs(options.config, agentId) : [];
   const sandboxRoot = sandbox?.workspaceDir;
   const sandboxFsBridge = sandbox?.fsBridge;
   const allowWorkspaceWrites = sandbox?.workspaceAccess !== "ro";
@@ -593,6 +594,7 @@ export function createOpenClawCodingTools(options?: {
             workspaceOnly
               ? wrapToolWorkspaceRootGuardWithOptions(sandboxed, sandboxRoot, {
                   containerWorkdir: sandbox.containerWorkdir,
+                  includedRoots: includedWorkDirs,
                 })
               : sandboxed,
           );
@@ -603,7 +605,13 @@ export function createOpenClawCodingTools(options?: {
           modelContextWindowTokens: options?.modelContextWindowTokens,
           imageSanitization,
         });
-        base.push(workspaceOnly ? wrapToolWorkspaceRootGuard(wrapped, workspaceRoot) : wrapped);
+        base.push(
+          workspaceOnly
+            ? wrapToolWorkspaceRootGuardWithOptions(wrapped, workspaceRoot, {
+                includedRoots: includedWorkDirs,
+              })
+            : wrapped,
+        );
         continue;
       }
       if (tool.name === "bash" || tool.name === execToolName) {
@@ -613,16 +621,34 @@ export function createOpenClawCodingTools(options?: {
         if (sandboxRoot) {
           continue;
         }
-        const wrapped = createHostWorkspaceWriteTool(workspaceRoot, { workspaceOnly });
-        base.push(workspaceOnly ? wrapToolWorkspaceRootGuard(wrapped, workspaceRoot) : wrapped);
+        const wrapped = createHostWorkspaceWriteTool(workspaceRoot, {
+          workspaceOnly,
+          allowedRoots: includedWorkDirs,
+        });
+        base.push(
+          workspaceOnly
+            ? wrapToolWorkspaceRootGuardWithOptions(wrapped, workspaceRoot, {
+                includedRoots: includedWorkDirs,
+              })
+            : wrapped,
+        );
         continue;
       }
       if (tool.name === "edit") {
         if (sandboxRoot) {
           continue;
         }
-        const wrapped = createHostWorkspaceEditTool(workspaceRoot, { workspaceOnly });
-        base.push(workspaceOnly ? wrapToolWorkspaceRootGuard(wrapped, workspaceRoot) : wrapped);
+        const wrapped = createHostWorkspaceEditTool(workspaceRoot, {
+          workspaceOnly,
+          allowedRoots: includedWorkDirs,
+        });
+        base.push(
+          workspaceOnly
+            ? wrapToolWorkspaceRootGuardWithOptions(wrapped, workspaceRoot, {
+                includedRoots: includedWorkDirs,
+              })
+            : wrapped,
+        );
         continue;
       }
       base.push(tool);
@@ -686,6 +712,7 @@ export function createOpenClawCodingTools(options?: {
             sandboxRoot && allowWorkspaceWrites
               ? { root: sandboxRoot, bridge: sandboxFsBridge! }
               : undefined,
+          allowedRoots: includedWorkDirs,
           workspaceOnly: applyPatchWorkspaceOnly,
         });
   options?.recordToolPrepStage?.("shell-tools");
@@ -771,6 +798,7 @@ export function createOpenClawCodingTools(options?: {
                   sandboxRoot,
                   {
                     containerWorkdir: sandbox.containerWorkdir,
+                    includedRoots: includedWorkDirs,
                   },
                 )
               : createSandboxedEditTool({ root: sandboxRoot, bridge: sandboxFsBridge! }),
@@ -780,6 +808,7 @@ export function createOpenClawCodingTools(options?: {
                   sandboxRoot,
                   {
                     containerWorkdir: sandbox.containerWorkdir,
+                    includedRoots: includedWorkDirs,
                   },
                 )
               : createSandboxedWriteTool({ root: sandboxRoot, bridge: sandboxFsBridge! }),
@@ -806,6 +835,7 @@ export function createOpenClawCodingTools(options?: {
           agentGroupSpace: options?.groupSpace ?? null,
           agentMemberRoleIds: options?.memberRoleIds,
           agentDir: options?.agentDir,
+          includedWorkDirs,
           sandboxRoot,
           sandboxContainerWorkdir: sandbox?.containerWorkdir,
           sandboxFsBridge,

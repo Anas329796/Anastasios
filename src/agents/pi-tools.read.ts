@@ -10,7 +10,7 @@ import { hasEncodedFileUrlSeparator, trySafeFileURLToPath } from "../infra/local
 import { detectMime } from "../media/mime.js";
 import { sniffMimeFromBase64 } from "../media/sniff-mime-from-base64.js";
 import type { ImageSanitizationLimits } from "./image-sanitization.js";
-import { toRelativeWorkspacePath } from "./path-policy.js";
+import { normalizeBoundaryRoots, resolvePathWithinRoots } from "./path-policy.js";
 import { wrapEditToolWithRecovery } from "./pi-tools.host-edit.js";
 import {
   REQUIRED_PARAM_GROUPS,
@@ -579,10 +579,12 @@ export function wrapToolWorkspaceRootGuardWithOptions(
     containerWorkdir?: string;
     pathParamKeys?: readonly string[];
     normalizeGuardedPathParams?: boolean;
+    includedRoots?: string[];
   },
 ): AnyAgentTool {
   const pathParamKeys =
     options?.pathParamKeys && options.pathParamKeys.length > 0 ? options.pathParamKeys : ["path"];
+  const allowedRoots = normalizeBoundaryRoots([root, ...(options?.includedRoots ?? [])]);
   return {
     ...tool,
     execute: async (toolCallId, args, signal, onUpdate) => {
@@ -598,10 +600,25 @@ export function wrapToolWorkspaceRootGuardWithOptions(
           root,
           containerWorkdir: options?.containerWorkdir,
         });
-        const sandboxResult = await assertSandboxPath({ filePath: sandboxPath, cwd: root, root });
+        let guardedPath = sandboxPath;
+        if (allowedRoots.length <= 1) {
+          const sandboxResult = await assertSandboxPath({ filePath: sandboxPath, cwd: root, root });
+          guardedPath = sandboxResult.resolved;
+        } else {
+          const match = resolvePathWithinRoots(allowedRoots, sandboxPath, {
+            cwd: root,
+            boundaryLabel: "allowed work roots",
+          });
+          const sandboxResult = await assertSandboxPath({
+            filePath: match.resolved,
+            cwd: match.root,
+            root: match.root,
+          });
+          guardedPath = sandboxResult.resolved;
+        }
         if (options?.normalizeGuardedPathParams && record) {
           normalizedRecord ??= { ...record };
-          normalizedRecord[key] = sandboxResult.resolved;
+          normalizedRecord[key] = guardedPath;
         }
       }
       return tool.execute(toolCallId, normalizedRecord ?? args, signal, onUpdate);
@@ -615,6 +632,153 @@ type SandboxToolParams = {
   modelContextWindowTokens?: number;
   imageSanitization?: ImageSanitizationLimits;
 };
+
+type EditReplacement = {
+  oldText: string;
+  newText: string;
+};
+
+type ToolSchemaRecord = Record<string, unknown>;
+
+function readEditReplacements(params: unknown): { path?: string; edits: EditReplacement[] } {
+  const record = getToolParamsRecord(params);
+  const pathParam = typeof record?.path === "string" ? record.path : undefined;
+  const edits = Array.isArray(record?.edits)
+    ? record.edits.flatMap((entry) => {
+        if (!entry || typeof entry !== "object") {
+          return [];
+        }
+        const replacement = entry as Record<string, unknown>;
+        if (
+          typeof replacement.oldText !== "string" ||
+          replacement.oldText.length === 0 ||
+          typeof replacement.newText !== "string"
+        ) {
+          return [];
+        }
+        return [{ oldText: replacement.oldText, newText: replacement.newText }];
+      })
+    : [];
+  return { path: pathParam, edits };
+}
+
+function readToolParameterSchema(tool: AnyAgentTool): ToolSchemaRecord | undefined {
+  return getToolParamsRecord(tool.parameters);
+}
+
+function readToolSchemaProperties(schema: ToolSchemaRecord | undefined): ToolSchemaRecord | undefined {
+  return getToolParamsRecord(schema?.properties);
+}
+
+function toolAcceptsCanonicalEditParams(tool: AnyAgentTool): boolean {
+  const schema = readToolParameterSchema(tool);
+  const properties = readToolSchemaProperties(schema);
+  const required = Array.isArray(schema?.required) ? schema.required : [];
+  return (
+    (properties && Object.prototype.hasOwnProperty.call(properties, "edits")) ||
+      required.includes("edits")
+  );
+}
+
+function toolAcceptsLegacySingleEditParams(tool: AnyAgentTool): boolean {
+  const schema = readToolParameterSchema(tool);
+  const properties = readToolSchemaProperties(schema);
+  const required = new Set(Array.isArray(schema?.required) ? schema.required : []);
+  return (
+    (properties &&
+      Object.prototype.hasOwnProperty.call(properties, "oldText") &&
+      Object.prototype.hasOwnProperty.call(properties, "newText")) ||
+      (required.has("oldText") && required.has("newText"))
+  );
+}
+
+function buildCanonicalEditParameters(tool: AnyAgentTool) {
+  const schema = readToolParameterSchema(tool);
+  if (!schema) {
+    return undefined;
+  }
+  const sourceProperties = readToolSchemaProperties(schema);
+  const properties = sourceProperties ? { ...sourceProperties } : {};
+  const oldTextSchema = properties.oldText;
+  const newTextSchema = properties.newText;
+  delete properties.oldText;
+  delete properties.newText;
+  properties.edits = {
+    type: "array",
+    minItems: 1,
+    description: "Exact text replacements to apply in order.",
+    items: {
+      type: "object",
+      required: ["oldText", "newText"],
+      properties: {
+        oldText:
+          oldTextSchema && typeof oldTextSchema === "object"
+            ? oldTextSchema
+            : {
+                type: "string",
+                description: "Exact text to find and replace (must match exactly)",
+              },
+        newText:
+          newTextSchema && typeof newTextSchema === "object"
+            ? newTextSchema
+            : {
+                type: "string",
+                description: "New text to replace the old text with",
+              },
+      },
+    },
+  } satisfies ToolSchemaRecord;
+  const required = new Set(Array.isArray(schema.required) ? schema.required : []);
+  required.delete("oldText");
+  required.delete("newText");
+  required.add("path");
+  required.add("edits");
+  return {
+    ...schema,
+    properties,
+    required: [...required],
+  } satisfies ToolSchemaRecord;
+}
+
+function wrapCanonicalEditExecution(base: AnyAgentTool): AnyAgentTool {
+  if (toolAcceptsCanonicalEditParams(base)) {
+    return base;
+  }
+  if (!toolAcceptsLegacySingleEditParams(base)) {
+    return base;
+  }
+
+  const parameters = buildCanonicalEditParameters(base);
+  return {
+    ...base,
+    ...(parameters ? { parameters } : {}),
+    execute: async (toolCallId, params, signal, onUpdate) => {
+      const { path: pathParam, edits } = readEditReplacements(params);
+      if (!pathParam || edits.length === 0) {
+        return base.execute(toolCallId, params, signal, onUpdate);
+      }
+
+      let result;
+      for (const edit of edits) {
+        result = await base.execute(
+          toolCallId,
+          {
+            path: pathParam,
+            oldText: edit.oldText,
+            newText: edit.newText,
+          },
+          signal,
+          onUpdate,
+        );
+      }
+
+      if (!result) {
+        throw new Error("Missing edit operations.");
+      }
+      return result;
+    },
+  };
+}
 
 export function createSandboxedReadTool(params: SandboxToolParams) {
   const base = createReadTool(params.root, {
@@ -634,9 +798,11 @@ export function createSandboxedWriteTool(params: SandboxToolParams) {
 }
 
 export function createSandboxedEditTool(params: SandboxToolParams) {
-  const base = createEditTool(params.root, {
-    operations: createSandboxEditOperations(params),
-  }) as unknown as AnyAgentTool;
+  const base = wrapCanonicalEditExecution(
+    createEditTool(params.root, {
+      operations: createSandboxEditOperations(params),
+    }) as unknown as AnyAgentTool,
+  );
   const withRecovery = wrapEditToolWithRecovery(base, {
     root: params.root,
     readFile: async (absolutePath: string) =>
@@ -645,20 +811,28 @@ export function createSandboxedEditTool(params: SandboxToolParams) {
   return wrapToolParamValidation(withRecovery, REQUIRED_PARAM_GROUPS.edit);
 }
 
-export function createHostWorkspaceWriteTool(root: string, options?: { workspaceOnly?: boolean }) {
+export function createHostWorkspaceWriteTool(
+  root: string,
+  options?: { workspaceOnly?: boolean; allowedRoots?: readonly string[] },
+) {
   const base = createWriteTool(root, {
     operations: createHostWriteOperations(root, options),
   }) as unknown as AnyAgentTool;
   return wrapToolParamValidation(base, REQUIRED_PARAM_GROUPS.write);
 }
 
-export function createHostWorkspaceEditTool(root: string, options?: { workspaceOnly?: boolean }) {
-  const base = createEditTool(root, {
-    operations: createHostEditOperations(root, options),
-  }) as unknown as AnyAgentTool;
+export function createHostWorkspaceEditTool(
+  root: string,
+  options?: { workspaceOnly?: boolean; allowedRoots?: readonly string[] },
+) {
+  const base = wrapCanonicalEditExecution(
+    createEditTool(root, {
+      operations: createHostEditOperations(root, options),
+    }) as unknown as AnyAgentTool,
+  );
   const withRecovery = wrapEditToolWithRecovery(base, {
     root,
-    readFile: (absolutePath: string) => fs.readFile(absolutePath, "utf-8"),
+    readFile: (absolutePath: string) => readHostEditRecoveryFile(root, absolutePath, options),
   });
   return wrapToolParamValidation(withRecovery, REQUIRED_PARAM_GROUPS.edit);
 }
@@ -746,7 +920,46 @@ async function writeHostFile(absolutePath: string, content: string) {
   await fs.writeFile(resolved, content, "utf-8");
 }
 
-function createHostWriteOperations(root: string, options?: { workspaceOnly?: boolean }) {
+async function readHostEditRecoveryFile(
+  root: string,
+  absolutePath: string,
+  options?: { workspaceOnly?: boolean; allowedRoots?: readonly string[] },
+): Promise<string> {
+  if (options?.workspaceOnly !== true) {
+    return await fs.readFile(path.resolve(absolutePath), "utf-8");
+  }
+  const target = resolveHostBoundaryTarget({
+    root,
+    candidate: absolutePath,
+    allowedRoots: options?.allowedRoots,
+  });
+  const safeRead = await (await fsRoot(target.rootDir)).read(target.relativePath);
+  return safeRead.buffer.toString("utf-8");
+}
+
+function resolveHostBoundaryTarget(params: {
+  root: string;
+  candidate: string;
+  allowedRoots?: readonly string[];
+  allowRoot?: boolean;
+}): { rootDir: string; relativePath: string } {
+  const boundaryRoots = normalizeBoundaryRoots([params.root, ...(params.allowedRoots ?? [])]);
+  const boundaryLabel = boundaryRoots.length > 1 ? "allowed work roots" : "workspace root";
+  const match = resolvePathWithinRoots(boundaryRoots, params.candidate, {
+    cwd: params.root,
+    allowRoot: params.allowRoot,
+    boundaryLabel,
+  });
+  return {
+    rootDir: match.root,
+    relativePath: match.relative,
+  };
+}
+
+function createHostWriteOperations(
+  root: string,
+  options?: { workspaceOnly?: boolean; allowedRoots?: readonly string[] },
+) {
   const workspaceOnly = options?.workspaceOnly ?? false;
 
   if (!workspaceOnly) {
@@ -761,22 +974,40 @@ function createHostWriteOperations(root: string, options?: { workspaceOnly?: boo
   }
 
   // When workspaceOnly is true, enforce workspace boundary
-  const rootPromise = fsRoot(root);
   return {
     mkdir: async (dir: string) => {
-      const relative = toRelativeWorkspacePath(root, dir, { allowRoot: true });
-      const resolved = relative ? path.resolve(root, relative) : path.resolve(root);
-      await assertSandboxPath({ filePath: resolved, cwd: root, root });
-      await fs.mkdir(resolved, { recursive: true });
+      const target = resolveHostBoundaryTarget({
+        root,
+        candidate: dir,
+        allowedRoots: options?.allowedRoots,
+        allowRoot: true,
+      });
+      const rootHandle = await fsRoot(target.rootDir);
+      if (target.relativePath === "" || target.relativePath === ".") {
+        await rootHandle.ensureRoot();
+        return;
+      }
+      await runHostBoundaryOperation(dir, () => rootHandle.mkdir(target.relativePath));
     },
     writeFile: async (absolutePath: string, content: string) => {
-      const relative = toRelativeWorkspacePath(root, absolutePath);
-      await (await rootPromise).write(relative, content, { mkdir: true });
+      const target = resolveHostBoundaryTarget({
+        root,
+        candidate: absolutePath,
+        allowedRoots: options?.allowedRoots,
+      });
+      await runHostBoundaryOperation(absolutePath, () =>
+        fsRoot(target.rootDir).then((rootHandle) =>
+          rootHandle.write(target.relativePath, content, { mkdir: true }),
+        ),
+      );
     },
   } as const;
 }
 
-function createHostEditOperations(root: string, options?: { workspaceOnly?: boolean }) {
+function createHostEditOperations(
+  root: string,
+  options?: { workspaceOnly?: boolean; allowedRoots?: readonly string[] },
+) {
   const workspaceOnly = options?.workspaceOnly ?? false;
 
   if (!workspaceOnly) {
@@ -795,21 +1026,38 @@ function createHostEditOperations(root: string, options?: { workspaceOnly?: bool
   }
 
   // When workspaceOnly is true, enforce workspace boundary
-  const rootPromise = fsRoot(root);
   return {
     readFile: async (absolutePath: string) => {
-      const relative = toRelativeWorkspacePath(root, absolutePath);
-      const safeRead = await (await rootPromise).read(relative);
+      const target = resolveHostBoundaryTarget({
+        root,
+        candidate: absolutePath,
+        allowedRoots: options?.allowedRoots,
+      });
+      const safeRead = await runHostBoundaryOperation(absolutePath, () =>
+        fsRoot(target.rootDir).then((rootHandle) => rootHandle.read(target.relativePath)),
+      );
       return safeRead.buffer;
     },
     writeFile: async (absolutePath: string, content: string) => {
-      const relative = toRelativeWorkspacePath(root, absolutePath);
-      await (await rootPromise).write(relative, content, { mkdir: true });
+      const target = resolveHostBoundaryTarget({
+        root,
+        candidate: absolutePath,
+        allowedRoots: options?.allowedRoots,
+      });
+      await runHostBoundaryOperation(absolutePath, () =>
+        fsRoot(target.rootDir).then((rootHandle) =>
+          rootHandle.write(target.relativePath, content, { mkdir: true }),
+        ),
+      );
     },
     access: async (absolutePath: string) => {
-      let relative: string;
+      let target: { rootDir: string; relativePath: string };
       try {
-        relative = toRelativeWorkspacePath(root, absolutePath);
+        target = resolveHostBoundaryTarget({
+          root,
+          candidate: absolutePath,
+          allowedRoots: options?.allowedRoots,
+        });
       } catch {
         // Path escapes workspace root.  Don't throw here – the upstream
         // library replaces any `access` error with a misleading "File not
@@ -819,13 +1067,13 @@ function createHostEditOperations(root: string, options?: { workspaceOnly?: bool
         return;
       }
       try {
-        const opened = await (await rootPromise).open(relative);
+        const opened = await (await fsRoot(target.rootDir)).open(target.relativePath);
         await opened.handle.close().catch(() => {});
       } catch (error) {
-        if (error instanceof FsSafeError && error.code === "not-found") {
+        if (isFsSafeErrorCode(error, "not-found")) {
           throw createFsAccessError("ENOENT", absolutePath);
         }
-        if (error instanceof FsSafeError && error.code === "outside-workspace") {
+        if (isFsSafeErrorCode(error, "outside-workspace") || isFsSafeErrorCode(error, "not-file")) {
           // Don't throw here – see the comment above about the upstream
           // library swallowing access errors as "File not found".
           return;
@@ -834,6 +1082,24 @@ function createHostEditOperations(root: string, options?: { workspaceOnly?: bool
       }
     },
   } as const;
+}
+
+async function runHostBoundaryOperation<T>(
+  filePath: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (isFsSafeErrorCode(error, "outside-workspace") || isFsSafeErrorCode(error, "not-file")) {
+      throw new Error(`Path alias escape blocked: ${filePath}`, { cause: error });
+    }
+    throw error;
+  }
+}
+
+function isFsSafeErrorCode(error: unknown, code: string): boolean {
+  return error instanceof FsSafeError && (error as { code?: unknown }).code === code;
 }
 
 function createFsAccessError(code: string, filePath: string): NodeJS.ErrnoException {

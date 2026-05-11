@@ -9,7 +9,11 @@ import {
 } from "../secrets/runtime.js";
 import { normalizeDeliveryContext } from "../utils/delivery-context.js";
 import type { GatewayMessageChannel } from "../utils/message-channel.js";
-import { resolveAgentWorkspaceDir, resolveSessionAgentIds } from "./agent-scope.js";
+import {
+  resolveAgentIncludedWorkDirs,
+  resolveAgentWorkspaceDir,
+  resolveSessionAgentIds,
+} from "./agent-scope.js";
 import type { AuthProfileStore } from "./auth-profiles/types.js";
 import { resolveOpenClawPluginToolsForOptions } from "./openclaw-plugin-tools.js";
 import {
@@ -86,6 +90,7 @@ export function createOpenClawTools(
     /** Thread/topic identifier for routing replies to the originating thread. */
     agentThreadId?: string | number;
     agentDir?: string;
+    includedWorkDirs?: string[];
     sandboxRoot?: string;
     sandboxContainerWorkdir?: string;
     sandboxFsBridge?: SandboxFsBridge;
@@ -179,6 +184,9 @@ export function createOpenClawTools(
   const spawnWorkspaceDir = resolveWorkspaceRoot(
     options?.spawnWorkspaceDir ?? options?.workspaceDir ?? inferredWorkspaceDir,
   );
+  const includedWorkDirs =
+    options?.includedWorkDirs ??
+    (resolvedConfig ? resolveAgentIncludedWorkDirs(resolvedConfig, sessionAgentId) : []);
   options?.recordToolPrepStage?.("openclaw-tools:session-workspace");
   const deliveryContext = normalizeDeliveryContext({
     channel: options?.agentChannel,
@@ -210,6 +218,7 @@ export function createOpenClawTools(
         agentDir: imageToolAgentDir!,
         authProfileStore: options?.authProfileStore,
         workspaceDir,
+        includedWorkDirs,
         sandbox,
         fsPolicy: options?.fsPolicy,
         modelHasVision: options?.modelHasVision,
@@ -261,6 +270,7 @@ export function createOpenClawTools(
           agentDir: options.agentDir,
           authProfileStore: options?.authProfileStore,
           workspaceDir,
+          includedWorkDirs,
           sandbox,
           fsPolicy: options?.fsPolicy,
           deferAutoModelResolution: true,

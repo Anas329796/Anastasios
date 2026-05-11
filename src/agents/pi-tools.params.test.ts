@@ -82,6 +82,35 @@ describe("assertRequiredParams", () => {
     );
   });
 
+  it("accepts whitespace-only canonical edit targets", async () => {
+    const execute = vi.fn(async (_id, args) => args);
+    const tool = wrapToolParamValidation(
+      {
+        name: "edit",
+        label: "edit",
+        description: "test",
+        parameters: {},
+        execute,
+      },
+      REQUIRED_PARAM_GROUPS.edit,
+    );
+
+    await tool.execute("tool-1", {
+      path: "indent.txt",
+      edits: [{ oldText: "  ", newText: "    " }],
+    });
+
+    expect(execute).toHaveBeenCalledWith(
+      "tool-1",
+      {
+        path: "indent.txt",
+        edits: [{ oldText: "  ", newText: "    " }],
+      },
+      undefined,
+      undefined,
+    );
+  });
+
   it("excludes null and undefined values from received hint", () => {
     expect(() =>
       assertRequiredParams(
