@@ -52,7 +52,14 @@ describe("policy commands", () => {
     expect(exitCode).toBe(0);
     const parsed = JSON.parse(output.at(-1) ?? "{}");
     const policyHash = policyDocumentHash(policy);
-    const evidence = { channels: [], tools: [] };
+    const evidence = {
+      channels: [],
+      mcpServers: [],
+      modelProviders: [],
+      modelRefs: [],
+      network: [],
+      tools: [],
+    };
     const workspaceHash = policyWorkspaceHash(evidence);
     const findingsHash = policyFindingsHash([]);
     expect(typeof parsed.attestation.checkedAt).toBe("string");
@@ -110,6 +117,10 @@ describe("policy commands", () => {
       ok: true,
       evidence: {
         channels: [],
+        mcpServers: [],
+        modelProviders: [],
+        modelRefs: [],
+        network: [],
       },
       findings: [],
     });
