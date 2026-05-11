@@ -48,6 +48,8 @@ const DISCORD_REALTIME_FORCED_CONSULT_FALLBACK_DELAY_MS = 200;
 const REALTIME_PCM16_BYTES_PER_SAMPLE = 2;
 const DISCORD_RAW_PCM_FRAME_BYTES = 3_840;
 const DISCORD_REALTIME_OUTPUT_PREROLL_FRAMES = 25;
+const DISCORD_REALTIME_TRAILING_SILENCE_MIN_MS = 700;
+const DISCORD_REALTIME_TRAILING_SILENCE_MAX_MS = 3_000;
 const DISCORD_REALTIME_FORCED_CONSULT_TRAILING_FRAGMENT_WORDS = new Set([
   "a",
   "about",
@@ -152,6 +154,14 @@ function formatRealtimeInterruptionLog(event: RealtimeVoiceBridgeEvent): string 
     }
   }
   return undefined;
+}
+
+function isRealtimeResponseCancelled(event: RealtimeVoiceBridgeEvent): boolean {
+  return (
+    event.direction === "server" &&
+    (event.type === "response.cancelled" ||
+      (event.type === "response.done" && event.detail?.includes("status=cancelled") === true))
+  );
 }
 
 function shouldLogRealtimeVerboseEvent(event: RealtimeVoiceBridgeEvent): boolean {
@@ -452,7 +462,9 @@ export class DiscordRealtimeVoiceSession implements VoiceRealtimeSession {
           if (this.exactSpeechResponseActive && !this.exactSpeechAudioStarted) {
             this.completeExactSpeechResponse(event.type);
           }
-          this.finishOutputAudioStream(event.type);
+          this.finishOutputAudioStream(event.type, {
+            playBuffered: !isRealtimeResponseCancelled(event),
+          });
         }
         const interruptionLog = formatRealtimeInterruptionLog(event);
         if (interruptionLog) {
@@ -697,7 +709,10 @@ export class DiscordRealtimeVoiceSession implements VoiceRealtimeSession {
     stream?.destroy();
   }
 
-  private finishOutputAudioStream(reason: string): void {
+  private finishOutputAudioStream(
+    reason: string,
+    { playBuffered = true }: { playBuffered?: boolean } = {},
+  ): void {
     const stream = this.outputStream;
     if (!stream || stream.destroyed || this.outputStreamEnding) {
       return;
@@ -706,7 +721,13 @@ export class DiscordRealtimeVoiceSession implements VoiceRealtimeSession {
     logger.info(
       `discord voice: realtime audio playback finishing reason=${reason} guild=${this.params.entry.guildId} channel=${this.params.entry.channelId} audioMs=${Math.floor(this.outputAudioTimestampMs)} chunks=${this.outputAudioChunks}`,
     );
-    this.startOutputPlayback(stream);
+    if (playBuffered) {
+      this.startOutputPlayback(stream);
+    } else {
+      this.resetOutputStream(reason);
+      this.params.entry.player.stop(true);
+      return;
+    }
     stream.end();
   }
 
@@ -813,10 +834,14 @@ export class DiscordRealtimeVoiceSession implements VoiceRealtimeSession {
     }
     const providerId = this.realtimeProviderId ?? this.realtimeConfig?.provider ?? "openai";
     const providerConfig = this.realtimeConfig?.providers?.[providerId];
-    const configuredSilenceDurationMs = providerConfig?.silenceDurationMs;
-    const silenceMs = Math.max(
-      700,
-      typeof configuredSilenceDurationMs === "number" ? configuredSilenceDurationMs : 0,
+    const rawSilenceDurationMs = providerConfig?.silenceDurationMs;
+    const configuredSilenceDurationMs =
+      typeof rawSilenceDurationMs === "number" && Number.isFinite(rawSilenceDurationMs)
+        ? rawSilenceDurationMs
+        : 0;
+    const silenceMs = Math.min(
+      DISCORD_REALTIME_TRAILING_SILENCE_MAX_MS,
+      Math.max(DISCORD_REALTIME_TRAILING_SILENCE_MIN_MS, configuredSilenceDurationMs),
     );
     const silenceBytes =
       Math.ceil((REALTIME_VOICE_AUDIO_FORMAT_PCM16_24KHZ.sampleRateHz * silenceMs) / 1_000) *
