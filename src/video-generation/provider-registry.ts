@@ -28,7 +28,7 @@ function resolvePluginVideoGenerationProviders(
   });
 }
 
-function buildProviderMaps(cfg?: OpenClawConfig): {
+function buildProviderMaps(providers: Iterable<VideoGenerationProviderPlugin>): {
   canonical: Map<string, VideoGenerationProviderPlugin>;
   aliases: Map<string, VideoGenerationProviderPlugin>;
 } {
@@ -49,29 +49,50 @@ function buildProviderMaps(cfg?: OpenClawConfig): {
     }
   };
 
-  for (const provider of BUILTIN_VIDEO_GENERATION_PROVIDERS) {
-    register(provider);
-  }
-  for (const provider of resolvePluginVideoGenerationProviders(cfg)) {
+  for (const provider of providers) {
     register(provider);
   }
 
   return { canonical, aliases };
 }
 
+export function createVideoGenerationProviderRegistry(
+  providers: Iterable<VideoGenerationProviderPlugin>,
+): {
+  listProviders: () => VideoGenerationProviderPlugin[];
+  getProvider: (providerId: string | undefined) => VideoGenerationProviderPlugin | undefined;
+} {
+  const maps = buildProviderMaps(providers);
+  return {
+    listProviders: () => [...maps.canonical.values()],
+    getProvider: (providerId) => {
+      const normalized = normalizeVideoGenerationProviderId(providerId);
+      if (!normalized) {
+        return undefined;
+      }
+      return maps.aliases.get(normalized);
+    },
+  };
+}
+
+function resolveVideoGenerationProviderRegistry(
+  cfg?: OpenClawConfig,
+): ReturnType<typeof createVideoGenerationProviderRegistry> {
+  return createVideoGenerationProviderRegistry([
+    ...BUILTIN_VIDEO_GENERATION_PROVIDERS,
+    ...resolvePluginVideoGenerationProviders(cfg),
+  ]);
+}
+
 export function listVideoGenerationProviders(
   cfg?: OpenClawConfig,
 ): VideoGenerationProviderPlugin[] {
-  return [...buildProviderMaps(cfg).canonical.values()];
+  return resolveVideoGenerationProviderRegistry(cfg).listProviders();
 }
 
 export function getVideoGenerationProvider(
   providerId: string | undefined,
   cfg?: OpenClawConfig,
 ): VideoGenerationProviderPlugin | undefined {
-  const normalized = normalizeVideoGenerationProviderId(providerId);
-  if (!normalized) {
-    return undefined;
-  }
-  return buildProviderMaps(cfg).aliases.get(normalized);
+  return resolveVideoGenerationProviderRegistry(cfg).getProvider(providerId);
 }
