@@ -187,7 +187,7 @@ function buildFallbackStateMismatchError(details: ConnectPairingRequiredDetails)
 }
 
 async function buildStaleApproveRequestIdError(
-  opts: DevicesRpcOpts,
+  _opts: DevicesRpcOpts,
   staleRequestId: string,
 ): Promise<Error> {
   const lines = [
@@ -196,15 +196,26 @@ async function buildStaleApproveRequestIdError(
   ];
   try {
     const list = await listDevicePairing();
-    const latest = selectLatestPendingRequest(list.pending);
-    if (latest?.requestId && latest.requestId !== staleRequestId) {
-      lines.push(
-        `Most recent pending request in this profile: ${latest.requestId}.`,
-        `Rerun: ${buildExplicitApproveCommand(opts, latest.requestId)}`,
-      );
-    } else {
+    const otherPending = (list.pending ?? []).filter(
+      (entry) => normalizeOptionalString(entry.requestId) && entry.requestId !== staleRequestId,
+    );
+    // The freshest pending entry is not necessarily the replacement for the
+    // stale id — TTL prune or profile/state mismatch can leave an unrelated
+    // request as the only visible one, and a multi-device profile can mix
+    // requests from agents the operator did not type the command for. Always
+    // route the operator through `openclaw devices list` so they can verify
+    // the deviceId and scopes before approving anything, instead of printing
+    // a direct rerun the operator might copy uncritically.
+    if (otherPending.length === 0) {
       lines.push(
         "No other pending requests are visible in this profile. List pending requests with: openclaw devices list",
+      );
+    } else {
+      const count = otherPending.length;
+      const label = count === 1 ? "request is" : "requests are";
+      lines.push(
+        `${count} other pending ${label} visible in this profile. Inspect device id and requested scopes before approving:`,
+        "  openclaw devices list",
       );
     }
   } catch {
