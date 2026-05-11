@@ -348,7 +348,7 @@ describe("resolveOutboundSessionRoute", () => {
       },
     },
     {
-      name: "FallbackChat space-style target",
+      name: "FallbackChat plugin parser classifies space-style target",
       cfg: baseConfig,
       channel: "fallbackchat",
       target: "spaces/AAA",
