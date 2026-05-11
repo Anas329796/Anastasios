@@ -4,20 +4,29 @@ import type { OpenClawConfig } from "../../config/config.js";
 import type { MsgContext } from "../templating.js";
 import { handleBashChatCommand } from "./bash-command.js";
 import { handleConfigCommand, handleDebugCommand } from "./commands-config.js";
+import { handleExperimentalCommand } from "./commands-experimental.js";
 import type { HandleCommandsParams } from "./commands-types.js";
 import { parseInlineDirectives } from "./directive-handling.parse.js";
 
 const readConfigFileSnapshotMock = vi.hoisted(() =>
-  vi.fn(async () => ({ valid: true, parsed: {} })),
+  vi.fn<() => Promise<Record<string, unknown>>>(async () => ({ valid: true, parsed: {} })),
 );
 const validateConfigObjectWithPluginsMock = vi.hoisted(() =>
-  vi.fn(() => ({
+  vi.fn<
+    (raw?: unknown) => {
+      ok: boolean;
+      config: unknown;
+      issues: Array<{ path: string; message: string }>;
+    }
+  >(() => ({
     ok: true,
     config: {},
     issues: [],
   })),
 );
-const replaceConfigFileMock = vi.hoisted(() => vi.fn(async () => undefined));
+const replaceConfigFileMock = vi.hoisted(() =>
+  vi.fn<(params: Record<string, unknown>) => Promise<void>>(async () => undefined),
+);
 const getConfigOverridesMock = vi.hoisted(() => vi.fn(() => ({})));
 const getConfigValueAtPathMock = vi.hoisted(() => vi.fn());
 const parseConfigPathMock = vi.hoisted(() => vi.fn());
@@ -265,6 +274,16 @@ describe("command gating", () => {
     expect(result?.reply?.text).toContain("/config is disabled");
   });
 
+  it("blocks disabled experimental", async () => {
+    const params = buildParams("/experimental", {
+      commands: { experimental: false, text: true },
+      channels: { whatsapp: { allowFrom: ["*"] } },
+    } as OpenClawConfig);
+    params.command.senderIsOwner = true;
+    const result = await handleExperimentalCommand(params, true);
+    expect(result?.reply?.text).toContain("/experimental is disabled");
+  });
+
   it("blocks disabled debug", async () => {
     const params = buildParams("/debug show", {
       commands: { config: false, debug: false, text: true },
@@ -289,6 +308,15 @@ describe("command gating", () => {
     } as OpenClawConfig);
     const debugResult = await handleDebugCommand(debugParams, true);
     expect(debugResult).toEqual({ shouldContinue: false });
+  });
+
+  it("blocks authorized non-owners from /experimental", async () => {
+    const params = buildParams("/experimental", {
+      commands: { experimental: true, text: true },
+      channels: { whatsapp: { allowFrom: ["*"] } },
+    } as OpenClawConfig);
+    const result = await handleExperimentalCommand(params, true);
+    expect(result).toEqual({ shouldContinue: false });
   });
 
   it("keeps /config show and /debug show available for owners", async () => {
@@ -427,6 +455,48 @@ describe("command gating", () => {
     }
   });
 
+  it("blocks disallowed /experimental writes", async () => {
+    resolveConfigWriteDeniedTextMock.mockReturnValueOnce("Config writes are disabled");
+    const params = buildParams("/experimental on tools.experimental.planTool", {
+      commands: { experimental: true, text: true },
+      channels: { whatsapp: { allowFrom: ["*"], configWrites: false } },
+    } as OpenClawConfig);
+    params.command.senderIsOwner = true;
+
+    const result = await handleExperimentalCommand(params, true);
+
+    expect(result?.shouldContinue).toBe(false);
+    expect(result?.reply?.text).toContain("Config writes are disabled");
+    expect(replaceConfigFileMock).not.toHaveBeenCalled();
+  });
+
+  it("writes allowed /experimental changes through the config mutation path", async () => {
+    readConfigFileSnapshotMock.mockResolvedValueOnce({
+      valid: true,
+      parsed: {},
+      runtimeConfig: { tools: { experimental: { planTool: false } } },
+    });
+    validateConfigObjectWithPluginsMock.mockImplementationOnce((raw: unknown) => ({
+      ok: true,
+      config: raw,
+      issues: [],
+    }));
+    const params = buildParams("/experimental on tools.experimental.planTool", {
+      commands: { experimental: true, text: true },
+      channels: { whatsapp: { allowFrom: ["*"], configWrites: true } },
+    } as OpenClawConfig);
+    params.command.senderIsOwner = true;
+
+    const result = await handleExperimentalCommand(params, true);
+
+    expect(result?.reply?.text).toContain("Config updated");
+    expect(replaceConfigFileMock).toHaveBeenCalledOnce();
+    expect(replaceConfigFileMock.mock.calls[0]?.[0]).toMatchObject({
+      nextConfig: { tools: { experimental: { planTool: true } } },
+      afterWrite: { mode: "auto" },
+    });
+  });
+
   it("honors the configured default account when gating omitted-account /config writes", async () => {
     resolveConfigWriteDeniedTextMock.mockReturnValueOnce(
       "channels.telegram.accounts.work.configWrites=true",
@@ -507,5 +577,24 @@ describe("command gating", () => {
     expect(setResult?.shouldContinue).toBe(false);
     expect(setResult?.reply?.text).toContain("Config updated");
     expect(replaceConfigFileMock).toHaveBeenCalled();
+  });
+
+  it("enforces gateway client permissions for /experimental writes", async () => {
+    const baseCfg = { commands: { experimental: true, text: true } } as OpenClawConfig;
+
+    const blockedParams = buildParams("/experimental on tools.experimental.planTool", baseCfg);
+    blockedParams.ctx.Provider = "webchat";
+    blockedParams.ctx.Surface = "webchat";
+    blockedParams.ctx.GatewayClientScopes = ["operator.write"];
+    blockedParams.command.channel = "webchat";
+    blockedParams.command.channelId = "webchat";
+    blockedParams.command.surface = "webchat";
+    blockedParams.command.senderIsOwner = true;
+    isInternalMessageChannelMock.mockReturnValueOnce(true);
+
+    const blockedResult = await handleExperimentalCommand(blockedParams, true);
+
+    expect(blockedResult?.shouldContinue).toBe(false);
+    expect(blockedResult?.reply?.text).toContain("requires operator.admin");
   });
 });
