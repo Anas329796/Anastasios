@@ -356,6 +356,72 @@ describe("update global helpers", () => {
     }
   });
 
+  it("refuses per-version cellar / nvm / asdf / volta / fnm prefixes so updates don't perpetuate into a soon-to-be-deleted directory", async () => {
+    // Repro: openclaw is currently installed inside a Homebrew per-version
+    // cellar dir (this happens once and then perpetuates because openclaw
+    // self-update used to re-resolve the same cellar npm and reinstall there).
+    // After this fix, the cellar npm is refused — `globalInstallArgs` falls
+    // back to plain `"npm"` so the install lands wherever the operator's
+    // PATH npm targets (a version-agnostic prefix that survives node bumps).
+    const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
+    try {
+      await withTempDir({ prefix: "openclaw-update-cellar-escape-" }, async (base) => {
+        const cellarPrefix = path.join(base, "opt", "homebrew", "Cellar", "node", "25.9.0_3");
+        const cellarBin = path.join(cellarPrefix, "bin");
+        const cellarRoot = path.join(cellarPrefix, "lib", "node_modules");
+        const pkgRoot = path.join(cellarRoot, "openclaw");
+        await fs.mkdir(pkgRoot, { recursive: true });
+        await fs.mkdir(cellarBin, { recursive: true });
+        // The cellar npm binary exists — pre-fix code would happily use it.
+        await fs.writeFile(path.join(cellarBin, "npm"), "", "utf8");
+
+        // Even with the cellar npm sitting right there, the resolver should
+        // refuse it and let the caller fall back to the plain "npm" command.
+        expect(globalInstallArgs("npm", "openclaw@latest", pkgRoot)).toEqual([
+          "npm",
+          "i",
+          "-g",
+          "openclaw@latest",
+          "--no-fund",
+          "--no-audit",
+          "--loglevel=error",
+        ]);
+        expect(globalInstallFallbackArgs("npm", "openclaw@latest", pkgRoot)).toEqual([
+          "npm",
+          "i",
+          "-g",
+          "openclaw@latest",
+          "--omit=optional",
+          "--no-fund",
+          "--no-audit",
+          "--loglevel=error",
+        ]);
+      });
+
+      // Same posture for nvm, asdf, volta, fnm, n. Just sanity-check one of
+      // each so the regex set covers the major version managers.
+      for (const layout of [
+        { dirs: [".nvm", "versions", "node", "v22.5.0"], label: "nvm" },
+        { dirs: [".asdf", "installs", "nodejs", "22.5.0"], label: "asdf" },
+        { dirs: [".volta", "tools", "image", "node", "22.5.0"], label: "volta" },
+        { dirs: [".fnm", "node-versions", "v22.5.0", "installation"], label: "fnm" },
+        { dirs: ["n", "versions", "node", "22.5.0"], label: "n-tjn" },
+      ]) {
+        await withTempDir({ prefix: `openclaw-update-${layout.label}-escape-` }, async (base) => {
+          const versionPrefix = path.join(base, ...layout.dirs);
+          const versionBin = path.join(versionPrefix, "bin");
+          const pkgRoot = path.join(versionPrefix, "lib", "node_modules", "openclaw");
+          await fs.mkdir(pkgRoot, { recursive: true });
+          await fs.mkdir(versionBin, { recursive: true });
+          await fs.writeFile(path.join(versionBin, "npm"), "", "utf8");
+          expect(globalInstallArgs("npm", "openclaw@latest", pkgRoot)[0]).toBe("npm");
+        });
+      }
+    } finally {
+      platformSpy.mockRestore();
+    }
+  });
+
   it("does not infer npm ownership from path shape alone when the owning npm binary is absent", async () => {
     await withTempDir({ prefix: "openclaw-update-npm-missing-bin-" }, async (base) => {
       const brewRoot = path.join(base, "opt", "homebrew", "lib", "node_modules");
