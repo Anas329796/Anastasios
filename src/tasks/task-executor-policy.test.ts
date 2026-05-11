@@ -38,6 +38,12 @@ describe("task-executor-policy", () => {
   });
 
   it("formats terminal, followup, and progress messages", () => {
+    const succeededTask = createTask({
+      status: "succeeded",
+      terminalSummary: "Imported 12 rows.",
+      runId: "run-0234567890",
+      label: "ACP import",
+    });
     const blockedTask = createTask({
       status: "succeeded",
       terminalOutcome: "blocked",
@@ -51,6 +57,9 @@ describe("task-executor-policy", () => {
       summary: "No output for 60s.",
     };
 
+    expect(formatTaskTerminalMessage(succeededTask)).toBe(
+      "Background task ready for review: ACP import (run run-0234). Imported 12 rows. Next: parent will review/verify before calling it done.",
+    );
     expect(formatTaskTerminalMessage(blockedTask)).toBe(
       "Background task blocked: ACP import (run run-1234). Needs login.",
     );

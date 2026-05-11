@@ -912,7 +912,9 @@ describe("task-registry", () => {
         to: "notifychat:123",
         threadId: "321",
       });
-      expect(String(message.content)).toContain("Background task done: ACP background task");
+      expect(String(message.content)).toContain(
+        "Background task ready for review: ACP background task",
+      );
       expectRecordFields(message.mirror, {
         sessionKey: "agent:main:main",
       });
@@ -995,7 +997,7 @@ describe("task-registry", () => {
       });
       expect(hoisted.sendMessageMock).not.toHaveBeenCalled();
       expect(peekSystemEvents(ownerKey)).toEqual([
-        expect.stringContaining("Background task done: ACP background task"),
+        expect.stringContaining("Background task ready for review: ACP background task"),
       ]);
       expect(hasPendingHeartbeatWake()).toBe(true);
     });
@@ -1120,7 +1122,7 @@ describe("task-registry", () => {
       );
       const events = peekSystemEvents("agent:main:main");
       expect(events).toHaveLength(1);
-      expect(events[0]).toContain("Background task done: ACP background task");
+      expect(events[0]).toContain("Background task ready for review: ACP background task");
       expect(hoisted.sendMessageMock).not.toHaveBeenCalled();
     });
   });
@@ -1202,7 +1204,8 @@ describe("task-registry", () => {
 
       await waitForAssertion(() =>
         expectRecordFields(sentMessageCall(), {
-          content: "Background task done: ACP background task (run run-deta).",
+          content:
+            "Background task ready for review: ACP background task (run run-deta). Next: parent will review/verify before calling it done.",
         }),
       );
     });
@@ -1278,7 +1281,7 @@ describe("task-registry", () => {
       await waitForAssertion(() =>
         expectRecordFields(sentMessageCall(), {
           content:
-            "Background task done: ACP background task (run run-succ). Created /tmp/file.txt and verified contents.",
+            "Background task ready for review: ACP background task (run run-succ). Created /tmp/file.txt and verified contents. Next: parent will review/verify before calling it done.",
         }),
       );
       expect(peekSystemEvents("agent:main:main")).toStrictEqual([]);
@@ -2726,7 +2729,8 @@ describe("task-registry", () => {
       expectRecordFields(sentMessageCall(), {
         channel: "guildchat",
         to: "guildchat:123",
-        content: "Background task done: ACP background task (run run-quie).",
+        content:
+          "Background task ready for review: ACP background task (run run-quie). Next: parent will review/verify before calling it done.",
       });
       expect(peekSystemEvents("agent:main:main")).toStrictEqual([]);
       relay.dispose();

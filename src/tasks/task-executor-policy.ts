@@ -38,9 +38,10 @@ export function formatTaskTerminalMessage(task: TaskRecord): string {
         ? `Background task blocked: ${title}${runLabel}. ${summary}`
         : `Background task blocked: ${title}${runLabel}.`;
     }
+    const reviewNext = "Next: parent will review/verify before calling it done.";
     return summary
-      ? `Background task done: ${title}${runLabel}. ${summary}`
-      : `Background task done: ${title}${runLabel}.`;
+      ? `Background task ready for review: ${title}${runLabel}. ${summary} ${reviewNext}`
+      : `Background task ready for review: ${title}${runLabel}. ${reviewNext}`;
   }
   if (task.status === "timed_out") {
     return `Background task timed out: ${title}${runLabel}.`;
