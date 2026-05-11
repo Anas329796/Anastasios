@@ -1,6 +1,6 @@
 import { logTypingFailure } from "openclaw/plugin-sdk/channel-feedback";
 import { createTypingCallbacks } from "openclaw/plugin-sdk/channel-message";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { createDiscordRestClient } from "../client.js";
 import type { RequestClient } from "../internal/discord.js";
 import { sendTyping } from "./typing.js";
