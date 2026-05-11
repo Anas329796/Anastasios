@@ -102,10 +102,16 @@ describe("status-runtime-shared", () => {
   });
 
   it("resolves usage summaries with the provided timeout", async () => {
-    await resolveStatusUsageSummary(1234);
+    await resolveStatusUsageSummary({
+      config: { gateway: {}, agents: { default: "main" } },
+      timeoutMs: 1234,
+      agentDir: "/tmp/openclaw-agent-main",
+    });
 
     expect(mocks.loadProviderUsageSummary).toHaveBeenCalledWith({
       timeoutMs: 1234,
+      config: { gateway: {}, agents: { default: "main" } },
+      agentDir: "/tmp/openclaw-agent-main",
       skipPluginAuthWithoutCredentialSource: true,
       allowOAuthRefresh: false,
     });
@@ -211,6 +217,8 @@ describe("status-runtime-shared", () => {
     });
     expect(mocks.loadProviderUsageSummary).toHaveBeenCalledWith({
       timeoutMs: 1234,
+      config: { gateway: {} },
+      agentDir: expect.stringContaining("agents/main/agent"),
       skipPluginAuthWithoutCredentialSource: true,
       allowOAuthRefresh: false,
     });
