@@ -3,6 +3,7 @@ import {
   DEEPINFRA_DEFAULT_MODEL_REF,
   DEEPINFRA_MODEL_CATALOG,
   DEEPINFRA_MODELS_URL,
+  buildDeepInfraModelDefinition,
   discoverDeepInfraModels,
   resetDeepInfraModelCacheForTest,
 } from "./provider-models.js";
@@ -31,13 +32,7 @@ function makeModelEntry(overrides: Record<string, unknown> = {}) {
 }
 
 function expectedStaticCatalog() {
-  return DEEPINFRA_MODEL_CATALOG.map((model) => ({
-    ...model,
-    compat: {
-      ...model.compat,
-      supportsUsageInStreaming: model.compat?.supportsUsageInStreaming ?? true,
-    },
-  }));
+  return DEEPINFRA_MODEL_CATALOG.map(buildDeepInfraModelDefinition);
 }
 
 async function withFetchPathTest(
