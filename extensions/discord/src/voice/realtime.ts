@@ -726,6 +726,7 @@ export class DiscordRealtimeVoiceSession implements VoiceRealtimeSession {
     } else {
       this.resetOutputStream(reason);
       this.params.entry.player.stop(true);
+      this.completeExactSpeechResponse(reason);
       return;
     }
     stream.end();
