@@ -6,6 +6,7 @@ Docs: https://docs.openclaw.ai
 
 ### Changes
 
+- Auth/fallback: add `openclaw models auth login --force` to drop cached provider profiles before invoking the auth flow, so operators can recover from stuck OAuth credentials (expired refresh tokens, swapped accounts) without hand-editing `auth-profiles.json`; surface a copy-pasteable re-login command in `FallbackSummaryError` messages when auth-class failures exhaust the chain; and cache `(sessionId, provider, model)` skip markers with a 60s TTL after `auth` / `auth_permanent` failures so the fallback chain stops re-attempting the same broken candidate on every turn within a conversation burst. Thanks @MertBasar0.
 - Docs/subagents: document `agents.defaults.subagents.announceTimeoutMs` in the sub-agent and configuration references. (#75509) Thanks @akrimm702.
 - Cron: add direct `cron.get`, `openclaw cron get <id>`, and agent-tool `get` support for inspecting one stored cron job by id. (#75117) Thanks @samzong.
 - Agents/tools: add per-sender tool policies with canonical channel-scoped sender keys, so operators can restrict dangerous tools by requester identity across global, agent, group, core, bundled, and plugin tool surfaces. (#66933) Thanks @JerranC.

@@ -46,6 +46,7 @@ const mocks = vi.hoisted(() => ({
   resolveAgentWorkspaceDir: vi.fn(),
   resolveDefaultAgentWorkspaceDir: vi.fn(),
   upsertAuthProfile: vi.fn(),
+  removeProviderAuthProfilesWithLock: vi.fn(),
   resolvePluginProviders: vi.fn(),
   createClackPrompter: vi.fn(),
   loadValidConfigOrThrow: vi.fn(),
@@ -62,6 +63,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../../agents/auth-profiles/profiles.js", () => ({
   listProfilesForProvider: mocks.listProfilesForProvider,
   promoteAuthProfileInOrder: mocks.promoteAuthProfileInOrder,
+  removeProviderAuthProfilesWithLock: mocks.removeProviderAuthProfilesWithLock,
   upsertAuthProfile: mocks.upsertAuthProfile,
 }));
 
@@ -316,6 +318,8 @@ describe("modelsAuthLoginCommand", () => {
     mocks.clackText.mockReset();
     mocks.upsertAuthProfile.mockReset();
     mocks.promoteAuthProfileInOrder.mockReset();
+    mocks.removeProviderAuthProfilesWithLock.mockReset();
+    mocks.removeProviderAuthProfilesWithLock.mockResolvedValue(null);
 
     mocks.resolveDefaultAgentId.mockReturnValue("main");
     mocks.resolveAgentDir.mockReturnValue("/tmp/openclaw/agents/main");
@@ -809,6 +813,42 @@ describe("modelsAuthLoginCommand", () => {
 
     await modelsAuthLoginCommand({ provider: "openai-codex" }, runtime);
 
+    expect(runProviderAuth).toHaveBeenCalledOnce();
+  });
+
+  it("--force purges cached profiles for the provider before login", async () => {
+    const runtime = createRuntime();
+
+    await modelsAuthLoginCommand({ provider: "openai-codex", force: true }, runtime);
+
+    expect(mocks.removeProviderAuthProfilesWithLock).toHaveBeenCalledWith({
+      provider: "openai-codex",
+      agentDir: "/tmp/openclaw/agents/main",
+    });
+    expect(runProviderAuth).toHaveBeenCalledOnce();
+    expect(runtime.log).toHaveBeenCalledWith(
+      expect.stringContaining('Removed cached auth profiles for provider "openai-codex"'),
+    );
+  });
+
+  it("--force does not purge when omitted", async () => {
+    const runtime = createRuntime();
+
+    await modelsAuthLoginCommand({ provider: "openai-codex" }, runtime);
+
+    expect(mocks.removeProviderAuthProfilesWithLock).not.toHaveBeenCalled();
+    expect(runProviderAuth).toHaveBeenCalledOnce();
+  });
+
+  it("--force surfaces a warning and still proceeds when purge throws", async () => {
+    const runtime = createRuntime();
+    mocks.removeProviderAuthProfilesWithLock.mockRejectedValueOnce(new Error("disk full"));
+
+    await modelsAuthLoginCommand({ provider: "openai-codex", force: true }, runtime);
+
+    expect(runtime.error).toHaveBeenCalledWith(
+      expect.stringContaining("Could not clear cached profiles"),
+    );
     expect(runProviderAuth).toHaveBeenCalledOnce();
   });
 

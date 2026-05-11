@@ -343,6 +343,11 @@ export function registerModelsCli(program: Command) {
     .option("--provider <id>", "Provider id registered by a plugin")
     .option("--method <id>", "Provider auth method id")
     .option("--set-default", "Apply the provider's default model recommendation", false)
+    .option(
+      "--force",
+      "Remove existing profiles for the provider before logging in (use when a cached OAuth profile is stuck or you want to switch accounts)",
+      false,
+    )
     .action(async (opts, command) => {
       const agent = resolveOptionFromCommand<string>(command, "agent");
       await runModelsCommand(async () => {
@@ -352,6 +357,7 @@ export function registerModelsCli(program: Command) {
             provider: opts.provider as string | undefined,
             method: opts.method as string | undefined,
             setDefault: Boolean(opts.setDefault),
+            force: Boolean(opts.force),
             agent,
           },
           defaultRuntime,
