@@ -566,7 +566,7 @@ export async function installSkill(params: SkillInstallRequest): Promise<SkillIn
     return withWarnings(goInstallFailure, warnings);
   }
 
-  const argv = command.argv ? [...command.argv] : null;
+  const argv = command.argv ? command.argv.slice() : null;
   if (spec.kind === "brew" && brewExe && argv?.[0] === "brew") {
     argv[0] = brewExe;
   }
