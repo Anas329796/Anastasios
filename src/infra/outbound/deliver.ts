@@ -1646,7 +1646,7 @@ async function deliverOutboundPayloadsCore(
             }),
           );
         }
-        const messageId = results.at(-1)?.messageId;
+        const messageId = deliveredResults.at(-1)?.messageId;
         const pinMessageId = deliveredResults.find((entry) => entry.messageId)?.messageId;
         await maybePinDeliveredMessage({
           handler,
@@ -1662,7 +1662,7 @@ async function deliverOutboundPayloadsCore(
         });
         completeDeliveryDiagnostics(deliveredResults.length);
         emitMessageSent({
-          success: results.length > beforeCount,
+          success: deliveredResults.length > 0,
           content: payloadSummary.hookContent ?? payloadSummary.text,
           messageId,
         });
@@ -1701,7 +1701,7 @@ async function deliverOutboundPayloadsCore(
             }),
           );
         }
-        const messageId = results.at(-1)?.messageId;
+        const messageId = deliveredResults.at(-1)?.messageId;
         const pinMessageId = deliveredResults.find((entry) => entry.messageId)?.messageId;
         await maybePinDeliveredMessage({
           handler,
@@ -1717,7 +1717,7 @@ async function deliverOutboundPayloadsCore(
         });
         completeDeliveryDiagnostics(deliveredResults.length);
         emitMessageSent({
-          success: results.length > beforeCount,
+          success: deliveredResults.length > 0,
           content: payloadSummary.hookContent ?? payloadSummary.text,
           messageId,
         });
