@@ -3,7 +3,11 @@ import { updateSessionStoreEntry, type SessionEntry } from "../../config/session
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { resolveSessionTranscriptCandidates } from "../../gateway/session-transcript-files.fs.js";
 import { logVerbose } from "../../globals.js";
+import { emitSessionLifecycleEvent } from "../../sessions/session-lifecycle-events.js";
 import { generateConversationLabel } from "./conversation-label-generator.js";
+
+/** Tracks session keys with an in-flight title generation to prevent duplicate model calls. */
+const inflightTitleGenerations = new Set<string>();
 
 function buildTitlePrompt(maxChars: number): string {
   return (
@@ -39,10 +43,17 @@ export function maybeGenerateSessionTitle(params: {
     return;
   }
 
+  // Already generating a title for this session — skip to avoid duplicate model calls.
+  if (inflightTitleGenerations.has(sessionKey)) {
+    return;
+  }
+
   const sessionId = sessionEntry.sessionId;
   if (!sessionId) {
     return;
   }
+
+  inflightTitleGenerations.add(sessionKey);
 
   // Fire and forget — do not block the reply.
   generateAndPersistTitle({
@@ -57,6 +68,8 @@ export function maybeGenerateSessionTitle(params: {
     model,
   }).catch((err) => {
     logVerbose(`session-title-generator: failed to generate title for ${sessionKey}: ${err}`);
+  }).finally(() => {
+    inflightTitleGenerations.delete(sessionKey);
   });
 }
 
@@ -128,12 +141,25 @@ async function generateAndPersistTitle(params: {
     return;
   }
 
-  // Persist the generated title.
-  await updateSessionStoreEntry({
+  // Persist the generated title. Re-check autoTitle inside the update to avoid
+  // overwriting a title that was set concurrently.
+  const result = await updateSessionStoreEntry({
     storePath,
     sessionKey,
-    update: async () => ({ autoTitle: title }),
+    update: async (entry) => {
+      if (entry.autoTitle) {
+        return null;
+      }
+      return { autoTitle: title };
+    },
   });
+
+  if (!result) {
+    return;
+  }
+
+  // Notify live session listeners so the Control UI sidebar updates immediately.
+  emitSessionLifecycleEvent({ sessionKey, reason: "title-updated", label: title });
 
   logVerbose(`session-title-generator: generated title "${title}" for ${sessionKey}`);
 }
@@ -155,8 +181,12 @@ function findTranscriptPath(
   );
 }
 
+/** Maximum bytes to scan when looking for user messages (64 KB). */
+const TRANSCRIPT_SCAN_CAP = 65_536;
+
 /**
- * Reads the head of a transcript file, extracts user message texts, and counts total user messages.
+ * Reads the transcript file, extracting user message texts and counting total user messages.
+ * Keeps reading sequential chunks until the threshold is met, EOF, or the byte cap is reached.
  */
 async function readUserMessagesFromTranscriptHead(
   filePath: string,
@@ -167,33 +197,48 @@ async function readUserMessagesFromTranscriptHead(
 
   const handle = await fs.promises.open(filePath, "r");
   try {
-    const buffer = Buffer.alloc(8192);
-    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-    if (bytesRead <= 0) {
-      return { messages: [], count: 0 };
-    }
-    const chunk = buffer.toString("utf-8", 0, bytesRead);
-    const lines = chunk.split(/\r?\n/);
+    const chunkSize = 8192;
+    const buffer = Buffer.alloc(chunkSize);
+    let offset = 0;
+    let carryOver = "";
 
-    for (const line of lines) {
-      if (!line.trim()) {
-        continue;
+    while (offset < TRANSCRIPT_SCAN_CAP) {
+      const { bytesRead } = await handle.read(buffer, 0, chunkSize, offset);
+      if (bytesRead <= 0) {
+        break;
       }
-      try {
-        const parsed = JSON.parse(line);
-        const msg = parsed?.message;
-        if (!msg || msg.role !== "user") {
+
+      const chunk = carryOver + buffer.toString("utf-8", 0, bytesRead);
+      const lines = chunk.split(/\r?\n/);
+      // Last segment may be incomplete — carry it forward.
+      carryOver = lines.pop() ?? "";
+
+      for (const line of lines) {
+        if (!line.trim()) {
           continue;
         }
-        count++;
-        if (messages.length < maxMessages) {
-          const text = extractTextFromContent(msg.content);
-          if (text) {
-            messages.push(text);
+        try {
+          const parsed = JSON.parse(line);
+          const msg = parsed?.message;
+          if (!msg || msg.role !== "user") {
+            continue;
           }
+          count++;
+          if (messages.length < maxMessages) {
+            const text = extractTextFromContent(msg.content);
+            if (text) {
+              messages.push(text);
+            }
+          }
+        } catch {
+          // skip malformed lines
         }
-      } catch {
-        // skip malformed lines
+      }
+
+      offset += bytesRead;
+      // Stop early once we have enough messages and no partial data.
+      if (count >= maxMessages && !carryOver.trim()) {
+        break;
       }
     }
   } finally {
