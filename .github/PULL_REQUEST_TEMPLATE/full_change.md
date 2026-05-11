@@ -1,7 +1,3 @@
-## PR Template Options
-
-For small changes, you can use the [quick fix template](https://github.com/openclaw/openclaw/compare?template=quick_fix.md). For broader changes, continue with this full template or use `?template=full_change.md` on the compare URL.
-
 ## Summary
 
 Describe the problem and fix in 2–5 bullets:
