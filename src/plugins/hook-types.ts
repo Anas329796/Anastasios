@@ -584,6 +584,11 @@ export type PluginHookSubagentDeliveryTargetEvent = {
   childRunId?: string;
   spawnMode?: "run" | "session";
   expectsCompletionMessage: boolean;
+  completionOwner?:
+    | "requester-session-final"
+    | "work-thread-final"
+    | "origin-bridge-final"
+    | "none";
 };
 
 export type PluginHookSubagentDeliveryTargetResult = {
