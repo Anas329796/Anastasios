@@ -258,6 +258,49 @@ describe("memory plugin e2e", () => {
     );
   });
 
+  test("registers a memory capability runtime so doctor/status discovers the plugin", () => {
+    const registerMemoryCapability = vi.fn();
+    const mockApi = {
+      id: "memory-lancedb",
+      name: "Memory (LanceDB)",
+      source: "test",
+      config: {},
+      pluginConfig: {
+        embedding: {
+          apiKey: OPENAI_API_KEY,
+          model: "text-embedding-3-small",
+        },
+        dbPath: getDbPath(),
+        autoCapture: false,
+        autoRecall: false,
+      },
+      runtime: {},
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+      },
+      registerTool: vi.fn(),
+      registerCli: vi.fn(),
+      registerService: vi.fn(),
+      registerMemoryCapability,
+      on: vi.fn(),
+      resolvePath: (filePath: string) => filePath,
+    };
+
+    memoryPlugin.register(mockApi as any);
+
+    expect(registerMemoryCapability).toHaveBeenCalledTimes(1);
+    const registration = registerMemoryCapability.mock.calls[0]?.[0];
+    expect(registration).toBeDefined();
+    expect(typeof registration.runtime?.getMemorySearchManager).toBe("function");
+    expect(typeof registration.runtime?.resolveMemoryBackendConfig).toBe("function");
+    expect(registration.runtime?.resolveMemoryBackendConfig({} as any)).toEqual({
+      backend: "builtin",
+    });
+  });
+
   test("registers auto-recall on before_prompt_build instead of the legacy hook", () => {
     const on = vi.fn();
     const mockApi = {
@@ -284,6 +327,7 @@ describe("memory plugin e2e", () => {
       registerTool: vi.fn(),
       registerCli: vi.fn(),
       registerService: vi.fn(),
+      registerMemoryCapability: vi.fn(),
       on,
       resolvePath: (filePath: string) => filePath,
     };
@@ -377,6 +421,7 @@ describe("memory plugin e2e", () => {
         registerTool,
         registerCli: vi.fn(),
         registerService: vi.fn(),
+        registerMemoryCapability: vi.fn(),
         on: vi.fn(),
         resolvePath: (filePath: string) => filePath,
       };
@@ -438,6 +483,7 @@ describe("memory plugin e2e", () => {
       registerTool: vi.fn(),
       registerCli: vi.fn(),
       registerService: vi.fn(),
+      registerMemoryCapability: vi.fn(),
       on,
       resolvePath: (filePath: string) => filePath,
     };
@@ -480,6 +526,7 @@ describe("memory plugin e2e", () => {
       registerTool: vi.fn(),
       registerCli: vi.fn(),
       registerService: vi.fn(),
+      registerMemoryCapability: vi.fn(),
       on,
       resolvePath: (filePath: string) => filePath,
     };
@@ -575,6 +622,7 @@ describe("memory plugin e2e", () => {
         registerTool: vi.fn(),
         registerCli: vi.fn(),
         registerService: vi.fn(),
+        registerMemoryCapability: vi.fn(),
         on,
         resolvePath: (p: string) => p,
       };
@@ -679,6 +727,7 @@ describe("memory plugin e2e", () => {
         registerTool: vi.fn(),
         registerCli: vi.fn(),
         registerService: vi.fn(),
+        registerMemoryCapability: vi.fn(),
         on,
         resolvePath: (p: string) => p,
       };
@@ -810,6 +859,7 @@ describe("memory plugin e2e", () => {
         registerTool: vi.fn(),
         registerCli: vi.fn(),
         registerService: vi.fn(),
+        registerMemoryCapability: vi.fn(),
         on,
         resolvePath: (p: string) => p,
       };
@@ -939,6 +989,7 @@ describe("memory plugin e2e", () => {
         registerTool: vi.fn(),
         registerCli: vi.fn(),
         registerService: vi.fn(),
+        registerMemoryCapability: vi.fn(),
         on,
         resolvePath: (p: string) => p,
       };
@@ -1064,6 +1115,7 @@ describe("memory plugin e2e", () => {
         registerTool: vi.fn(),
         registerCli: vi.fn(),
         registerService: vi.fn(),
+        registerMemoryCapability: vi.fn(),
         on,
         resolvePath: (p: string) => p,
       };
@@ -1161,6 +1213,7 @@ describe("memory plugin e2e", () => {
         registerTool: vi.fn(),
         registerCli: vi.fn(),
         registerService: vi.fn(),
+        registerMemoryCapability: vi.fn(),
         on,
         resolvePath: (p: string) => p,
       };
@@ -1289,6 +1342,7 @@ describe("memory plugin e2e", () => {
         registerTool: vi.fn(),
         registerCli: vi.fn(),
         registerService: vi.fn(),
+        registerMemoryCapability: vi.fn(),
         on,
         resolvePath: (p: string) => p,
       };
@@ -1423,6 +1477,7 @@ describe("memory plugin e2e", () => {
         registerTool: vi.fn(),
         registerCli: vi.fn(),
         registerService: vi.fn(),
+        registerMemoryCapability: vi.fn(),
         on,
         resolvePath: (p: string) => p,
       };
@@ -1550,6 +1605,7 @@ describe("memory plugin e2e", () => {
         registerTool: vi.fn(),
         registerCli: vi.fn(),
         registerService: vi.fn(),
+        registerMemoryCapability: vi.fn(),
         on,
         resolvePath: (p: string) => p,
       };
@@ -1653,6 +1709,7 @@ describe("memory plugin e2e", () => {
       registerTool: vi.fn(),
       registerCli: vi.fn(),
       registerService: vi.fn(),
+      registerMemoryCapability: vi.fn(),
       on,
       resolvePath: (p: string) => p,
     };
@@ -1876,6 +1933,7 @@ describe("memory plugin e2e", () => {
         },
         registerCli: vi.fn(),
         registerService: vi.fn(),
+        registerMemoryCapability: vi.fn(),
         on: vi.fn(),
         resolvePath: (p: string) => p,
       };
@@ -1972,6 +2030,7 @@ describe("memory plugin e2e", () => {
         },
         registerCli: vi.fn(),
         registerService: vi.fn(),
+        registerMemoryCapability: vi.fn(),
         on: vi.fn(),
         resolvePath: (p: string) => p,
       };
@@ -2260,6 +2319,7 @@ describe("memory plugin e2e", () => {
         },
         registerCli: vi.fn(),
         registerService: vi.fn(),
+        registerMemoryCapability: vi.fn(),
         on: vi.fn(),
         resolvePath: (p: string) => p,
       };
