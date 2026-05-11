@@ -1,13 +1,13 @@
-import { Agent, type StreamFn } from "@mariozechner/pi-agent-core";
+import { Agent, type StreamFn } from "@earendil-works/pi-agent-core";
 import {
   createAssistantMessageEventStream,
   type AssistantMessage,
   type Context,
   type Model,
   type SimpleStreamOptions,
-} from "@mariozechner/pi-ai";
-import { streamSimpleOpenAICodexResponses } from "@mariozechner/pi-ai/openai-codex-responses";
-import { streamSimpleOpenAIResponses } from "@mariozechner/pi-ai/openai-responses";
+} from "@earendil-works/pi-ai";
+import { streamSimpleOpenAICodexResponses } from "@earendil-works/pi-ai/openai-codex-responses";
+import { streamSimpleOpenAIResponses } from "@earendil-works/pi-ai/openai-responses";
 import { describe, expect, it } from "vitest";
 
 type ResponsesModel = Model<"openai-responses"> | Model<"openai-codex-responses">;
@@ -53,8 +53,11 @@ describe("OpenAI thinking contract", () => {
 
       await agent.prompt("hello");
 
-      expect(capturedOptions).toHaveLength(1);
-      expect(capturedOptions[0]?.reasoning).toBe(expectedReasoning);
+      expect(capturedOptions).toStrictEqual([
+        expect.objectContaining({
+          reasoning: expectedReasoning,
+        }),
+      ]);
     },
   );
 
@@ -72,8 +75,11 @@ describe("OpenAI thinking contract", () => {
 
       await agent.prompt("hello");
 
-      expect(capturedOptions).toHaveLength(1);
-      expect(capturedOptions[0]?.reasoning).toBeUndefined();
+      expect(capturedOptions).toStrictEqual([
+        expect.not.objectContaining({
+          reasoning: expect.anything(),
+        }),
+      ]);
     },
   );
 

@@ -112,6 +112,7 @@ describe("scripts/lib/docker-e2e-plan", () => {
     });
     expect(plan.credentials).toEqual(["anthropic", "openai"]);
     expect(plan.lanes.map((lane) => lane.name)).toContain("install-e2e-openai");
+    expect(plan.lanes.map((lane) => lane.name)).toContain("openai-chat-tools");
     expect(plan.lanes.map((lane) => lane.name)).toContain("codex-on-demand");
     expect(plan.lanes.map((lane) => lane.name)).toContain("install-e2e-anthropic");
     expect(plan.lanes.map((lane) => lane.name)).toContain("mcp-channels");
@@ -155,6 +156,7 @@ describe("scripts/lib/docker-e2e-plan", () => {
     const laneNames = plan.lanes.map((lane) => lane.name);
     expect(plan.releaseProfile).toBe("beta");
     expect(laneNames).toContain("install-e2e-openai");
+    expect(laneNames).toContain("openai-chat-tools");
     expect(laneNames).toContain("install-e2e-anthropic");
     expect(laneNames).toContain("update-channel-switch");
     expect(laneNames).not.toContain("plugins");
@@ -243,6 +245,7 @@ describe("scripts/lib/docker-e2e-plan", () => {
 
     expect(packageInstallOpenAi.lanes.map((lane) => lane.name)).toEqual([
       "install-e2e-openai",
+      "openai-chat-tools",
       "codex-on-demand",
     ]);
     expect(packageInstallAnthropic.lanes.map((lane) => lane.name)).toEqual([
@@ -468,6 +471,7 @@ describe("scripts/lib/docker-e2e-plan", () => {
 
     expect(packageUpdate.lanes.map((lane) => lane.name)).toEqual([
       "install-e2e-openai",
+      "openai-chat-tools",
       "codex-on-demand",
       "install-e2e-anthropic",
       "npm-onboard-channel-agent",
@@ -814,10 +818,13 @@ describe("scripts/lib/docker-e2e-plan", () => {
       ),
     );
     expect(plan.lanes).toHaveLength(BUNDLED_PLUGIN_INSTALL_UNINSTALL_SHARDS);
-    expect(plan.lanes.at(0)).toBeDefined();
-    expect(plan.lanes.at(23)).toBeDefined();
-    expect(summarizeLane(plan.lanes[0])).toEqual(bundledPluginSweepLane(0));
-    expect(summarizeLane(plan.lanes[23])).toEqual(bundledPluginSweepLane(23));
+    const firstLane = plan.lanes[0];
+    const lastLane = plan.lanes[23];
+    if (!firstLane || !lastLane) {
+      throw new Error("Expected bundled plugin sweep boundary lanes");
+    }
+    expect(summarizeLane(firstLane)).toEqual(bundledPluginSweepLane(0));
+    expect(summarizeLane(lastLane)).toEqual(bundledPluginSweepLane(23));
     expect(plan.needs).toEqual({
       bareImage: false,
       e2eImage: true,

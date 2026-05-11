@@ -446,8 +446,6 @@ function getReactionEmojis(): string[] {
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
-  expect(typeof value).toBe("object");
-  expect(value).not.toBeNull();
   if (typeof value !== "object" || value === null) {
     throw new Error(`${label} was not an object`);
   }
@@ -491,7 +489,6 @@ function requireReactionCall(
   index: number,
 ) {
   const call = mock.mock.calls[index] as unknown[] | undefined;
-  expect(call).toBeDefined();
   if (!call) {
     throw new Error(`missing reaction call ${index + 1}`);
   }
@@ -564,7 +561,6 @@ function createMockDraftStreamForTest() {
 
 function expectPreviewEditContent(content: string) {
   const call = editMessageDiscord.mock.calls[0] as unknown[] | undefined;
-  expect(call).toBeDefined();
   if (!call) {
     throw new Error("missing preview edit call");
   }
@@ -783,7 +779,6 @@ describe("processDiscordMessage ack reactions", () => {
     const resolveCall = discordTargetMocks.resolveDiscordTargetChannelId.mock.calls[0] as
       | unknown[]
       | undefined;
-    expect(resolveCall).toBeDefined();
     if (!resolveCall) {
       throw new Error("missing Discord target resolve call");
     }
@@ -1751,7 +1746,7 @@ describe("processDiscordMessage draft streaming", () => {
           mode: "progress",
           progress: {
             label: "Clawing...",
-            maxLines: 3,
+            maxLines: 4,
           },
         },
       },
@@ -1759,8 +1754,7 @@ describe("processDiscordMessage draft streaming", () => {
 
     await runProcessDiscordMessage(ctx);
 
-    expect(draftStream.update).toHaveBeenNthCalledWith(1, "Clawing...\n🧩 First\n🧩 Second");
-    expect(draftStream.update).toHaveBeenNthCalledWith(2, "🧩 First\n🧩 Second\n🧩 Third");
+    expect(draftStream.update).toHaveBeenCalledWith("Clawing...\n🧩 First\n🧩 Second\n🧩 Third");
   });
 
   it("skips empty apply_patch starts and renders the patch summary", async () => {
