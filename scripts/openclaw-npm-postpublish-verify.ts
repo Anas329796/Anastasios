@@ -50,7 +50,9 @@ const PUBLISHED_BUNDLED_RUNTIME_SIDECAR_PATHS = BUNDLED_RUNTIME_SIDECAR_PATHS.fi
 );
 const NODE_BUILTIN_MODULES = new Set(builtinModules.map((name) => name.replace(/^node:/u, "")));
 const MAX_INSTALLED_ROOT_PACKAGE_JSON_BYTES = 1024 * 1024;
-const MAX_INSTALLED_ROOT_DIST_JS_BYTES = 4 * 1024 * 1024;
+// Keep a hard ceiling to avoid unbounded scans, but allow current
+// session-runtime artifact sizes from published beta builds.
+const MAX_INSTALLED_ROOT_DIST_JS_BYTES = 6 * 1024 * 1024;
 const MAX_INSTALLED_ROOT_DIST_JS_FILES = 5000;
 const ROOT_DIST_JAVASCRIPT_MODULE_FILE_RE = /\.(?:c|m)?js$/u;
 const OPTIONAL_OR_EXTERNALIZED_RUNTIME_IMPORTS = new Set([
@@ -69,6 +71,11 @@ const OPTIONAL_OR_EXTERNALIZED_RUNTIME_IMPORTS = new Set([
   // Discord voice decoder fallback. The root chunk catches missing decoders and the owning
   // Discord plugin remains externalized from the root package.
   "opusscript",
+  // Optional audio decoding helper used by media/runtime paths when available.
+  "audio-decode",
+  // Plugin SDK test-contract modules in dist import vitest for plugin-author test
+  // helpers; published runtime does not require vitest at execution time.
+  "vitest",
 ]);
 const require = createRequire(import.meta.url);
 const acorn = require("acorn") as typeof import("acorn");
