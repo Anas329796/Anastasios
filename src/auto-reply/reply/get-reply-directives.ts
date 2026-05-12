@@ -447,6 +447,7 @@ export async function resolveReplyDirectives(params: {
   const resolvedVerboseLevel =
     directives.verboseLevel ??
     (targetSessionEntry?.verboseLevel as VerboseLevel | undefined) ??
+    (agentEntry?.verboseDefault as VerboseLevel | undefined) ??
     (agentCfg?.verboseDefault as VerboseLevel | undefined);
   const configuredReasoningDefault =
     (agentEntry?.reasoningDefault as ReasoningLevel | undefined) ??
@@ -476,6 +477,7 @@ export async function resolveReplyDirectives(params: {
   const resolvedElevatedLevel = elevatedAllowed
     ? (directives.elevatedLevel ??
       (targetSessionEntry?.elevatedLevel as ElevatedLevel | undefined) ??
+      (agentEntry?.elevatedDefault as ElevatedLevel | undefined) ??
       (agentCfg?.elevatedDefault as ElevatedLevel | undefined) ??
       "on")
     : "off";
