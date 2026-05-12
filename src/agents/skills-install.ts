@@ -59,6 +59,8 @@ const defaultSkillsInstallDeps: SkillsInstallDeps = {
 
 let skillsInstallDeps = defaultSkillsInstallDeps;
 
+const trustedInstallSources = new Set(["openclaw-bundled", "openclaw-managed", "openclaw-extra"]);
+
 function getSkillsInstallDeps(): SkillsInstallDeps {
   return skillsInstallDeps;
 }
@@ -98,13 +100,17 @@ function formatSkillInstallSource(entry: SkillEntry): string {
   return `${entry.skill.name} (${resolveSkillSource(entry.skill)})`;
 }
 
+function isTrustedInstallSource(source: string): boolean {
+  return trustedInstallSources.has(source);
+}
+
 function resolveSkillToolsRootCollision(params: {
   entry: SkillEntry;
   entries: readonly SkillEntry[];
   bundledContext: BundledSkillsContext;
 }): string | undefined {
   const source = resolveSkillSource(params.entry.skill);
-  if (source === "openclaw-bundled") {
+  if (isTrustedInstallSource(source)) {
     return undefined;
   }
 
@@ -542,8 +548,7 @@ export async function installSkill(params: SkillInstallRequest): Promise<SkillIn
 
   // Warn when install is triggered from a non-bundled source.
   // Workspace/project/personal agent skills can contain attacker-controlled metadata.
-  const trustedInstallSources = new Set(["openclaw-bundled", "openclaw-managed", "openclaw-extra"]);
-  if (!trustedInstallSources.has(skillSource)) {
+  if (!isTrustedInstallSource(skillSource)) {
     warnings.push(
       `WARNING: Skill "${params.skillName}" install triggered from non-bundled source "${skillSource}". Verify the install recipe is trusted.`,
     );
