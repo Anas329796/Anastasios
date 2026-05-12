@@ -13,6 +13,7 @@ import { callGateway } from "../gateway/call.js";
 import { getAgentRunContext, onAgentEvent } from "../infra/agent-events.js";
 import { registerPendingSpawnedChildrenQuery } from "../infra/outbound/pending-spawn-query.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
+import { formatBlockedLivenessError, isBlockedLivenessState } from "../shared/agent-liveness.js";
 import { createLazyImportLoader, createLazyPromiseLoader } from "../shared/lazy-promise.js";
 import { importRuntimeModule } from "../shared/runtime-import.js";
 import { normalizeDeliveryContext } from "../utils/delivery-context.shared.js";
@@ -926,11 +927,30 @@ function ensureListener() {
       }
       const endedAt = typeof evt.data?.endedAt === "number" ? evt.data.endedAt : Date.now();
       const error = typeof evt.data?.error === "string" ? evt.data.error : undefined;
+      const livenessState =
+        typeof evt.data?.livenessState === "string" ? evt.data.livenessState : undefined;
       if (phase === "error") {
         schedulePendingLifecycleError({
           runId: evt.runId,
           endedAt,
           error,
+        });
+        return;
+      }
+      if (isBlockedLivenessState(livenessState)) {
+        clearPendingLifecycleError(evt.runId);
+        clearPendingLifecycleTimeout(evt.runId);
+        await completeSubagentRun({
+          runId: evt.runId,
+          endedAt,
+          outcome: {
+            status: "error",
+            error: formatBlockedLivenessError(error),
+          },
+          reason: SUBAGENT_ENDED_REASON_ERROR,
+          sendFarewell: true,
+          accountId: entry.requesterOrigin?.accountId,
+          triggerCleanup: true,
         });
         return;
       }

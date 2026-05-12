@@ -493,6 +493,79 @@ describe("subagent registry seam flow", () => {
     expect(mocks.persistSubagentRunsToDisk).toHaveBeenCalledTimes(6);
   });
 
+  it("announces blocked lifecycle end events as errors instead of success", async () => {
+    mocks.callGateway.mockImplementation(async (request: { method?: string }) => {
+      if (request.method === "agent.wait") {
+        return { status: "pending" };
+      }
+      return {};
+    });
+
+    mod.registerSubagentRun({
+      runId: "run-blocked-end",
+      childSessionKey: "agent:main:subagent:child",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      task: "overflow task",
+      cleanup: "keep",
+      expectsCompletionMessage: true,
+    });
+
+    const lastOnAgentEventCall = mocks.onAgentEvent.mock.calls[
+      mocks.onAgentEvent.mock.calls.length - 1
+    ] as unknown as
+      | [(evt: { runId: string; stream: string; data: Record<string, unknown> }) => void]
+      | undefined;
+    const lifecycleHandler = lastOnAgentEventCall?.[0];
+    expect(lifecycleHandler).toBeTypeOf("function");
+
+    lifecycleHandler?.({
+      runId: "run-blocked-end",
+      stream: "lifecycle",
+      data: {
+        phase: "start",
+        startedAt: 10,
+      },
+    });
+    lifecycleHandler?.({
+      runId: "run-blocked-end",
+      stream: "lifecycle",
+      data: {
+        phase: "end",
+        startedAt: 10,
+        endedAt: 20,
+        livenessState: "blocked",
+        error: "Context overflow: prompt too large for the model.",
+      },
+    });
+
+    await waitForFast(() => {
+      expect(mocks.runSubagentAnnounceFlow).toHaveBeenCalledTimes(1);
+    });
+    const announceParams = expectRecordFields(
+      getMockCallArg(mocks.runSubagentAnnounceFlow, 0, 0, "blocked announce"),
+      { childRunId: "run-blocked-end" },
+      "blocked announce params",
+    );
+    expectRecordFields(
+      announceParams.outcome,
+      {
+        status: "error",
+        error: "Context overflow: prompt too large for the model.",
+        startedAt: 10,
+        endedAt: 20,
+        elapsedMs: 10,
+      },
+      "blocked announce outcome",
+    );
+
+    const run = mod
+      .listSubagentRunsForRequester("agent:main:main")
+      .find((entry) => entry.runId === "run-blocked-end");
+    expect(run?.endedReason).toBe("subagent-error");
+    expect(run?.outcome?.status).toBe("error");
+  });
+
   it("suppresses stale timeout announces when the same child run later finishes successfully", async () => {
     mocks.callGateway.mockImplementation(async (request: { method?: string }) => {
       if (request.method === "agent.wait") {
