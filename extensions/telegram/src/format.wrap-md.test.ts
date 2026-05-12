@@ -9,27 +9,17 @@ import {
 type TelegramChunk = ReturnType<typeof markdownToTelegramChunks>[number];
 
 function expectHtmlChunkLengthsAtMost(chunks: TelegramChunk[], limit: number) {
-  expect(
-    chunks
-      .map((chunk, index) => ({ index, htmlLength: chunk.html.length, text: chunk.text }))
-      .filter((chunk) => chunk.htmlLength > limit),
-  ).toEqual([]);
+  expect(chunks.some((chunk) => chunk.html.length > limit)).toBe(false);
 }
 
 function expectNonBlankTextChunks(chunks: TelegramChunk[]) {
-  expect(
-    chunks
-      .map((chunk, index) => ({ index, text: chunk.text }))
-      .filter((chunk) => chunk.text.trim().length === 0),
-  ).toEqual([]);
+  expect(chunks.some((chunk) => chunk.text.trim().length === 0)).toBe(false);
 }
 
 function expectHtmlChunksWrappedWith(chunks: TelegramChunk[], prefix: string, suffix: string) {
   expect(
-    chunks
-      .map((chunk, index) => ({ index, html: chunk.html }))
-      .filter((chunk) => !chunk.html.startsWith(prefix) || !chunk.html.endsWith(suffix)),
-  ).toEqual([]);
+    chunks.every((chunk) => chunk.html.startsWith(prefix) && chunk.html.endsWith(suffix)),
+  ).toBe(true);
 }
 
 describe("wrapFileReferencesInHtml", () => {
@@ -180,9 +170,12 @@ describe("markdownToTelegramHtml - file reference wrapping", () => {
 describe("markdownToTelegramChunks - file reference wrapping", () => {
   it("wraps file references in chunked output", () => {
     const chunks = markdownToTelegramChunks("Check README.md and backup.sh", 4096);
-    expect(chunks.length).toBeGreaterThan(0);
-    expect(chunks[0].html).toContain("<code>README.md</code>");
-    expect(chunks[0].html).toContain("<code>backup.sh</code>");
+    expect(chunks).toStrictEqual([
+      {
+        html: "Check <code>README.md</code> and <code>backup.sh</code>",
+        text: "Check README.md and backup.sh",
+      },
+    ]);
   });
 
   it("keeps rendered html chunks within the provided limit", () => {
@@ -236,7 +229,6 @@ describe("markdownToTelegramChunks - file reference wrapping", () => {
 
   it("gracefully returns the original chunk when tag overhead exceeds the limit", () => {
     const input = "**ab**";
-    expect(() => markdownToTelegramChunks(input, 6)).not.toThrow();
     const chunks = markdownToTelegramChunks(input, 6);
     expect(chunks).toHaveLength(1);
     expect(chunks[0]?.text).toBe("ab");

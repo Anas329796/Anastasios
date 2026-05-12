@@ -40,6 +40,16 @@ const FAST_WAIT_OPTS = { timeout: 1_000, interval: 2 } as const;
 let ws: WebSocket;
 let port: number;
 
+function countConnectedNodes(nodes: readonly { connected?: boolean }[] | undefined): number {
+  let count = 0;
+  for (const node of nodes ?? []) {
+    if (node.connected) {
+      count++;
+    }
+  }
+  return count;
+}
+
 function installCanvasNodePolicyForTest() {
   const registry = getActiveRuntimePluginRegistry();
   if (!registry) {
@@ -200,14 +210,9 @@ async function expectPendingPairingCommands(nodeId: string, commands: string[]) 
     pending?: Array<{ nodeId?: string; commands?: string[] }>;
   }>(ws, "node.pair.list", {});
   expect(pairingList.ok).toBe(true);
-  expect(pairingList.payload?.pending ?? []).toEqual(
-    expect.arrayContaining([
-      expect.objectContaining({
-        nodeId,
-        commands,
-      }),
-    ]),
-  );
+  const pending = (pairingList.payload?.pending ?? []).find((entry) => entry.nodeId === nodeId);
+  expect(pending?.nodeId).toBe(nodeId);
+  expect(pending?.commands).toEqual(commands);
 }
 
 describe("gateway role enforcement", () => {
@@ -240,7 +245,7 @@ describe("gateway role enforcement", () => {
       await expect(nodeClient.request("status", {})).rejects.toThrow("unauthorized role");
 
       const healthPayload = await nodeClient.request<HealthSummary>("health", {});
-      expect(healthPayload).toMatchObject({ ok: true });
+      expect(healthPayload.ok).toBe(true);
     } finally {
       nodeClient?.stop();
     }
@@ -326,8 +331,7 @@ describe("gateway node command allowlist", () => {
           const listRes = await rpcReq<{
             nodes?: Array<{ nodeId: string; connected?: boolean }>;
           }>(ws, "node.list", {});
-          const nodes = listRes.payload?.nodes ?? [];
-          return nodes.filter((node) => node.connected).length;
+          return countConnectedNodes(listRes.payload?.nodes);
         }, FAST_WAIT_OPTS)
         .toBe(count);
     };
@@ -554,7 +558,7 @@ describe("gateway node command allowlist", () => {
             "node.list",
             {},
           );
-          return (listRes.payload?.nodes ?? []).filter((node) => node.connected).length;
+          return countConnectedNodes(listRes.payload?.nodes);
         }, FAST_WAIT_OPTS)
         .toBe(0);
 
