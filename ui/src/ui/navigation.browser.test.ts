@@ -550,19 +550,17 @@ describe("control UI routing", () => {
     toggle.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     await app.updateComplete;
 
-    expect(request).not.toHaveBeenCalledWith("config.patch", expect.anything());
+    expect(request.mock.calls.some((call) => call[0] === "config.patch")).toBe(false);
     const confirmRestart = expectButtonWithText(app, "Confirm Restart");
     confirmRestart.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
 
     await nextFrame();
     await app.updateComplete;
 
-    expect(request).toHaveBeenCalledWith(
-      "config.patch",
-      expect.objectContaining({
-        baseHash: "hash-1",
-      }),
-    );
+    const patchCall = request.mock.calls.find((call) => call[0] === "config.patch") as
+      | [string, { baseHash?: string }]
+      | undefined;
+    expect(patchCall?.[1].baseHash).toBe("hash-1");
   });
 
   it("renders the refreshed top navigation shell", async () => {
@@ -603,15 +601,15 @@ describe("control UI routing", () => {
     const split = expectElement(app, ".chat-split-container", HTMLElement);
     split.classList.add("chat-split-container--open");
     await app.updateComplete;
-    expect(split.classList.contains("chat-split-container--open")).toBe(true);
+    expect([...split.classList]).toEqual(["chat-split-container", "chat-split-container--open"]);
 
     expectElement(app, ".chat-main", HTMLElement);
 
     const topShell = expectElement(app, ".topnav-shell", HTMLElement);
     const content = expectElement(app, ".topnav-shell__content", HTMLElement);
 
-    expect(topShell.classList.contains("topnav-shell")).toBe(true);
-    expect(content.classList.contains("topnav-shell__content")).toBe(true);
+    expect([...topShell.classList]).toEqual(["topnav-shell"]);
+    expect([...content.classList]).toEqual(["topnav-shell__content"]);
     expectElement(topShell, ".topbar-nav-toggle", HTMLElement);
     expect(topShell.children[1]).toBe(content);
     expectElement(topShell, ".topnav-shell__actions", HTMLElement);
@@ -619,22 +617,21 @@ describe("control UI routing", () => {
     const toggle = expectElement(app, ".topbar-nav-toggle", HTMLElement);
     const actions = expectElement(app, ".topnav-shell__actions", HTMLElement);
 
-    expect(toggle.classList.contains("topbar-nav-toggle")).toBe(true);
-    expect(toggle.classList.contains("sidebar-menu-trigger")).toBe(true);
-    expect(actions.classList.contains("topnav-shell__actions")).toBe(true);
+    expect([...toggle.classList]).toEqual(["sidebar-menu-trigger", "topbar-nav-toggle"]);
+    expect([...actions.classList]).toEqual(["topnav-shell__actions"]);
     expect(topShell.firstElementChild).toBe(toggle);
     expect(topShell.querySelector(".topbar-nav-toggle")).toBe(toggle);
     expectElement(actions, ".topbar-search", HTMLElement);
-    expect(toggle.getAttribute("aria-label")).toEqual(expect.stringMatching(/\S/u));
+    expect(toggle.getAttribute("aria-label")).toBe("Expand sidebar");
 
     const nav = expectElement(app, ".shell-nav", HTMLElement);
 
-    expect(shell.classList.contains("shell--nav-drawer-open")).toBe(false);
+    expect([...shell.classList]).toEqual(["shell", "shell--chat"]);
     toggle.click();
     await app.updateComplete;
 
-    expect(shell.classList.contains("shell--nav-drawer-open")).toBe(true);
-    expect(nav.classList.contains("shell-nav")).toBe(true);
+    expect([...shell.classList]).toEqual(["shell", "shell--chat", "shell--nav-drawer-open"]);
+    expect([...nav.classList]).toEqual(["shell-nav"]);
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
 
     const link = expectElement(app, 'a.nav-item[href="/channels"]', HTMLAnchorElement);
@@ -642,7 +639,7 @@ describe("control UI routing", () => {
 
     await app.updateComplete;
     expect(app.tab).toBe("channels");
-    expect(shell.classList.contains("shell--nav-drawer-open")).toBe(false);
+    expect([...shell.classList]).toEqual(["shell"]);
 
     app.applySettings({ ...app.settings, navCollapsed: true });
     await app.updateComplete;
@@ -657,7 +654,7 @@ describe("control UI routing", () => {
     const header = expectElement(app, ".sidebar-shell__header", HTMLElement);
     const sidebar = expectElement(app, ".sidebar", HTMLElement);
 
-    expect(sidebar.classList.contains("sidebar--collapsed")).toBe(true);
+    expect([...sidebar.classList]).toEqual(["sidebar", "sidebar--collapsed"]);
     expectElement(item, ".nav-item__icon", HTMLElement);
     expect(item.querySelector(".nav-item__text")).toBeNull();
     expect(app.querySelector(".sidebar-brand__copy")).toBeNull();
@@ -677,7 +674,13 @@ describe("control UI routing", () => {
 
     expect(app.chatMobileControlsOpen).toBe(true);
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
-    expect(dropdown.classList.contains("open")).toBe(true);
+    expect([...toggle.classList]).toEqual([
+      "btn",
+      "btn--sm",
+      "btn--icon",
+      "chat-controls-mobile-toggle",
+    ]);
+    expect([...dropdown.classList]).toEqual(["chat-controls-dropdown", "open"]);
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await app.updateComplete;
@@ -685,7 +688,7 @@ describe("control UI routing", () => {
 
     expect(app.chatMobileControlsOpen).toBe(false);
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
-    expect(dropdown.classList.contains("open")).toBe(false);
+    expect([...dropdown.classList]).toEqual(["chat-controls-dropdown"]);
     expect(document.activeElement).toBe(toggle);
 
     toggle.click();
@@ -693,16 +696,16 @@ describe("control UI routing", () => {
     app.requestUpdate();
     await app.updateComplete;
 
-    const openDropdown = app.querySelector<HTMLElement>(".chat-controls-dropdown");
+    const openDropdown = expectElement(app, ".chat-controls-dropdown", HTMLElement);
     expect(app.chatMobileControlsOpen).toBe(true);
-    expect(openDropdown?.classList.contains("open")).toBe(true);
+    expect([...openDropdown.classList]).toEqual(["chat-controls-dropdown", "open"]);
 
     document.body.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, composed: true }));
     await app.updateComplete;
 
-    const closedDropdown = app.querySelector<HTMLElement>(".chat-controls-dropdown");
+    const closedDropdown = expectElement(app, ".chat-controls-dropdown", HTMLElement);
     expect(app.chatMobileControlsOpen).toBe(false);
-    expect(closedDropdown?.classList.contains("open")).toBe(false);
+    expect([...closedDropdown.classList]).toEqual(["chat-controls-dropdown"]);
 
     expectElement(app, ".chat-controls-mobile-toggle", HTMLButtonElement).click();
     await app.updateComplete;
@@ -727,13 +730,13 @@ describe("control UI routing", () => {
     expect(window.location.search).toBe("?session=agent%3Amain%3Asubagent%3Atask-123");
 
     const shell = expectElement(app, ".shell", HTMLElement);
-    expect(shell.classList.contains("shell--chat-focus")).toBe(false);
+    expect([...shell.classList]).toEqual(["shell", "shell--chat"]);
 
     const toggle = expectElement(app, 'button[title^="Toggle focus mode"]', HTMLButtonElement);
     toggle.click();
 
     await app.updateComplete;
-    expect(shell.classList.contains("shell--chat-focus")).toBe(true);
+    expect([...shell.classList]).toEqual(["shell", "shell--chat", "shell--chat-focus"]);
 
     const channelsLink = expectElement(app, 'a.nav-item[href="/channels"]', HTMLAnchorElement);
     channelsLink.dispatchEvent(
@@ -742,14 +745,14 @@ describe("control UI routing", () => {
 
     await app.updateComplete;
     expect(app.tab).toBe("channels");
-    expect(shell.classList.contains("shell--chat-focus")).toBe(false);
+    expect([...shell.classList]).toEqual(["shell"]);
 
     const chatLink = expectElement(app, 'a.nav-item[href="/chat"]', HTMLAnchorElement);
     chatLink.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
 
     await app.updateComplete;
     expect(app.tab).toBe("chat");
-    expect(shell.classList.contains("shell--chat-focus")).toBe(true);
+    expect([...shell.classList]).toEqual(["shell", "shell--chat", "shell--chat-focus"]);
   });
 
   it("auto-scrolls chat history to the latest message", async () => {

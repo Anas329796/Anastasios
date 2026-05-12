@@ -33,49 +33,37 @@ export const PluginsUiDescriptorsResultSchema = Type.Object(
   { additionalProperties: false },
 );
 
-export const PluginControlUiEntryPointSchema = Type.Object(
+export const PluginsSessionActionParamsSchema = Type.Object(
   {
-    id: NonEmptyString,
     pluginId: NonEmptyString,
-    pluginName: Type.Optional(NonEmptyString),
-    surface: Type.Literal("app-nav"),
-    label: NonEmptyString,
-    path: NonEmptyString,
-    openMode: Type.Optional(
-      Type.Union([Type.Literal("in-app"), Type.Literal("same-window"), Type.Literal("new-window")]),
-    ),
-    description: Type.Optional(Type.String()),
-    requiredScopes: Type.Optional(Type.Array(NonEmptyString)),
-  },
-  { additionalProperties: false },
-);
-
-export const PluginsUiEntryPointsParamsSchema = Type.Object({}, { additionalProperties: false });
-
-export const PluginsUiEntryPointsResultSchema = Type.Object(
-  {
-    ok: Type.Literal(true),
-    entryPoints: Type.Array(PluginControlUiEntryPointSchema),
-  },
-  { additionalProperties: false },
-);
-
-export const PluginsUiEntryPointLaunchParamsSchema = Type.Object(
-  {
-    id: NonEmptyString,
-    pluginId: NonEmptyString,
-    path: NonEmptyString,
+    actionId: NonEmptyString,
     sessionKey: Type.Optional(NonEmptyString),
-    contextTokens: Type.Optional(Type.Integer({ minimum: 1 })),
+    payload: Type.Optional(PluginJsonValueSchema),
   },
   { additionalProperties: false },
 );
 
-export const PluginsUiEntryPointLaunchResultSchema = Type.Object(
+export const PluginsSessionActionSuccessResultSchema = Type.Object(
   {
     ok: Type.Literal(true),
-    path: NonEmptyString,
-    expiresInMs: Type.Number(),
+    result: Type.Optional(PluginJsonValueSchema),
+    continueAgent: Type.Optional(Type.Boolean()),
+    reply: Type.Optional(PluginJsonValueSchema),
   },
   { additionalProperties: false },
 );
+
+export const PluginsSessionActionFailureResultSchema = Type.Object(
+  {
+    ok: Type.Literal(false),
+    error: Type.String(),
+    code: Type.Optional(Type.String()),
+    details: Type.Optional(PluginJsonValueSchema),
+  },
+  { additionalProperties: false },
+);
+
+export const PluginsSessionActionResultSchema = Type.Union([
+  PluginsSessionActionSuccessResultSchema,
+  PluginsSessionActionFailureResultSchema,
+]);

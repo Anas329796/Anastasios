@@ -170,10 +170,11 @@ describe("gateway plugin HTTP auth boundary", () => {
         "nosniff",
       );
       expect(withoutHstsResponse.setHeader).toHaveBeenCalledWith("Referrer-Policy", "no-referrer");
-      expect(withoutHstsResponse.setHeader).not.toHaveBeenCalledWith(
-        "Strict-Transport-Security",
-        expect.any(String),
-      );
+      expect(
+        withoutHstsResponse.setHeader.mock.calls.some(
+          ([headerName]) => headerName === "Strict-Transport-Security",
+        ),
+      ).toBe(false);
 
       const withHsts = createTestGatewayServer({
         resolvedAuth: AUTH_NONE,
@@ -656,9 +657,9 @@ describe("gateway plugin HTTP auth boundary", () => {
     });
 
     expect(observedRuntimeScopes).toHaveLength(1);
-    expect(observedRuntimeScopes[0]).toEqual(
-      expect.arrayContaining(["operator.admin", "operator.read", "operator.write"]),
-    );
+    expect(observedRuntimeScopes[0]).toContain("operator.admin");
+    expect(observedRuntimeScopes[0]).toContain("operator.read");
+    expect(observedRuntimeScopes[0]).toContain("operator.write");
     expect(adminAllowedResults).toEqual([true]);
   });
 

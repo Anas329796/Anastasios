@@ -146,6 +146,8 @@ import {
   ConnectParamsSchema,
   type CronAddParams,
   CronAddParamsSchema,
+  type CronGetParams,
+  CronGetParamsSchema,
   type CronJob,
   CronJobSchema,
   type CronListParams,
@@ -192,6 +194,10 @@ import {
   PluginApprovalRequestParamsSchema,
   type PluginApprovalResolveParams,
   PluginApprovalResolveParamsSchema,
+  type PluginsSessionActionParams,
+  type PluginsSessionActionResult,
+  PluginsSessionActionParamsSchema,
+  PluginsSessionActionResultSchema,
   type PluginsUiDescriptorsParams,
   PluginsUiDescriptorsParamsSchema,
   type PluginsUiEntryPointLaunchParams,
@@ -268,6 +274,7 @@ import {
   NodeRenameParamsSchema,
   type PollParams,
   PollParamsSchema,
+  MIN_CLIENT_PROTOCOL_VERSION,
   MIN_PROBE_PROTOCOL_VERSION,
   PROTOCOL_VERSION,
   type PushTestParams,
@@ -670,6 +677,7 @@ export const validateSkillsSearchParams = ajv.compile<SkillsSearchParams>(Skills
 export const validateSkillsDetailParams = ajv.compile<SkillsDetailParams>(SkillsDetailParamsSchema);
 export const validateCronListParams = ajv.compile<CronListParams>(CronListParamsSchema);
 export const validateCronStatusParams = ajv.compile<CronStatusParams>(CronStatusParamsSchema);
+export const validateCronGetParams = ajv.compile<CronGetParams>(CronGetParamsSchema);
 export const validateCronAddParams = ajv.compile<CronAddParams>(CronAddParamsSchema);
 export const validateCronUpdateParams = ajv.compile<CronUpdateParams>(CronUpdateParamsSchema);
 export const validateCronRemoveParams = ajv.compile<CronRemoveParams>(CronRemoveParamsSchema);
@@ -717,11 +725,11 @@ export const validatePluginApprovalResolveParams = ajv.compile<PluginApprovalRes
 export const validatePluginsUiDescriptorsParams = ajv.compile<PluginsUiDescriptorsParams>(
   PluginsUiDescriptorsParamsSchema,
 );
-export const validatePluginsUiEntryPointsParams = ajv.compile<PluginsUiEntryPointsParams>(
-  PluginsUiEntryPointsParamsSchema,
+export const validatePluginsSessionActionParams = ajv.compile<PluginsSessionActionParams>(
+  PluginsSessionActionParamsSchema,
 );
-export const validatePluginsUiEntryPointLaunchParams = ajv.compile<PluginsUiEntryPointLaunchParams>(
-  PluginsUiEntryPointLaunchParamsSchema,
+export const validatePluginsSessionActionResult = ajv.compile<PluginsSessionActionResult>(
+  PluginsSessionActionResultSchema,
 );
 export const validateExecApprovalsNodeGetParams = ajv.compile<ExecApprovalsNodeGetParams>(
   ExecApprovalsNodeGetParamsSchema,
@@ -919,6 +927,8 @@ export {
   AgentsListResultSchema,
   CommandsListParamsSchema,
   CommandsListResultSchema,
+  PluginsSessionActionParamsSchema,
+  PluginsSessionActionResultSchema,
   PluginsUiDescriptorsParamsSchema,
   PluginsUiEntryPointLaunchParamsSchema,
   PluginsUiEntryPointsParamsSchema,
@@ -939,6 +949,7 @@ export {
   CronJobSchema,
   CronListParamsSchema,
   CronStatusParamsSchema,
+  CronGetParamsSchema,
   CronAddParamsSchema,
   CronUpdateParamsSchema,
   CronRemoveParamsSchema,
@@ -958,6 +969,7 @@ export {
   TickEventSchema,
   ShutdownEventSchema,
   ProtocolSchemas,
+  MIN_CLIENT_PROTOCOL_VERSION,
   MIN_PROBE_PROTOCOL_VERSION,
   PROTOCOL_VERSION,
   ErrorCodes,
@@ -1059,6 +1071,8 @@ export type {
   CommandsListParams,
   CommandsListResult,
   CommandEntry,
+  PluginsSessionActionParams,
+  PluginsSessionActionResult,
   SkillsStatusParams,
   ToolsCatalogParams,
   ToolsCatalogResult,
@@ -1118,6 +1132,7 @@ export type {
   CronJob,
   CronListParams,
   CronStatusParams,
+  CronGetParams,
   CronAddParams,
   CronUpdateParams,
   CronRemoveParams,

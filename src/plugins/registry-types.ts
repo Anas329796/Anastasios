@@ -16,6 +16,7 @@ import type {
   PluginControlUiDescriptor,
   PluginControlUiEntryPoint,
   PluginRuntimeLifecycleRegistration,
+  PluginSessionActionRegistration,
   PluginSessionSchedulerJobRegistration,
   PluginSessionExtensionRegistration,
   PluginToolMetadataRegistration,
@@ -349,6 +350,14 @@ export type PluginSessionSchedulerJobRegistryRegistration = {
   rootDir?: string;
 };
 
+export type PluginSessionActionRegistryRegistration = {
+  pluginId: string;
+  pluginName?: string;
+  action: PluginSessionActionRegistration;
+  source: string;
+  rootDir?: string;
+};
+
 export type PluginConversationBindingResolvedHandlerRegistration = {
   pluginId: string;
   pluginName?: string;
@@ -464,6 +473,7 @@ export type PluginRegistry = {
   runtimeLifecycles?: PluginRuntimeLifecycleRegistryRegistration[];
   agentEventSubscriptions?: PluginAgentEventSubscriptionRegistryRegistration[];
   sessionSchedulerJobs?: PluginSessionSchedulerJobRegistryRegistration[];
+  sessionActions?: PluginSessionActionRegistryRegistration[];
   conversationBindingResolvedHandlers: PluginConversationBindingResolvedHandlerRegistration[];
   diagnostics: PluginDiagnostic[];
 };
@@ -473,6 +483,10 @@ export type PluginRegistryParams = {
   coreGatewayHandlers?: GatewayRequestHandlers;
   coreGatewayMethodNames?: readonly string[];
   runtime: PluginRuntime;
+  hostServices?: {
+    /** May be a live accessor; plugin APIs must read it at call time. */
+    cron?: import("../cron/service-contract.js").CronServiceContract;
+  };
   activateGlobalSideEffects?: boolean;
 };
 
