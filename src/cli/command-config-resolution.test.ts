@@ -53,7 +53,7 @@ describe("resolveCommandConfigWithSecrets", () => {
     });
   });
 
-  it("routes diagnostics to stderr for json commands", async () => {
+  it("routes diagnostics to stderr when requested for json output", async () => {
     const runtime = { log: vi.fn(), error: vi.fn(), exit: vi.fn() } as const;
     const config = { channels: {} };
     const resolvedConfig = { channels: { discord: {} } };
@@ -66,9 +66,10 @@ describe("resolveCommandConfigWithSecrets", () => {
 
     await resolveCommandConfigWithSecrets({
       config,
-      commandName: "status --json",
+      commandName: "models status",
       targetIds: new Set(["channels.discord.token"]),
       mode: "read_only_status",
+      diagnosticStream: "stderr",
       runtime,
     });
 

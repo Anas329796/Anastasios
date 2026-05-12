@@ -170,6 +170,7 @@ export async function collectStatusScanOverview(params: {
           loadedConfig,
         ),
         mode: "read_only_status",
+        diagnosticStream: params.commandName === "status --json" ? "stderr" : "stdout",
         ...(params.runtime ? { runtime: params.runtime } : {}),
       }),
   });
