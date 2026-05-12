@@ -91,8 +91,15 @@ type DreamingPhaseInfo = {
   nextRunAtMs?: number;
 };
 
+type DreamingAgentOption = {
+  id: string;
+  label: string;
+};
+
 export type DreamingProps = {
   active: boolean;
+  selectedAgentId: string;
+  agentOptions: DreamingAgentOption[];
   shortTermCount: number;
   groundedSignalCount: number;
   totalSignalCount: number;
@@ -125,6 +132,7 @@ export type DreamingProps = {
   wikiMemoryPalaceError: string | null;
   wikiMemoryPalace: WikiMemoryPalace | null;
   onRefresh: () => void;
+  onSelectAgent: (agentId: string) => void;
   onRefreshDiary: () => void;
   onRefreshImports: () => void;
   onRefreshMemoryPalace: () => void;
@@ -291,35 +299,61 @@ export function renderDreaming(props: DreamingProps) {
   return html`
     <div class="dreams-page">
       <!-- ── Sub-tab bar ── -->
-      <nav class="dreams__tabs">
-        <button
-          class="dreams__tab ${_subTab === "scene" ? "dreams__tab--active" : ""}"
-          @click=${() => {
-            _subTab = "scene";
-            props.onRequestUpdate?.();
-          }}
-        >
-          ${t("dreaming.tabs.scene")}
-        </button>
-        <button
-          class="dreams__tab ${_subTab === "diary" ? "dreams__tab--active" : ""}"
-          @click=${() => {
-            _subTab = "diary";
-            props.onRequestUpdate?.();
-          }}
-        >
-          ${t("dreaming.tabs.diary")}
-        </button>
-        <button
-          class="dreams__tab ${_subTab === "advanced" ? "dreams__tab--active" : ""}"
-          @click=${() => {
-            _subTab = "advanced";
-            props.onRequestUpdate?.();
-          }}
-        >
-          ${t("dreaming.tabs.advanced")}
-        </button>
-      </nav>
+      <div class="dreams__topbar">
+        <nav class="dreams__tabs">
+          <button
+            class="dreams__tab ${_subTab === "scene" ? "dreams__tab--active" : ""}"
+            @click=${() => {
+              _subTab = "scene";
+              props.onRequestUpdate?.();
+            }}
+          >
+            ${t("dreaming.tabs.scene")}
+          </button>
+          <button
+            class="dreams__tab ${_subTab === "diary" ? "dreams__tab--active" : ""}"
+            @click=${() => {
+              _subTab = "diary";
+              props.onRequestUpdate?.();
+            }}
+          >
+            ${t("dreaming.tabs.diary")}
+          </button>
+          <button
+            class="dreams__tab ${_subTab === "advanced" ? "dreams__tab--active" : ""}"
+            @click=${() => {
+              _subTab = "advanced";
+              props.onRequestUpdate?.();
+            }}
+          >
+            ${t("dreaming.tabs.advanced")}
+          </button>
+        </nav>
+        ${props.agentOptions.length > 1
+          ? html`<label class="field dreams__agent-select">
+              <span class="sr-only">Agent</span>
+              <select
+                data-dreaming-agent-select="true"
+                aria-label="Dreaming agent"
+                .value=${props.selectedAgentId}
+                @change=${(e: Event) => {
+                  const nextAgentId = (e.target as HTMLSelectElement).value;
+                  if (nextAgentId === props.selectedAgentId) {
+                    return;
+                  }
+                  props.onSelectAgent(nextAgentId);
+                }}
+              >
+                ${props.agentOptions.map(
+                  (entry) =>
+                    html`<option value=${entry.id} ?selected=${entry.id === props.selectedAgentId}>
+                      ${entry.label}
+                    </option>`,
+                )}
+              </select>
+            </label>`
+          : nothing}
+      </div>
 
       ${_subTab === "scene"
         ? renderScene(props, idle, dreamText)
