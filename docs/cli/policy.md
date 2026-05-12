@@ -211,11 +211,12 @@ attestation before relying on the previous approval.
 
 The tool runtime gate also includes structured approval metadata on gateway
 approval requests: policy path/hash, configured expected hash when present, the
-policy evidence hash, and the target tool reference. Gateway approval request,
-list, and resolve events preserve that metadata so supervisors can audit the
-decision against the policy and workspace state that produced it. The UI and
-text approval surfaces summarize those values, but the audit trail remains
-structured.
+accepted attestation hash when present, the current policy evidence hash, and
+the target tool reference. Gateway approval request, list, and resolve events
+preserve that metadata so supervisors can audit the decision against the policy
+and workspace state that produced it. If the current attestation no longer
+matches `expectedAttestationHash`, the runtime gate fails closed before asking
+for approval and reports both the current and expected attestation hashes.
 
 Policy findings can include both `target` and `requirement`. `target` is the
 observed workspace thing that does not conform. `requirement` is the authored
@@ -406,6 +407,8 @@ The runtime gate:
 
 - blocks tool calls if the enabled policy artifact is missing or does not match
   `expectedHash`;
+- blocks tool calls if `expectedAttestationHash` is configured and the current
+  policy evidence no longer matches the accepted clean policy check;
 - blocks governed tool calls whose required metadata is missing or invalid;
 - asks for approval for governed tools marked `risk:critical` or
   `IRREVERSIBLE_EXTERNAL`;

@@ -11,8 +11,9 @@ import type {
 import { jsoncValueToUnknown } from "./jsonc-value.js";
 import {
   collectPolicyEvidence,
+  createPolicyAttestation,
   policyDocumentHash,
-  policyWorkspaceHash,
+  type PolicyAttestation,
   type PolicyEvidence,
   type PolicyToolEvidence,
 } from "./policy-state.js";
@@ -23,6 +24,7 @@ type PolicyRuntimeSettings = {
   readonly requireRisk?: boolean;
   readonly requireSensitivity?: boolean;
   readonly expectedHash?: string;
+  readonly expectedAttestationHash?: string;
   readonly path?: string;
 };
 
@@ -32,6 +34,7 @@ type RuntimePolicyState = {
   readonly policyHash?: string;
   readonly policy?: unknown;
   readonly evidence: PolicyEvidence;
+  readonly attestation?: PolicyAttestation;
   readonly settings: PolicyRuntimeSettings;
 };
 
@@ -126,6 +129,18 @@ export async function evaluatePolicyTrustedToolCall(
       blockReason: `${state.policyPath} does not match the configured policy hash.`,
     };
   }
+  const expectedAttestationHash = state.settings.expectedAttestationHash?.trim();
+  if (
+    expectedAttestationHash !== undefined &&
+    expectedAttestationHash !== "" &&
+    state.attestation?.attestationHash !== expectedAttestationHash
+  ) {
+    const currentAttestationHash = state.attestation?.attestationHash ?? "missing";
+    return {
+      block: true,
+      blockReason: `${state.policyPath} no longer matches the accepted policy attestation (current ${currentAttestationHash}, expected ${expectedAttestationHash}).`,
+    };
+  }
 
   const tool = state.evidence.tools.find((entry) => entry.id === event.toolName);
   if (tool === undefined) {
@@ -172,6 +187,7 @@ function runtimeApprovalMetadata(
   tool?: PolicyToolEvidence,
 ): PluginJsonValue {
   const expectedHash = state.settings.expectedHash?.trim();
+  const expectedAttestationHash = state.settings.expectedAttestationHash?.trim();
   return {
     source: "policy",
     policy: {
@@ -179,9 +195,17 @@ function runtimeApprovalMetadata(
       ...(state.policyHash !== undefined ? { hash: state.policyHash } : {}),
       ...(expectedHash ? { expectedHash } : {}),
     },
+    attestation: {
+      ...(state.attestation?.attestationHash !== undefined
+        ? { hash: state.attestation.attestationHash }
+        : {}),
+      ...(expectedAttestationHash ? { expectedHash: expectedAttestationHash } : {}),
+    },
     workspace: {
       scope: "policy",
-      hash: policyWorkspaceHash(state.evidence),
+      ...(state.attestation?.workspace.hash !== undefined
+        ? { hash: state.attestation.workspace.hash }
+        : {}),
     },
     target: tool?.source ?? `oc://TOOLS.md/tools/${toolName}`,
   };
@@ -216,11 +240,20 @@ async function loadRuntimePolicyState(
   if (policyShapeError !== undefined) {
     return { policyPath, policyError: policyShapeError, evidence, settings };
   }
+  const policyHash = policyDocumentHash(policy);
   return {
     policyPath,
     policy,
-    policyHash: policyDocumentHash(policy),
+    policyHash,
     evidence,
+    attestation: createPolicyAttestation({
+      ok: true,
+      checkedAt: new Date().toISOString(),
+      policyPath,
+      policyHash,
+      evidence,
+      findings: [],
+    }),
     settings,
   };
 }

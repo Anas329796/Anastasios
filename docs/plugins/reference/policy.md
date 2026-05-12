@@ -50,7 +50,9 @@ SSRF posture:
   `workspaceRepairs` is explicitly enabled.
 - When `runtimeToolPolicy` is enabled, the bundled policy extension registers a
   trusted tool policy that blocks unverifiable governed tool calls and requests
-  approval for critical or irreversible governed tools.
+  approval for critical or irreversible governed tools. If
+  `expectedAttestationHash` is configured, the same gate fails closed when the
+  current policy evidence no longer matches the accepted clean policy check.
 
 Policy is not a duplicate governance stack. It records expected conformance in
 `policy.jsonc`, observes existing OpenClaw settings and `TOOLS.md` declarations
@@ -74,8 +76,9 @@ local behavior and does not need policy findings or attestation output.
 The policy hash identifies the authored requirement file. The evidence hash
 identifies the observed OpenClaw state used by the policy checks. The findings
 hash identifies the exact finding set. The attestation hash binds those values
-with the check result and timestamp, giving operators a compact value to record
-when a workspace is clean.
+with the check result, giving operators a compact value to record when a
+workspace is clean. The emitted `checkedAt` timestamp is audit metadata, but it
+is intentionally excluded from the stable attestation hash.
 
 When policy is enabled, the extension registers its health checks with the
 shared health registry. Doctor then runs registered checks; doctor does not
@@ -99,6 +102,7 @@ Policy config lives under `plugins.entries.policy.config`:
           "runtimeToolPolicy": false,
           "workspaceRepairs": false,
           "expectedHash": "sha256:...",
+          "expectedAttestationHash": "sha256:...",
           "path": "policy.jsonc",
         },
       },
@@ -110,36 +114,41 @@ Policy config lives under `plugins.entries.policy.config`:
 `workspaceRepairs` defaults to off. With the default posture, policy checks can
 report denied channels, but `doctor --fix` will not edit workspace settings for
 policy unless the operator explicitly enables repairs. `expectedHash` can pin
-the policy file to an approved hash.
+the policy file to an approved hash. `expectedAttestationHash` can pin the
+current policy evidence and finding set to the last accepted clean policy
+check.
 
 `runtimeToolPolicy` also defaults to off. It is enabled from OpenClaw config,
 not from `policy.jsonc`, so a missing policy artifact still fails closed
 instead of disabling the runtime gate. When enabled, the runtime trusted tool
 policy reads the same policy artifact and `TOOLS.md` evidence used by
 `policy check`. It blocks calls when required metadata is missing or the policy
-hash does not match, and requests approval for governed tools marked
-`risk:critical` or `IRREVERSIBLE_EXTERNAL`. Approval decisions carry structured
-metadata with the policy path/hash, configured expected hash when present,
-policy evidence hash, and target tool reference so audit systems do not need to
-parse those values out of human-readable text.
+hash or accepted attestation hash does not match, and requests approval for
+governed tools marked `risk:critical` or `IRREVERSIBLE_EXTERNAL`. Approval
+decisions carry structured metadata with the policy path/hash, configured
+expected hashes when present, current policy evidence hash, and target tool
+reference so audit systems do not need to parse those values out of
+human-readable text. Attestation mismatches fail closed before approval and
+include the current and expected attestation hashes in the block reason.
 
 ## Checks
 
 The plugin registers these doctor health checks:
 
-| Check id                                 | Purpose                                        |
-| ---------------------------------------- | ---------------------------------------------- |
-| `policy/policy-jsonc-missing`            | Report missing policy artifact when enabled.   |
-| `policy/policy-hash-mismatch`            | Reject policy files that do not match hash.    |
-| `policy/channels-denied-provider`        | Reject enabled channels matching deny rules.   |
-| `policy/mcp-denied-server`               | Reject denied MCP server entries.              |
-| `policy/mcp-unapproved-server`           | Reject MCP servers outside the allowlist.      |
-| `policy/models-denied-provider`          | Reject denied model providers and refs.        |
-| `policy/models-unapproved-provider`      | Reject model providers outside the allowlist.  |
-| `policy/network-private-access-enabled`  | Reject private-network SSRF escape hatches.    |
-| `policy/tools-missing-risk-level`        | Require governed tools to declare risk.        |
-| `policy/tools-missing-sensitivity-token` | Require governed tools to declare sensitivity. |
-| `policy/tools-unknown-sensitivity-token` | Reject unknown governed tool sensitivity.      |
+| Check id                                 | Purpose                                                          |
+| ---------------------------------------- | ---------------------------------------------------------------- |
+| `policy/policy-jsonc-missing`            | Report missing policy artifact when enabled.                     |
+| `policy/policy-hash-mismatch`            | Reject policy files that do not match hash.                      |
+| `policy/attestation-hash-mismatch`       | Reject policy state that no longer matches accepted attestation. |
+| `policy/channels-denied-provider`        | Reject enabled channels matching deny rules.                     |
+| `policy/mcp-denied-server`               | Reject denied MCP server entries.                                |
+| `policy/mcp-unapproved-server`           | Reject MCP servers outside the allowlist.                        |
+| `policy/models-denied-provider`          | Reject denied model providers and refs.                          |
+| `policy/models-unapproved-provider`      | Reject model providers outside the allowlist.                    |
+| `policy/network-private-access-enabled`  | Reject private-network SSRF escape hatches.                      |
+| `policy/tools-missing-risk-level`        | Require governed tools to declare risk.                          |
+| `policy/tools-missing-sensitivity-token` | Require governed tools to declare sensitivity.                   |
+| `policy/tools-unknown-sensitivity-token` | Reject unknown governed tool sensitivity.                        |
 
 Run them through either surface:
 
