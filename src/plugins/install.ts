@@ -590,25 +590,18 @@ async function installPluginFromManagedNpmRoot(
     npmRoot,
   });
   try {
-    await relinkOpenClawPeerDependenciesInManagedNpmRoot({
-      npmRoot,
-      logger,
-    });
-  } catch (error) {
-    await rollbackManagedNpmPluginInstall({
-      npmRoot,
-      packageName: params.packageName,
-      targetDir: installRoot,
-      timeoutMs,
-      logger,
-    });
-    return {
-      ok: false,
-      error: `Failed to repair openclaw peer links after npm install: ${String(error)}`,
-    };
-  }
-  if (installedPackageNeedsOpenClawPeerLinkRepair(installRoot)) {
-    await rollbackManagedNpmPluginInstall({
+    logger.info?.(`Installing ${params.displaySpec} into ${npmRoot}…`);
+    if (params.packageName !== "openclaw") {
+      const repairedOpenClawPeer = await repairManagedNpmRootOpenClawPeer({
+        npmRoot,
+        timeoutMs,
+        logger,
+      });
+      if (repairedOpenClawPeer) {
+        logger.info?.(`Repaired stale openclaw peer dependency in ${npmRoot}`);
+      }
+    }
+    await upsertManagedNpmRootDependency({
       npmRoot,
       packageName: params.packageName,
       dependencySpec: params.dependencySpec,
