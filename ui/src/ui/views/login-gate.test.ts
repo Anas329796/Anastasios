@@ -115,6 +115,36 @@ describe("resolveLoginFailureFeedback", () => {
     expect(feedback?.steps.join(" ")).toContain("gateway.controlUi.allowInsecureAuth");
   });
 
+  it("explains browser WebSocket security failures as insecure context", () => {
+    const feedback = resolveLoginFailureFeedback({
+      connected: false,
+      lastError:
+        "Browser refused the Gateway WebSocket for security reasons. Use wss:// when the Control UI is served over HTTPS/Tailscale Serve, or open the loopback dashboard at http://127.0.0.1:18789.",
+      lastErrorCode: "BROWSER_WEBSOCKET_SECURITY_ERROR",
+      hasToken: true,
+      hasPassword: false,
+    });
+
+    expect(feedback?.kind).toBe("insecure-context");
+    expect(feedback?.rawError).toContain("Use wss://");
+    expect(feedback?.rawError).toContain("http://127.0.0.1:18789");
+    expect(feedback?.steps.join(" ")).toContain("Tailscale Serve");
+    expect(feedback?.steps.join(" ")).toContain("gateway.controlUi.allowInsecureAuth");
+  });
+
+  it("keeps generic browser WebSocket constructor failures on the network path", () => {
+    const feedback = resolveLoginFailureFeedback({
+      connected: false,
+      lastError: "Could not create the Gateway WebSocket: constructor failed",
+      lastErrorCode: "BROWSER_WEBSOCKET_CONSTRUCTOR_ERROR",
+      hasToken: false,
+      hasPassword: false,
+    });
+
+    expect(feedback?.kind).toBe("network");
+    expect(feedback?.steps.join(" ")).toContain("WebSocket URL");
+  });
+
   it("explains browser origin rejections", () => {
     const feedback = resolveLoginFailureFeedback({
       connected: false,
@@ -192,7 +222,6 @@ describe("renderLoginGate", () => {
     await Promise.resolve();
 
     const alert = container.querySelector<HTMLElement>('[role="alert"]');
-    expect(alert).not.toBeNull();
     expect(alert?.dataset.kind).toBe("protocol-mismatch");
     expect(alert?.textContent).toContain("Protocol mismatch");
     expect(alert?.textContent).toContain("openclaw dashboard");
