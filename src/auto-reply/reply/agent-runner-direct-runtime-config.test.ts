@@ -268,11 +268,20 @@ describe("runReplyAgent runtime config", () => {
 
     const result = await runReplyAgent(replyParams);
 
-    expect(result).toMatchObject({
+    if (!result || Array.isArray(result)) {
+      throw new Error("expected a single memory-flush error reply payload");
+    }
+    expect(result).toEqual({
       text: "⚠️ write failed: Memory flush writes are restricted to memory/2023-11-14.md; use that path only.",
       isError: true,
+      replyToId: "msg-1",
+      replyToCurrent: undefined,
+      replyToTag: false,
+      mediaUrl: undefined,
+      mediaUrls: undefined,
+      audioAsVoice: false,
     });
-    expect(result ? getReplyPayloadMetadata(result) : undefined).toMatchObject({
+    expect(getReplyPayloadMetadata(result)).toEqual({
       deliverDespiteSourceReplySuppression: true,
     });
   });
@@ -307,7 +316,7 @@ describe("runReplyAgent runtime config", () => {
 
     expect(resolveQueuedReplyExecutionConfigMock).not.toHaveBeenCalled();
     expect(enqueueFollowupRunMock).toHaveBeenCalledTimes(1);
-    const enqueueCall = enqueueFollowupRunMock.mock.calls[0];
+    const enqueueCall = enqueueFollowupRunMock.mock.calls.at(0);
     expect(enqueueCall?.[0]).toBe("main");
     expect(enqueueCall?.[1]).toBe(followupRun);
     expect(enqueueCall?.[2]).toBe(resolvedQueue);

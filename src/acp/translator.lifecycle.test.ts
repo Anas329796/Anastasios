@@ -336,7 +336,6 @@ describe("acp translator stable lifecycle handlers", () => {
     const result = await agent.resumeSession(createResumeSessionRequest("agent:main:work"));
 
     expect(result.modes?.currentModeId).toBe("adaptive");
-    expect(result.configOptions).toBeDefined();
     if (!result.configOptions) {
       throw new Error("expected resume session config options");
     }
@@ -351,6 +350,11 @@ describe("acp translator stable lifecycle handlers", () => {
         sessionUpdate: "session_info_update",
         title: "Work session",
         updatedAt: "2024-03-09T16:00:00.000Z",
+        _meta: {
+          sessionKey: "agent:main:work",
+          kind: "direct",
+          spawnedWorkspaceDir: "/tmp/openclaw",
+        },
       },
     });
 

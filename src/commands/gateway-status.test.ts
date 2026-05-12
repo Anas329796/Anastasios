@@ -400,13 +400,13 @@ describe("gateway-status command", () => {
       degraded?: boolean;
       warnings?: Array<{ code?: string; message?: string; targetIds?: string[] }>;
     };
-    expect(parsed.degraded).toBe(true);
+    expect(parsed.degraded).toBe(false);
     const pricingWarnings =
       parsed.warnings?.filter((warning) => warning.code === "model_pricing_degraded") ?? [];
     expect(pricingWarnings).toHaveLength(2);
     expect(pricingWarnings.map((warning) => warning.message)).toEqual([
-      "Model pricing degraded: OpenRouter pricing fetch failed: TypeError: fetch failed",
-      "Model pricing degraded: OpenRouter pricing fetch failed: TypeError: fetch failed",
+      "Model pricing warning: optional pricing refresh degraded: OpenRouter pricing fetch failed: TypeError: fetch failed",
+      "Model pricing warning: optional pricing refresh degraded: OpenRouter pricing fetch failed: TypeError: fetch failed",
     ]);
     expect(pricingWarnings.map((warning) => warning.targetIds)).toEqual([
       ["sshTunnel"],
@@ -968,7 +968,7 @@ describe("gateway-status command", () => {
       await runGatewayStatus(runtime, { timeout: "1000", json: true, sshAuto: true });
 
       expect(startSshPortForward).toHaveBeenCalledTimes(1);
-      const call = startSshPortForward.mock.calls[0]?.[0] as { target: string };
+      const call = startSshPortForward.mock.calls.at(0)?.[0] as { target: string };
       expect(call.target).toBe("steipete@goodhost:2222");
     });
   });
@@ -990,7 +990,7 @@ describe("gateway-status command", () => {
       await runGatewayStatus(runtime, { timeout: "1000", json: true });
 
       expect(startSshPortForward).toHaveBeenCalledTimes(1);
-      const call = startSshPortForward.mock.calls[0]?.[0] as {
+      const call = startSshPortForward.mock.calls.at(0)?.[0] as {
         target: string;
         identity?: string;
       };
@@ -1010,7 +1010,7 @@ describe("gateway-status command", () => {
       startSshPortForward.mockClear();
       await runGatewayStatus(runtime, { timeout: "1000", json: true });
 
-      const call = startSshPortForward.mock.calls[0]?.[0] as {
+      const call = startSshPortForward.mock.calls.at(0)?.[0] as {
         target: string;
       };
       expect(call.target).toBe("studio.example");
@@ -1037,7 +1037,7 @@ describe("gateway-status command", () => {
       sshIdentity: "/tmp/explicit_id",
     });
 
-    const call = startSshPortForward.mock.calls[0]?.[0] as {
+    const call = startSshPortForward.mock.calls.at(0)?.[0] as {
       identity?: string;
     };
     expect(call.identity).toBe("/tmp/explicit_id");

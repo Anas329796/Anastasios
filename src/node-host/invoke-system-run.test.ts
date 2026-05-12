@@ -133,37 +133,39 @@ describe("handleSystemRunInvoke mac app exec host routing", () => {
     payloadJSON?: string;
     error?: { message?: string };
   } {
-    const result = sendInvokeResult.mock.calls[0]?.[0];
-    if (!result) {
-      throw new Error("expected sendInvokeResult payload");
-    }
+    const result = firstMockCallArg(sendInvokeResult, "sendInvokeResult", 0);
     return result as { ok?: boolean; payloadJSON?: string; error?: { message?: string } };
   }
 
   function requireFirstRunCommandArgs(runCommand: MockedRunCommand): string[] {
-    const args = vi.mocked(runCommand).mock.calls[0]?.[0] as string[] | undefined;
-    if (!args) {
-      throw new Error("expected runCommand args");
-    }
-    return args;
+    return firstMockCallArg(vi.mocked(runCommand), "runCommand", 0) as string[];
   }
 
   function requireMacExecHostCall(runViaMacAppExecHost: MockedRunViaMacAppExecHost): {
     approvals?: { agent?: { security?: string; ask?: string } };
     request?: { command?: string[]; rawCommand?: string; cwd?: string };
   } {
-    const call = runViaMacAppExecHost.mock.calls[0]?.[0];
-    if (!call) {
-      throw new Error("expected runViaMacAppExecHost call");
-    }
+    const call = firstMockCallArg(runViaMacAppExecHost, "runViaMacAppExecHost", 0);
     return call as {
       approvals?: { agent?: { security?: string; ask?: string } };
       request?: { command?: string[]; rawCommand?: string; cwd?: string };
     };
   }
 
+  function firstMockCallArg(
+    mock: { mock: { calls: readonly unknown[][] } },
+    label: string,
+    argIndex: number,
+  ): unknown {
+    const [call] = mock.mock.calls;
+    if (!call) {
+      throw new Error(`expected ${label} call`);
+    }
+    return call[argIndex];
+  }
+
   function expectExecDeniedEvent(sendNodeEvent: MockedSendNodeEvent): void {
-    const call = sendNodeEvent.mock.calls[0];
+    const call = sendNodeEvent.mock.calls.at(0);
     if (!call) {
       throw new Error("expected sendNodeEvent call");
     }
@@ -553,7 +555,9 @@ describe("handleSystemRunInvoke mac app exec host routing", () => {
     });
 
     const shellWrapperCall = requireMacExecHostCall(shellWrapperInvoke.runViaMacAppExecHost);
-    expect(shellWrapperCall.approvals).toBeDefined();
+    if (shellWrapperCall.approvals === undefined) {
+      throw new Error("Expected shell-wrapper approvals");
+    }
     expect(shellWrapperCall.request?.command).toEqual([
       "/bin/sh",
       "-lc",
@@ -621,7 +625,9 @@ describe("handleSystemRunInvoke mac app exec host routing", () => {
           const canonicalCwd = fs.realpathSync(tmp);
           expect(invoke.runCommand).not.toHaveBeenCalled();
           const macHostCall = requireMacExecHostCall(invoke.runViaMacAppExecHost);
-          expect(macHostCall.approvals).toBeDefined();
+          if (macHostCall.approvals === undefined) {
+            throw new Error("Expected Mac host approvals");
+          }
           expect(macHostCall.request?.command).toEqual(["env", "sh", "-c", "echo SAFE"]);
           expect(macHostCall.request?.rawCommand).toBe('env sh -c "echo SAFE"');
           expect(macHostCall.request?.cwd).toBe(canonicalCwd);
@@ -742,6 +748,55 @@ describe("handleSystemRunInvoke mac app exec host routing", () => {
         expectInvokeErrorMessage(sendInvokeResult, { message: testCase.message });
       }
     }
+  });
+
+  it("denies abbreviated PowerShell encoded payloads even when the wrapper is allowlisted", async () => {
+    const binDir = createFixtureDir("openclaw-pwsh-allowlist-");
+    const executablePath = createTempExecutable({ dir: binDir, name: "pwsh" });
+    await withTempApprovalsHome({
+      approvals: createAllowlistOnMissApprovals({
+        agents: {
+          main: {
+            allowlist: [{ pattern: executablePath }],
+          },
+        },
+      }),
+      run: async () => {
+        const { runCommand, sendInvokeResult, sendNodeEvent } = await runSystemInvoke({
+          preferMacAppExecHost: false,
+          security: "allowlist",
+          ask: "on-miss",
+          command: [
+            executablePath,
+            "-win",
+            "hidden",
+            "-if",
+            "XML",
+            "-config",
+            "SomeConfig",
+            "/NoProfile",
+            "/ec",
+            "VwByAGkAdABlAC0ATwB1AHQAcAB1AHQAIABoAGkA",
+          ],
+        });
+
+        expect(runCommand).not.toHaveBeenCalled();
+        expectApprovalRequiredDenied({ sendNodeEvent, sendInvokeResult });
+
+        const commandWithArgs = await runSystemInvoke({
+          preferMacAppExecHost: false,
+          security: "allowlist",
+          ask: "on-miss",
+          command: [executablePath, "-cwa", "Write-Output", "hi"],
+        });
+
+        expect(commandWithArgs.runCommand).not.toHaveBeenCalled();
+        expectApprovalRequiredDenied({
+          sendNodeEvent: commandWithArgs.sendNodeEvent,
+          sendInvokeResult: commandWithArgs.sendInvokeResult,
+        });
+      },
+    });
   });
 
   it.runIf(process.platform !== "win32")(
@@ -1179,7 +1234,7 @@ describe("handleSystemRunInvoke mac app exec host routing", () => {
     });
 
     expect(runCommand).toHaveBeenCalledTimes(1);
-    const passedEnv = runCommand.mock.calls[0]?.[2];
+    const passedEnv = firstMockCallArg(runCommand, "runCommand", 2);
     expect(passedEnv).toEqual({
       LANG: "C",
       LC_TIME: "C",

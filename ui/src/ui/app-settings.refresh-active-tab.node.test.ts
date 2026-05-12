@@ -15,19 +15,12 @@ function createDeferred<T = void>() {
 }
 
 async function raceWithNextMacrotask(promise: Promise<unknown>): Promise<"resolved" | "pending"> {
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    return await Promise.race([
-      promise.then(() => "resolved" as const),
-      new Promise<"pending">((resolve) => {
-        timer = setTimeout(() => resolve("pending"), 0);
-      }),
-    ]);
-  } finally {
-    if (timer) {
-      clearTimeout(timer);
-    }
-  }
+  return await Promise.race([
+    promise.then(() => "resolved" as const),
+    new Promise<"pending">((resolve) => {
+      setImmediate(() => resolve("pending"));
+    }),
+  ]);
 }
 
 const mocks = vi.hoisted(() => ({
@@ -184,12 +177,14 @@ function expectBufferedPerformanceEvent(
       return candidate.payload?.[key] === expected;
     });
   });
-  expect(entry).toBeDefined();
-  for (const [key, expected] of Object.entries(expectedPayload)) {
-    expect(entry?.payload?.[key]).toBe(expected);
+  if (!entry) {
+    throw new Error(`Expected performance event ${event}`);
   }
-  expect(entry?.payload?.durationMs).toBeTypeOf("number");
-  return entry?.payload;
+  for (const [key, expected] of Object.entries(expectedPayload)) {
+    expect(entry.payload?.[key]).toBe(expected);
+  }
+  expect(entry.payload?.durationMs).toBeTypeOf("number");
+  return entry.payload;
 }
 
 describe("refreshActiveTab", () => {
