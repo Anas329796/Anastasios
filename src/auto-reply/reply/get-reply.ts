@@ -25,7 +25,10 @@ import type { ReplyPayload } from "../reply-payload.js";
 import type { MsgContext } from "../templating.js";
 import { normalizeVerboseLevel } from "../thinking.js";
 import { SILENT_REPLY_TOKEN } from "../tokens.js";
-import { resolveDefaultModel } from "./directive-handling.defaults.js";
+import {
+  resolveDefaultModel,
+  resolveSubagentSessionDefaultModel,
+} from "./directive-handling.defaults.js";
 import { clearInlineDirectives } from "./get-reply-directives-utils.js";
 import { resolveReplyDirectives } from "./get-reply-directives.js";
 import {
@@ -246,10 +249,10 @@ export async function getReplyFromConfig(
     mergedSkillFilter !== undefined ? { ...opts, skillFilter: mergedSkillFilter } : opts;
   const agentCfg = cfg.agents?.defaults;
   const sessionCfg = cfg.session;
-  const { defaultProvider, defaultModel, aliasIndex } = resolveDefaultModel({
-    cfg,
-    agentId,
-  });
+  const resolvedDefaults = resolveDefaultModel({ cfg, agentId });
+  let defaultProvider = resolvedDefaults.defaultProvider;
+  let defaultModel = resolvedDefaults.defaultModel;
+  const aliasIndex = resolvedDefaults.aliasIndex;
   let provider = defaultProvider;
   let model = defaultModel;
   let hasResolvedHeartbeatModelOverride = false;
@@ -455,6 +458,24 @@ export async function getReplyFromConfig(
     }
   }
 
+  // Subagent sessions should boot on their configured `subagents.model` chain,
+  // not the parent agent's primary. Without this, the Pi runtime starts on the
+  // parent's primary and post-run persistence clobbers `entry.model` over the
+  // value `resolveSubagentSpawnModelSelection` wrote at spawn time.
+  if (!hasResolvedHeartbeatModelOverride) {
+    const subagentDefault = resolveSubagentSessionDefaultModel({
+      cfg,
+      agentId,
+      sessionEntry,
+      defaultProvider,
+    });
+    if (subagentDefault) {
+      defaultProvider = subagentDefault.provider;
+      defaultModel = subagentDefault.model;
+      provider = subagentDefault.provider;
+      model = subagentDefault.model;
+    }
+  }
   if (resetTriggered && normalizeOptionalString(bodyStripped)) {
     const { applyResetModelOverride } = await loadSessionResetModelRuntime();
     await applyResetModelOverride({
