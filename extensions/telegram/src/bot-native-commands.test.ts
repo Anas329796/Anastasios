@@ -634,16 +634,14 @@ describe("registerTelegramNativeCommands", () => {
     expect(commandParams.messageThreadId).toBe(1);
   });
 
-  it("forwards direct-message binding context to Telegram plugin commands", async () => {
-    const { handler } = registerPlugCommand();
+  it("suppresses the fallback reply when a plugin command returns suppressReply: true", async () => {
+    const { handler } = registerPlugCommand({
+      result: { suppressReply: true },
+    });
 
-    await handler(createPrivateCommandContext({ chatId: 100, userId: 200 }));
+    await handler(createPrivateCommandContext());
 
-    const commandParams = firstExecutePluginCommandParams();
-    expect(commandParams.channel).toBe("telegram");
-    expect(commandParams.accountId).toBe("default");
-    expect(commandParams.from).toBe("telegram:100");
-    expect(commandParams.to).toBe("telegram:100");
-    expect(commandParams.messageThreadId).toBeUndefined();
+    expect(deliverReplies).not.toHaveBeenCalled();
+    expect(editMessageTelegram).not.toHaveBeenCalled();
   });
 });
