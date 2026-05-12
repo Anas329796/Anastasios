@@ -1,11 +1,71 @@
 import fs from "node:fs";
 import path from "node:path";
 import { resolveHomeRelativePath } from "../infra/home-dir.js";
-import { isPathInside } from "../infra/path-guards.js";
 
 export const TRAJECTORY_RUNTIME_CAPTURE_MAX_BYTES = 10 * 1024 * 1024;
 export const TRAJECTORY_RUNTIME_FILE_MAX_BYTES = 50 * 1024 * 1024;
-export const TRAJECTORY_RUNTIME_EVENT_MAX_BYTES = 256 * 1024;
+
+const DEFAULT_TRAJECTORY_RUNTIME_EVENT_MAX_BYTES = 256 * 1024;
+
+/**
+ * Resolve the per-event byte cap for trajectory runtime events.
+ *
+ * Operators can override the 256 KiB default via the
+ * `OPENCLAW_TRAJECTORY_RUNTIME_EVENT_MAX_BYTES` environment variable. Values
+ * accept human-friendly suffixes (`512kb`, `2mb`, `1gb`) or raw byte counts
+ * (`262144`). Invalid, empty, or non-positive values fall back to the default
+ * so misconfiguration cannot silently widen truncation behavior.
+ */
+export function resolveTrajectoryRuntimeEventMaxBytes(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const raw = env.OPENCLAW_TRAJECTORY_RUNTIME_EVENT_MAX_BYTES?.trim();
+  if (!raw) {
+    return DEFAULT_TRAJECTORY_RUNTIME_EVENT_MAX_BYTES;
+  }
+  try {
+    const parsed = parseTrajectoryEventByteSize(raw);
+    if (parsed > 0) {
+      return parsed;
+    }
+  } catch {
+    // Fall through to default on invalid input.
+  }
+  return DEFAULT_TRAJECTORY_RUNTIME_EVENT_MAX_BYTES;
+}
+
+/**
+ * Minimal byte-size parser for the trajectory event cap env var.
+ * Supports: raw integers, `kb`, `mb`, `gb` suffixes.
+ */
+function parseTrajectoryEventByteSize(raw: string): number {
+  const lower = raw.toLowerCase().replace(/\s+/g, "");
+  const m = /^(\d+(?:\.\d+)?)([a-z]*)$/.exec(lower);
+  if (!m) {
+    throw new Error(`invalid byte size: ${raw}`);
+  }
+  const [, numStr, unit] = m;
+  const num = parseFloat(numStr);
+  switch (unit) {
+    case "kb":
+    case "k":
+      return Math.floor(num * 1024);
+    case "mb":
+    case "m":
+      return Math.floor(num * 1024 * 1024);
+    case "gb":
+    case "g":
+      return Math.floor(num * 1024 * 1024 * 1024);
+    case "":
+    case "b":
+      return Math.floor(num);
+    default:
+      throw new Error(`invalid byte size unit: ${unit}`);
+  }
+}
+
+export const TRAJECTORY_RUNTIME_EVENT_MAX_BYTES =
+  resolveTrajectoryRuntimeEventMaxBytes();
 
 type TrajectoryPointerOpenFlagConstants = Pick<
   typeof fs.constants,
@@ -33,7 +93,8 @@ export function resolveTrajectoryPointerOpenFlags(
 function resolveContainedPath(baseDir: string, fileName: string): string {
   const resolvedBase = path.resolve(baseDir);
   const resolvedFile = path.resolve(resolvedBase, fileName);
-  if (resolvedFile === resolvedBase || !isPathInside(resolvedBase, resolvedFile)) {
+  const relative = path.relative(resolvedBase, resolvedFile);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
     throw new Error("Trajectory file path escaped its configured directory");
   }
   return resolvedFile;
