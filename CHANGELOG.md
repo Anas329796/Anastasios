@@ -536,6 +536,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Android/chat: wait for an in-flight model selection update before sending the next message, preventing immediate sends from racing the selected model. (#70993) Thanks @Svetznaniy33.
 - Models/auth: keep `agents.defaults.model` when `openclaw models auth login` runs without `--set-default`, so provider onboarding patches add models without silently switching the primary. Fixes #78162. (#78241) Thanks @neeravmakwana.
 - Control UI/chat: localize the remaining chat welcome, composer, run-control, session/model/thinking selector, and zh-CN Skills labels through the Control UI i18n pipeline so non-English browser locales no longer see those chat controls in English. Fixes #79937. Thanks @BunsDev.
 - Control UI: surface browser-blocked WebSocket security failures with wss:// and loopback dashboard guidance instead of leaving the connection on a dead security error. Thanks @BunsDev.

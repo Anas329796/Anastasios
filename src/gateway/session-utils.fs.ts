@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { StringDecoder } from "node:string_decoder";
 import { deriveSessionTotalTokens, hasNonzeroUsage, normalizeUsage } from "../agents/usage.js";
+import { stripInboundMetadata } from "../auto-reply/reply/strip-inbound-meta.js";
 import { jsonUtf8Bytes } from "../infra/json-utf8-bytes.js";
 import { hasInterSessionUserProvenance } from "../sessions/input-provenance.js";
 import { extractAssistantVisibleText } from "../shared/chat-message-content.js";
@@ -121,9 +122,10 @@ export function attachOpenClawTranscriptMeta(
     return message;
   }
   const record = message as Record<string, unknown>;
+  const openclawMeta = record["__openclaw"];
   const existing =
-    record.__openclaw && typeof record.__openclaw === "object" && !Array.isArray(record.__openclaw)
-      ? (record.__openclaw as Record<string, unknown>)
+    openclawMeta && typeof openclawMeta === "object" && !Array.isArray(openclawMeta)
+      ? (openclawMeta as Record<string, unknown>)
       : {};
   return {
     ...record,
@@ -924,7 +926,9 @@ export async function readSessionTitleFieldsFromTranscriptAsync(
 
 function extractTextFromContent(content: TranscriptMessage["content"]): string | null {
   if (typeof content === "string") {
-    const normalized = stripInlineDirectiveTagsForDisplay(content).text.trim();
+    const normalized = stripInboundMetadata(
+      stripInlineDirectiveTagsForDisplay(content).text,
+    ).trim();
     return normalized || null;
   }
   if (!Array.isArray(content)) {
@@ -935,7 +939,9 @@ function extractTextFromContent(content: TranscriptMessage["content"]): string |
       continue;
     }
     if (part.type === "text" || part.type === "output_text" || part.type === "input_text") {
-      const normalized = stripInlineDirectiveTagsForDisplay(part.text).text.trim();
+      const normalized = stripInboundMetadata(
+        stripInlineDirectiveTagsForDisplay(part.text).text,
+      ).trim();
       if (normalized) {
         return normalized;
       }
