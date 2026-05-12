@@ -675,28 +675,42 @@ function operationCanHotLoad(
   nextConfig: unknown,
   requestedPath: PathSegment[] | undefined,
 ): boolean {
-  if (!requestedPath || requestedPath.length < 3) return false;
-  if (requestedPath[0] !== "agents" || requestedPath[1] !== "list") return false;
+  if (!requestedPath || requestedPath.length < 3) {
+    return false;
+  }
+  if (requestedPath[0] !== "agents" || requestedPath[1] !== "list") {
+    return false;
+  }
   const indexSegment = requestedPath[2];
-  if (typeof indexSegment !== "string" || indexSegment.length === 0) return false;
+  if (typeof indexSegment !== "string" || indexSegment.length === 0) {
+    return false;
+  }
   // Only canonical, non-negative integer indices like "0", "3"; reject "01", "-1".
-  if (!/^(0|[1-9][0-9]*)$/.test(indexSegment)) return false;
+  if (!/^(0|[1-9][0-9]*)$/.test(indexSegment)) {
+    return false;
+  }
   const index = Number(indexSegment);
   // Any edit that touches the agentRuntime sub-tree changes runtime structure
   // and is treated as restart-required, even on an otherwise-active agent.
-  if (requestedPath.slice(3).includes("agentRuntime")) return false;
+  if (requestedPath.slice(3).includes("agentRuntime")) {
+    return false;
+  }
   const root = nextConfig as { agents?: { list?: unknown } } | undefined;
   const agentsList = root?.agents?.list;
-  if (!Array.isArray(agentsList)) return false;
+  if (!Array.isArray(agentsList)) {
+    return false;
+  }
   const agent = agentsList[index];
-  if (!agent || typeof agent !== "object" || Array.isArray(agent)) return false;
+  if (!agent || typeof agent !== "object" || Array.isArray(agent)) {
+    return false;
+  }
   const agentRuntime = (agent as { agentRuntime?: unknown }).agentRuntime;
   if (
     agentRuntime &&
     typeof agentRuntime === "object" &&
     !Array.isArray(agentRuntime) &&
     typeof (agentRuntime as { id?: unknown }).id === "string" &&
-    ((agentRuntime as { id: string }).id).length > 0
+    (agentRuntime as { id: string }).id.length > 0
   ) {
     // Dormant agent — runtime plan is cached; restart is genuinely needed.
     return false;
@@ -708,16 +722,19 @@ function operationsCanHotLoad(
   nextConfig: unknown,
   operations: ReadonlyArray<{ requestedPath?: PathSegment[] }>,
 ): boolean {
-  if (operations.length === 0) return false;
-  return operations.every((operation) =>
-    operationCanHotLoad(nextConfig, operation.requestedPath),
-  );
+  if (operations.length === 0) {
+    return false;
+  }
+  return operations.every((operation) => operationCanHotLoad(nextConfig, operation.requestedPath));
 }
 
 const RESTART_HINT = "Restart the gateway to apply.";
 const HOT_LOAD_HINT = "Change will apply on next agent invocation.";
 
-function applyHint(nextConfig: unknown, operations: ReadonlyArray<{ requestedPath?: PathSegment[] }>): string {
+function applyHint(
+  nextConfig: unknown,
+  operations: ReadonlyArray<{ requestedPath?: PathSegment[] }>,
+): string {
   return operationsCanHotLoad(nextConfig, operations) ? HOT_LOAD_HINT : RESTART_HINT;
 }
 
@@ -1682,9 +1699,7 @@ async function runConfigOperations(params: {
   if (params.successMode === "set" && operations.length === 1) {
     const operation = operations[0];
     const action = operation?.mutation === "delete" ? "Removed" : "Updated";
-    runtime.log(
-      info(`${action} ${toDotPath(operation?.requestedPath ?? [])}. ${hint}`),
-    );
+    runtime.log(info(`${action} ${toDotPath(operation?.requestedPath ?? [])}. ${hint}`));
     return;
   }
   if (params.successMode === "set") {
