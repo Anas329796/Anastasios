@@ -431,7 +431,7 @@ describe("CodexAppServerEventProjector", () => {
         },
       }),
     );
-    const toolProgressText = onToolResult.mock.calls[0]?.[0]?.text;
+    const toolProgressText = onToolResult.mock.calls.at(0)?.[0]?.text;
     expect(toolProgressText).toBe("🛠️ `run tests (workspace)`");
 
     await projector.handleNotification(
@@ -1457,7 +1457,7 @@ describe("CodexAppServerEventProjector", () => {
       }),
     );
 
-    const text = onToolResult.mock.calls[0]?.[0]?.text;
+    const text = onToolResult.mock.calls.at(0)?.[0]?.text;
     expect(text).toContain("sk-123…ZZZZ");
     expect(text).not.toContain("sk-1234567890abcdefZZZZ");
   });
@@ -1589,7 +1589,7 @@ describe("CodexAppServerEventProjector", () => {
     );
 
     expect(onToolResult).toHaveBeenCalledTimes(21);
-    expect(onToolResult.mock.calls[19]?.[0]?.text).toContain("...(truncated)...");
+    expect(onToolResult.mock.calls.at(19)?.[0]?.text).toContain("...(truncated)...");
     expect(JSON.stringify(onToolResult.mock.calls)).not.toContain(
       "final output should not duplicate",
     );

@@ -68,7 +68,7 @@ describe("loadPromptRefImages", () => {
       sandbox,
     });
 
-    const [ref, workspaceDir, options] = loadImageFromRefSpy.mock.calls[0] ?? [];
+    const [ref, workspaceDir, options] = loadImageFromRefSpy.mock.calls.at(0) ?? [];
     expect(ref?.resolved).toBe("/tmp/photo.png");
     expect(ref?.type).toBe("path");
     expect(workspaceDir).toBe("/workspace");
@@ -301,13 +301,14 @@ describe("writeCliImages", () => {
         useResume: false,
       });
 
-      const imageArgIndex = argv.indexOf("--image");
-      const promptIndex = argv.indexOf("describe the attached image");
-      expect(imageArgIndex).toBeGreaterThanOrEqual(0);
-      expect(promptIndex).toBeGreaterThanOrEqual(0);
-      expect(imageArgIndex).toBeGreaterThan(promptIndex);
-      expect(argv[imageArgIndex + 1]).toContain("openclaw-cli-images");
-      expect(argv[imageArgIndex + 1]).not.toBe(sourceImage);
+      expect(argv).toStrictEqual([
+        "exec",
+        "--json",
+        "describe the attached image",
+        "--image",
+        expect.stringContaining("openclaw-cli-images"),
+      ]);
+      expect(argv[4]).not.toBe(sourceImage);
 
       await prepared.cleanupImages?.();
     } finally {
