@@ -29,15 +29,37 @@ vi.mock("./skills/plugin-skills.js", () => ({
   resolvePluginSkillDirs: () => [],
 }));
 
-async function writeInstallableSkill(workspaceDir: string, name: string): Promise<string> {
-  const skillDir = path.join(workspaceDir, "skills", name);
+async function writeInstallableSkill(
+  workspaceDir: string,
+  name: string,
+  options?: {
+    skillKey?: string;
+  },
+): Promise<string> {
+  return writeInstallableSkillInRoot(path.join(workspaceDir, "skills"), name, options);
+}
+
+async function writeInstallableSkillInRoot(
+  skillsRootDir: string,
+  name: string,
+  options?: {
+    skillKey?: string;
+  },
+): Promise<string> {
+  const skillDir = path.join(skillsRootDir, name);
   await fs.mkdir(skillDir, { recursive: true });
+  const metadata = {
+    openclaw: {
+      ...(options?.skillKey ? { skillKey: options.skillKey } : {}),
+      install: [{ id: "deps", kind: "node", package: "example-package" }],
+    },
+  };
   await fs.writeFile(
     path.join(skillDir, "SKILL.md"),
     `---
 name: ${name}
 description: test skill
-metadata: {"openclaw":{"install":[{"id":"deps","kind":"node","package":"example-package"}]}}
+metadata: ${JSON.stringify(metadata)}
 ---
 
 # ${name}
@@ -67,10 +89,18 @@ function mockDangerousSkillScanFinding(skillDir: string) {
   });
 }
 
-function loadTestWorkspaceSkillEntries(workspaceDir: string): SkillEntry[] {
+function loadTestWorkspaceSkillEntries(
+  workspaceDir: string,
+  source: unknown = "openclaw-workspace",
+): SkillEntry[] {
+  const resolvedSource = typeof source === "string" ? source : "openclaw-workspace";
+  return loadTestSkillEntriesFromDir(path.join(workspaceDir, "skills"), resolvedSource);
+}
+
+function loadTestSkillEntriesFromDir(dir: string, source = "openclaw-workspace"): SkillEntry[] {
   const skills = loadSkillsFromDirSafe({
-    dir: path.join(workspaceDir, "skills"),
-    source: "openclaw-workspace",
+    dir,
+    source,
   }).skills;
   return skills.map((skill) => {
     const frontmatter =
@@ -90,6 +120,29 @@ function loadTestWorkspaceSkillEntries(workspaceDir: string): SkillEntry[] {
         userInvocable: invocation.userInvocable,
       },
     };
+  });
+}
+
+function emptyBundledSkillsContext() {
+  return { names: new Set<string>(), skillKeys: new Set<string>() };
+}
+
+function setSkillsInstallTestDeps(
+  overrides: NonNullable<Parameters<typeof skillsInstallTesting.setDepsForTest>[0]> = {},
+) {
+  skillsInstallTesting.setDepsForTest({
+    loadWorkspaceSkillEntries: loadTestWorkspaceSkillEntries,
+    loadWorkspaceSkillEntriesForInstallCollision: loadTestWorkspaceSkillEntries,
+    resolveNodeInstallStateDir: () => {
+      const stateDir = process.env.OPENCLAW_STATE_DIR;
+      if (!stateDir) {
+        throw new Error("OPENCLAW_STATE_DIR missing in skills install test");
+      }
+      return stateDir;
+    },
+    resolveBundledSkillsContext: emptyBundledSkillsContext,
+    isCaseInsensitiveToolsFilesystem: () => false,
+    ...overrides,
   });
 }
 
@@ -124,16 +177,7 @@ describe("installSkill code safety scanning", () => {
     resetGlobalHookRunner();
     runCommandWithTimeoutMock.mockClear();
     scanDirectoryWithSummaryMock.mockClear();
-    skillsInstallTesting.setDepsForTest({
-      loadWorkspaceSkillEntries: loadTestWorkspaceSkillEntries,
-      resolveNodeInstallStateDir: () => {
-        const stateDir = process.env.OPENCLAW_STATE_DIR;
-        if (!stateDir) {
-          throw new Error("OPENCLAW_STATE_DIR missing in skills install test");
-        }
-        return stateDir;
-      },
-    });
+    setSkillsInstallTestDeps();
     runCommandWithTimeoutMock.mockResolvedValue({
       code: 0,
       stdout: "ok",
@@ -170,6 +214,169 @@ describe("installSkill code safety scanning", () => {
       expect(runCommandWithTimeoutMock).not.toHaveBeenCalled();
     });
   });
+
+  it("blocks non-bundled installs that claim a bundled skill key", async () => {
+    await withWorkspaceCase(async ({ workspaceDir }) => {
+      await writeInstallableSkill(workspaceDir, "tts-helper", {
+        skillKey: " sherpa-onnx-tts ",
+      });
+      setSkillsInstallTestDeps({
+        resolveBundledSkillsContext: () => ({
+          names: new Set(["sherpa-onnx-tts"]),
+          skillKeys: new Set(["sherpa-onnx-tts"]),
+        }),
+      });
+
+      const result = await installSkill({
+        workspaceDir,
+        skillName: "tts-helper",
+        installId: "deps",
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.message).toContain(
+        'Skill "tts-helper" install blocked: non-bundled source "openclaw-workspace" claims bundled skill key "sherpa-onnx-tts".',
+      );
+      expect(runCommandWithTimeoutMock).not.toHaveBeenCalled();
+    });
+  });
+
+  it("blocks case-only bundled skill key claims on case-insensitive tools filesystems", async () => {
+    await withWorkspaceCase(async ({ workspaceDir }) => {
+      await writeInstallableSkill(workspaceDir, "tts-helper", {
+        skillKey: " Sherpa-Onnx-TTS ",
+      });
+      setSkillsInstallTestDeps({
+        isCaseInsensitiveToolsFilesystem: () => true,
+        resolveBundledSkillsContext: () => ({
+          names: new Set(["sherpa-onnx-tts"]),
+          skillKeys: new Set(["sherpa-onnx-tts"]),
+        }),
+      });
+
+      const result = await installSkill({
+        workspaceDir,
+        skillName: "tts-helper",
+        installId: "deps",
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.message).toContain(
+        'Skill "tts-helper" install blocked: non-bundled source "openclaw-workspace" claims bundled skill key "Sherpa-Onnx-TTS".',
+      );
+      expect(runCommandWithTimeoutMock).not.toHaveBeenCalled();
+    });
+  });
+
+  it.each(["openclaw-managed", "openclaw-extra"])(
+    "allows trusted %s installs that use a bundled skill key",
+    async (source) => {
+      await withWorkspaceCase(async ({ workspaceDir }) => {
+        await writeInstallableSkill(workspaceDir, "trusted-tts", {
+          skillKey: "sherpa-onnx-tts",
+        });
+        setSkillsInstallTestDeps({
+          loadWorkspaceSkillEntries: (dir) => loadTestWorkspaceSkillEntries(dir, source),
+          resolveBundledSkillsContext: () => ({
+            names: new Set(["sherpa-onnx-tts"]),
+            skillKeys: new Set(["sherpa-onnx-tts"]),
+          }),
+        });
+
+        const result = await installSkill({
+          workspaceDir,
+          skillName: "trusted-tts",
+          installId: "deps",
+        });
+
+        expect(result.ok).toBe(true);
+        expect(result.warnings ?? []).toEqual([]);
+        expect(runCommandWithTimeoutMock).toHaveBeenCalled();
+      });
+    },
+  );
+
+  it("blocks non-bundled installs whose tools directory collides with another skill", async () => {
+    await withWorkspaceCase(async ({ workspaceDir }) => {
+      await writeInstallableSkill(workspaceDir, "runtime-owner", {
+        skillKey: "shared-runtime",
+      });
+      await writeInstallableSkill(workspaceDir, "runtime-helper", {
+        skillKey: "shared-runtime",
+      });
+
+      const result = await installSkill({
+        workspaceDir,
+        skillName: "runtime-helper",
+        installId: "deps",
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.message).toContain(
+        'Skill "runtime-helper" install blocked: tools directory collides with runtime-owner (openclaw-workspace).',
+      );
+      expect(runCommandWithTimeoutMock).not.toHaveBeenCalled();
+    });
+  });
+
+  it("blocks case-only tools directory collisions on case-insensitive tools filesystems", async () => {
+    await withWorkspaceCase(async ({ workspaceDir }) => {
+      await writeInstallableSkill(workspaceDir, "runtime-owner", {
+        skillKey: "shared-runtime",
+      });
+      await writeInstallableSkill(workspaceDir, "runtime-helper", {
+        skillKey: "Shared-Runtime",
+      });
+      setSkillsInstallTestDeps({
+        isCaseInsensitiveToolsFilesystem: () => true,
+      });
+
+      const result = await installSkill({
+        workspaceDir,
+        skillName: "runtime-helper",
+        installId: "deps",
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.message).toContain(
+        'Skill "runtime-helper" install blocked: tools directory collides with runtime-owner (openclaw-workspace).',
+      );
+      expect(runCommandWithTimeoutMock).not.toHaveBeenCalled();
+    });
+  });
+
+  it.each(["openclaw-managed", "openclaw-extra"])(
+    "blocks non-bundled installs that shadow a trusted %s skill tools directory",
+    async (trustedSource) => {
+      await withWorkspaceCase(async ({ workspaceDir }) => {
+        const trustedSkillsRoot = path.join(workspaceDir, `${trustedSource}-skills`);
+        await writeInstallableSkillInRoot(trustedSkillsRoot, "runtime-owner", {
+          skillKey: "shared-runtime",
+        });
+        await writeInstallableSkill(workspaceDir, "runtime-owner", {
+          skillKey: "shared-runtime",
+        });
+        setSkillsInstallTestDeps({
+          loadWorkspaceSkillEntriesForInstallCollision: (dir) => [
+            ...loadTestSkillEntriesFromDir(trustedSkillsRoot, trustedSource),
+            ...loadTestWorkspaceSkillEntries(dir),
+          ],
+        });
+
+        const result = await installSkill({
+          workspaceDir,
+          skillName: "runtime-owner",
+          installId: "deps",
+        });
+
+        expect(result.ok).toBe(false);
+        expect(result.message).toContain(
+          `Skill "runtime-owner" install blocked: tools directory collides with runtime-owner (${trustedSource}).`,
+        );
+        expect(runCommandWithTimeoutMock).not.toHaveBeenCalled();
+      });
+    },
+  );
 
   it("allows dangerous skill installs when forced unsafe install is set", async () => {
     await withWorkspaceCase(async ({ workspaceDir }) => {

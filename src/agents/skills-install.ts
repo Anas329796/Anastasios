@@ -17,12 +17,19 @@ import type { SkillInstallResult } from "./skills-install.types.js";
 import {
   hasBinary as defaultHasBinary,
   loadWorkspaceSkillEntries as defaultLoadWorkspaceSkillEntries,
+  loadWorkspaceSkillEntriesForInstallCollision as defaultLoadWorkspaceSkillEntriesForInstallCollision,
   resolveSkillsInstallPreferences as defaultResolveSkillsInstallPreferences,
   type SkillEntry,
   type SkillInstallSpec,
   type SkillsInstallPreferences,
 } from "./skills.js";
+import {
+  resolveBundledSkillsContext as defaultResolveBundledSkillsContext,
+  type BundledSkillsContext,
+} from "./skills/bundled-context.js";
+import { resolveSkillKey } from "./skills/frontmatter.js";
 import { resolveSkillSource } from "./skills/source.js";
+import { resolveSkillToolsRootDir } from "./skills/tools-dir.js";
 
 export type SkillInstallRequest = InstallSafetyOverrides & {
   workspaceDir: string;
@@ -36,20 +43,64 @@ export type { SkillInstallResult } from "./skills-install.types.js";
 type SkillsInstallDeps = {
   hasBinary: (bin: string) => boolean;
   loadWorkspaceSkillEntries: typeof defaultLoadWorkspaceSkillEntries;
+  loadWorkspaceSkillEntriesForInstallCollision: typeof defaultLoadWorkspaceSkillEntriesForInstallCollision;
   resolveNodeInstallStateDir: () => string;
   resolveBrewExecutable: () => string | undefined;
   resolveSkillsInstallPreferences: typeof defaultResolveSkillsInstallPreferences;
+  resolveBundledSkillsContext: () => BundledSkillsContext;
+  isCaseInsensitiveToolsFilesystem: () => boolean;
 };
 
 const defaultSkillsInstallDeps: SkillsInstallDeps = {
   hasBinary: defaultHasBinary,
   loadWorkspaceSkillEntries: defaultLoadWorkspaceSkillEntries,
+  loadWorkspaceSkillEntriesForInstallCollision: defaultLoadWorkspaceSkillEntriesForInstallCollision,
   resolveNodeInstallStateDir: resolveDefaultNodeInstallStateDir,
   resolveBrewExecutable: defaultResolveBrewExecutable,
   resolveSkillsInstallPreferences: defaultResolveSkillsInstallPreferences,
+  resolveBundledSkillsContext: defaultResolveBundledSkillsContext,
+  isCaseInsensitiveToolsFilesystem: isCaseInsensitiveToolsFilesystemByDefault,
 };
 
 let skillsInstallDeps = defaultSkillsInstallDeps;
+
+const trustedInstallSources = new Set(["openclaw-bundled", "openclaw-managed", "openclaw-extra"]);
+
+function isCaseInsensitiveToolsFilesystemByDefault(): boolean {
+  return process.platform === "darwin" || process.platform === "win32";
+}
+
+function normalizeToolsCollisionValue(value: string, caseInsensitive: boolean): string {
+  const normalized = value.normalize("NFC");
+  return caseInsensitive ? normalized.toLowerCase() : normalized;
+}
+
+function hasCollisionValue(
+  values: ReadonlySet<string>,
+  candidate: string,
+  caseInsensitive: boolean,
+): boolean {
+  if (values.has(candidate)) {
+    return true;
+  }
+  if (!caseInsensitive) {
+    return false;
+  }
+  const normalizedCandidate = normalizeToolsCollisionValue(candidate, true);
+  for (const value of values) {
+    if (normalizeToolsCollisionValue(value, true) === normalizedCandidate) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function resolveToolsRootCollisionValue(entry: SkillEntry, caseInsensitive: boolean): string {
+  return normalizeToolsCollisionValue(
+    path.resolve(resolveSkillToolsRootDir(entry)),
+    caseInsensitive,
+  );
+}
 
 function getSkillsInstallDeps(): SkillsInstallDeps {
   return skillsInstallDeps;
@@ -75,6 +126,62 @@ function findInstallSpec(entry: SkillEntry, installId: string): SkillInstallSpec
     if (resolveInstallId(spec, index) === installId) {
       return spec;
     }
+  }
+  return undefined;
+}
+
+function sameSkillInstallSource(left: SkillEntry, right: SkillEntry): boolean {
+  return (
+    path.resolve(left.skill.baseDir) === path.resolve(right.skill.baseDir) &&
+    path.resolve(left.skill.filePath) === path.resolve(right.skill.filePath)
+  );
+}
+
+function formatSkillInstallSource(entry: SkillEntry): string {
+  return `${entry.skill.name} (${resolveSkillSource(entry.skill)})`;
+}
+
+function isTrustedInstallSource(source: string): boolean {
+  return trustedInstallSources.has(source);
+}
+
+function resolveSkillToolsRootCollision(params: {
+  entry: SkillEntry;
+  entries: readonly SkillEntry[];
+  bundledContext: BundledSkillsContext;
+  caseInsensitiveToolsFilesystem: boolean;
+}): string | undefined {
+  const source = resolveSkillSource(params.entry.skill);
+  if (isTrustedInstallSource(source)) {
+    return undefined;
+  }
+
+  const skillKey = resolveSkillKey(params.entry.skill, params.entry);
+  if (
+    hasCollisionValue(
+      params.bundledContext.skillKeys,
+      skillKey,
+      params.caseInsensitiveToolsFilesystem,
+    ) ||
+    hasCollisionValue(params.bundledContext.names, skillKey, params.caseInsensitiveToolsFilesystem)
+  ) {
+    return `Skill "${params.entry.skill.name}" install blocked: non-bundled source "${source}" claims bundled skill key "${skillKey}".`;
+  }
+
+  const toolsRoot = resolveToolsRootCollisionValue(
+    params.entry,
+    params.caseInsensitiveToolsFilesystem,
+  );
+  for (const other of params.entries) {
+    if (sameSkillInstallSource(params.entry, other)) {
+      continue;
+    }
+    if (
+      resolveToolsRootCollisionValue(other, params.caseInsensitiveToolsFilesystem) !== toolsRoot
+    ) {
+      continue;
+    }
+    return `Skill "${params.entry.skill.name}" install blocked: tools directory collides with ${formatSkillInstallSource(other)}.`;
   }
   return undefined;
 }
@@ -492,10 +599,10 @@ export async function installSkill(params: SkillInstallRequest): Promise<SkillIn
       warnings,
     );
   }
+
   // Warn when install is triggered from a non-bundled source.
   // Workspace/project/personal agent skills can contain attacker-controlled metadata.
-  const trustedInstallSources = new Set(["openclaw-bundled", "openclaw-managed", "openclaw-extra"]);
-  if (!trustedInstallSources.has(skillSource)) {
+  if (!isTrustedInstallSource(skillSource)) {
     warnings.push(
       `WARNING: Skill "${params.skillName}" install triggered from non-bundled source "${skillSource}". Verify the install recipe is trusted.`,
     );
@@ -512,6 +619,28 @@ export async function installSkill(params: SkillInstallRequest): Promise<SkillIn
       warnings,
     );
   }
+
+  const toolsRootCollision = resolveSkillToolsRootCollision({
+    entry,
+    entries: deps.loadWorkspaceSkillEntriesForInstallCollision(workspaceDir, {
+      config: params.config,
+    }),
+    bundledContext: deps.resolveBundledSkillsContext(),
+    caseInsensitiveToolsFilesystem: deps.isCaseInsensitiveToolsFilesystem(),
+  });
+  if (toolsRootCollision) {
+    return withWarnings(
+      {
+        ok: false,
+        message: toolsRootCollision,
+        stdout: "",
+        stderr: toolsRootCollision,
+        code: null,
+      },
+      warnings,
+    );
+  }
+
   if (spec.kind === "download") {
     const downloadResult = await installDownloadSpec({ entry, spec, timeoutMs });
     return withWarnings(downloadResult, warnings);
