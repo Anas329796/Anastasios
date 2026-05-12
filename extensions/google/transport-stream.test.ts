@@ -964,6 +964,62 @@ describe("google transport stream", () => {
     });
   });
 
+  it("adds skip-validator fallback to unsigned sibling Gemini 3 tool calls", () => {
+    const model = buildGeminiModel({
+      id: "gemini-3.1-pro-preview",
+      name: "Gemini 3.1 Pro Preview",
+    });
+
+    const params = buildGoogleGenerativeAiParams(model, {
+      messages: [
+        {
+          role: "assistant",
+          provider: "google",
+          api: "google-generative-ai",
+          model: "gemini-3.1-pro-preview",
+          stopReason: "toolUse",
+          timestamp: 0,
+          content: [
+            {
+              type: "toolCall",
+              id: "call_math",
+              name: "math_eval",
+              arguments: { expression: "17*23" },
+              thoughtSignature: "real_sig_1",
+            },
+            {
+              type: "toolCall",
+              id: "call_lookup",
+              name: "lookup_fact",
+              arguments: { key: "beta" },
+            },
+            {
+              type: "toolCall",
+              id: "call_transform",
+              name: "string_transform",
+              arguments: { text: "claw", mode: "reverse" },
+            },
+          ],
+        },
+      ],
+    } as never);
+
+    const parts = (params.contents[0] as { parts: Array<Record<string, unknown>> }).parts;
+    expect(parts).toHaveLength(3);
+    expect(parts[0]).toMatchObject({
+      thoughtSignature: "real_sig_1",
+      functionCall: { name: "math_eval", args: { expression: "17*23" } },
+    });
+    expect(parts[1]).toMatchObject({
+      thoughtSignature: "skip_thought_signature_validator",
+      functionCall: { name: "lookup_fact", args: { key: "beta" } },
+    });
+    expect(parts[2]).toMatchObject({
+      thoughtSignature: "skip_thought_signature_validator",
+      functionCall: { name: "string_transform", args: { text: "claw", mode: "reverse" } },
+    });
+  });
+
   it("does not trust cross-provider tool-call thought signatures for non-Gemini-3 models", () => {
     const model = buildGeminiModel({
       id: "gemini-2.5-pro",
