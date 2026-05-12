@@ -23,6 +23,7 @@ import {
 import { GATEWAY_CLIENT_IDS, GATEWAY_CLIENT_MODES } from "../../gateway/protocol/client-info.js";
 import { getToolResult, runMessageAction } from "../../infra/outbound/message-action-runner.js";
 import { resolveAllowedMessageActions } from "../../infra/outbound/outbound-policy.js";
+import { hasReplyPayloadContent } from "../../interactive/payload.js";
 import { stringifyRouteThreadId } from "../../plugin-sdk/channel-route.js";
 import { POLL_CREATION_PARAM_DEFS, SHARED_POLL_CREATION_PARAM_NAMES } from "../../poll-params.js";
 import { normalizeAccountId } from "../../routing/session-key.js";
@@ -82,21 +83,36 @@ function normalizeEscapedLineBreaksForVisibleText(text: string): string {
   return text.replace(/\\r\\n|\\n|\\r/g, "\n");
 }
 
-function sanitizeUserVisibleToolText(text: string, bootPrompt: string | undefined): string {
+function sanitizeUserVisibleToolTextResult(
+  text: string,
+  bootPrompt: string | undefined,
+): { text: string; suppressed: boolean } {
   const normalized = normalizeEscapedLineBreaksForVisibleText(text);
-  return stripBootEchoFromOutboundText(
-    stripInternalRuntimeContext(stripFormattedReasoningMessage(normalized)),
-    bootPrompt,
-  );
+  const strippedReasoning = stripFormattedReasoningMessage(normalized);
+  const strippedInternal = stripInternalRuntimeContext(strippedReasoning);
+  const strippedBoot = stripBootEchoFromOutboundText(strippedInternal, bootPrompt);
+  return {
+    text: strippedBoot,
+    suppressed:
+      strippedBoot.trim().length === 0 &&
+      strippedReasoning.trim().length > 0 &&
+      (strippedInternal !== strippedReasoning || strippedBoot !== strippedInternal),
+  };
 }
 
-function sanitizePresentationTextFields(value: unknown, bootPrompt: string | undefined): unknown {
+function sanitizePresentationTextFieldsResult(
+  value: unknown,
+  bootPrompt: string | undefined,
+): { value: unknown; suppressed: boolean } {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return value;
+    return { value, suppressed: false };
   }
+  let suppressed = false;
   const presentation = { ...(value as Record<string, unknown>) };
   if (typeof presentation.title === "string") {
-    presentation.title = sanitizeUserVisibleToolText(presentation.title, bootPrompt);
+    const sanitized = sanitizeUserVisibleToolTextResult(presentation.title, bootPrompt);
+    presentation.title = sanitized.text;
+    suppressed ||= sanitized.suppressed;
   }
   if (Array.isArray(presentation.blocks)) {
     presentation.blocks = presentation.blocks.map((block) => {
@@ -106,7 +122,9 @@ function sanitizePresentationTextFields(value: unknown, bootPrompt: string | und
       const sanitizedBlock = { ...(block as Record<string, unknown>) };
       for (const field of ["text", "placeholder"]) {
         if (typeof sanitizedBlock[field] === "string") {
-          sanitizedBlock[field] = sanitizeUserVisibleToolText(sanitizedBlock[field], bootPrompt);
+          const sanitized = sanitizeUserVisibleToolTextResult(sanitizedBlock[field], bootPrompt);
+          sanitizedBlock[field] = sanitized.text;
+          suppressed ||= sanitized.suppressed;
         }
       }
       if (Array.isArray(sanitizedBlock.buttons)) {
@@ -116,7 +134,9 @@ function sanitizePresentationTextFields(value: unknown, bootPrompt: string | und
           }
           const sanitizedButton = { ...(button as Record<string, unknown>) };
           if (typeof sanitizedButton.label === "string") {
-            sanitizedButton.label = sanitizeUserVisibleToolText(sanitizedButton.label, bootPrompt);
+            const sanitized = sanitizeUserVisibleToolTextResult(sanitizedButton.label, bootPrompt);
+            sanitizedButton.label = sanitized.text;
+            suppressed ||= sanitized.suppressed;
           }
           return sanitizedButton;
         });
@@ -128,7 +148,9 @@ function sanitizePresentationTextFields(value: unknown, bootPrompt: string | und
           }
           const sanitizedOption = { ...(option as Record<string, unknown>) };
           if (typeof sanitizedOption.label === "string") {
-            sanitizedOption.label = sanitizeUserVisibleToolText(sanitizedOption.label, bootPrompt);
+            const sanitized = sanitizeUserVisibleToolTextResult(sanitizedOption.label, bootPrompt);
+            sanitizedOption.label = sanitized.text;
+            suppressed ||= sanitized.suppressed;
           }
           return sanitizedOption;
         });
@@ -136,7 +158,42 @@ function sanitizePresentationTextFields(value: unknown, bootPrompt: string | und
       return sanitizedBlock;
     });
   }
-  return presentation;
+  return { value: presentation, suppressed };
+}
+
+function readFirstStringParam(params: Record<string, unknown>, keys: readonly string[]): string {
+  for (const key of keys) {
+    const value = params[key];
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+  return "";
+}
+
+function readStringArrayParamRaw(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const values = value.filter((entry): entry is string => typeof entry === "string");
+  return values.length > 0 ? values : undefined;
+}
+
+function hasSanitizedSendPayloadContent(params: Record<string, unknown>): boolean {
+  const text = ["message", "text", "content", "caption"]
+    .map((field) => (typeof params[field] === "string" ? params[field] : ""))
+    .filter((value) => value.trim())
+    .join("\n");
+  return hasReplyPayloadContent(
+    {
+      text,
+      mediaUrl: readFirstStringParam(params, ["media", "mediaUrl", "path", "filePath", "fileUrl"]),
+      mediaUrls: readStringArrayParamRaw(params.mediaUrls),
+      presentation: params.presentation,
+      interactive: params.interactive,
+    },
+    { trimText: true },
+  );
 }
 
 function buildRoutingSchema() {
@@ -861,19 +918,35 @@ export function createMessageTool(options?: MessageToolOptions): AnyAgentTool {
       //    that paraphrase out the wrapper markers but reproduce a
       //    substantial chunk of the boot prompt content. Refs #53732.
       const bootPromptForSession = getBootEchoContextForSession(options?.agentSessionKey);
+      let suppressedVisiblePayload = false;
       for (const field of ["text", "content", "message", "caption"]) {
         if (typeof params[field] === "string") {
-          params[field] = sanitizeUserVisibleToolText(params[field], bootPromptForSession);
+          const sanitized = sanitizeUserVisibleToolTextResult(params[field], bootPromptForSession);
+          params[field] = sanitized.text;
+          suppressedVisiblePayload ||= sanitized.suppressed;
         }
       }
-      params.presentation = sanitizePresentationTextFields(
+      const sanitizedPresentation = sanitizePresentationTextFieldsResult(
         params.presentation,
         bootPromptForSession,
       );
+      params.presentation = sanitizedPresentation.value;
+      suppressedVisiblePayload ||= sanitizedPresentation.suppressed;
 
       const action = readStringParam(params, "action", {
         required: true,
       }) as ChannelMessageActionName;
+      if (
+        suppressedVisiblePayload &&
+        action === "send" &&
+        !hasSanitizedSendPayloadContent(params)
+      ) {
+        return jsonResult({
+          status: "suppressed",
+          reason: "internal_runtime_context_echo",
+          message: "Suppressed outbound message text because it matched internal runtime context.",
+        });
+      }
       const requireExplicitTarget = options?.requireExplicitTarget === true;
       if (requireExplicitTarget && actionNeedsExplicitTarget(action)) {
         const explicitTarget =
