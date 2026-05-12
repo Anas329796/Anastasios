@@ -1,6 +1,7 @@
 import {
   defineFinalizableLivePreviewAdapter,
   deliverWithFinalizableLivePreviewAdapter,
+  type LivePreviewFinalizerResultKind,
 } from "openclaw/plugin-sdk/channel-message";
 import { resolveChannelStreamingPreviewToolProgress } from "openclaw/plugin-sdk/channel-streaming";
 import { isLoopbackHost } from "openclaw/plugin-sdk/gateway-runtime";
@@ -18,6 +19,11 @@ import {
   resolveMattermostReplyToMode,
   type ResolvedMattermostAccount,
 } from "./accounts.js";
+import {
+  cleanupMattermostAckReaction,
+  createMattermostAckReaction,
+  resolveMattermostAckReactionConfig,
+} from "./ack-reactions.js";
 import {
   createMattermostClient,
   fetchMattermostMe,
@@ -283,6 +289,19 @@ export function shouldClearMattermostDraftPreview(params: {
   return params.finalReplyDelivered && !params.finalizedViaPreviewPost;
 }
 
+export function didMattermostDeliverVisibleReply(
+  resultKind: LivePreviewFinalizerResultKind,
+): boolean {
+  return resultKind === "normal-delivered" || resultKind === "preview-finalized";
+}
+
+export function updateMattermostReplyDeliveryState(params: {
+  previousDelivered: boolean;
+  resultKind: LivePreviewFinalizerResultKind;
+}): boolean {
+  return params.previousDelivered || didMattermostDeliverVisibleReply(params.resultKind);
+}
+
 export function shouldFinalizeMattermostPreviewAfterDispatch(params: {
   finalCount: number;
   canFinalizeInPlace: boolean;
@@ -326,12 +345,12 @@ type MattermostDraftPreviewDeliverParams = {
 
 export async function deliverMattermostReplyWithDraftPreview(
   params: MattermostDraftPreviewDeliverParams,
-): Promise<void> {
+): Promise<{ kind: LivePreviewFinalizerResultKind }> {
   if (isReasoningReplyPayload(params.payload)) {
-    return;
+    return { kind: "normal-skipped" };
   }
 
-  await deliverWithFinalizableLivePreviewAdapter({
+  return await deliverWithFinalizableLivePreviewAdapter({
     kind: params.info.kind,
     payload: params.payload,
     adapter: defineFinalizableLivePreviewAdapter<ReplyPayload, string, { message: string }>({
@@ -1559,6 +1578,28 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
         logVerboseMessage(
           `mattermost inbound: from=${ctxPayload.From} len=${bodyText.length} preview="${previewLine}"`,
         );
+        const mattermostConfig = cfg.channels?.mattermost;
+        const reactionsEnabled =
+          account.config.actions?.reactions ?? mattermostConfig?.actions?.reactions ?? true;
+        const { removeAckAfterReply } = resolveMattermostAckReactionConfig({
+          cfg,
+          agentId: route.agentId,
+          accountId: account.accountId,
+        });
+        const ackReaction = createMattermostAckReaction({
+          cfg,
+          agentId: route.agentId,
+          accountId: account.accountId,
+          channelId,
+          postId: post.id,
+          kind,
+          shouldRequireMention,
+          canDetectMention,
+          effectiveWasMentioned: mentionDecision.effectiveWasMentioned,
+          shouldBypassMention,
+          reactionsEnabled,
+          log: logVerboseMessage,
+        });
 
         const textLimit = core.channel.text.resolveTextChunkLimit(
           cfg,
@@ -1607,6 +1648,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
             })
           : createDisabledMattermostDraftStream();
         let lastPartialText = "";
+        let anyReplyDelivered = false;
         const previewState: MattermostDraftPreviewState = {
           finalizedViaPreviewPost: false,
         };
@@ -1700,6 +1742,10 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
                   });
                   runtime.log?.(`delivered reply to ${to}`);
                 },
+              });
+              anyReplyDelivered = updateMattermostReplyDeliveryState({
+                previousDelivered: anyReplyDelivered,
+                resultKind: result.kind,
               });
             },
             onError: (err, info) => {
@@ -1830,6 +1876,13 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
             },
           });
         } finally {
+          cleanupMattermostAckReaction({
+            ackReaction,
+            didSendReply: anyReplyDelivered,
+            removeAckAfterReply,
+            target: `${channelId}/${post.id ?? "unknown"}`,
+            log: logVerboseMessage,
+          });
           try {
             await draftStream.stop();
           } catch (err) {
