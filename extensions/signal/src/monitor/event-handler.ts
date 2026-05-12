@@ -45,6 +45,7 @@ import {
   formatSignalPairingIdLine,
   formatSignalSenderDisplay,
   formatSignalSenderId,
+  isStrictUuid,
   normalizeSignalAllowRecipient,
   resolveSignalPeerId,
   resolveSignalRecipient,
@@ -59,9 +60,11 @@ import type {
   SignalEventHandlerDeps,
   SignalReactionMessage,
   SignalReceivePayload,
+  SignalReplyTarget,
 } from "./event-handler.types.js";
 import { resolveSignalQuoteContext } from "./inbound-context.js";
 import { renderSignalMentions } from "./mentions.js";
+import { describeSignalReplyTarget } from "./quote-context.js";
 
 function formatAttachmentKindCount(kind: string, count: number): string {
   if (kind === "attachment") {
@@ -101,6 +104,78 @@ function resolveSignalInboundRoute(params: {
 }
 
 export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
+  // Best-effort index to map (conversation, messageId) -> senderRecipient for quote-author resolution.
+  // signal-cli requires quote-author for group quotes.
+  const messageAuthorIndex = new Map<string, string>();
+  const MAX_MESSAGE_AUTHOR_INDEX = 5000;
+
+  const resolveConversationKey = (entry: {
+    isGroup: boolean;
+    groupId?: string;
+    senderPeerId: string;
+  }): string =>
+    entry.isGroup ? `group:${entry.groupId ?? "unknown"}` : `dm:${entry.senderPeerId}`;
+
+  // Strict E.164: + followed by 7-15 digits (ITU-T E.164 range).
+  const STRICT_E164_RE = /^\+\d{7,15}$/;
+
+  const normalizeCachedMessageAuthor = (raw?: string) => {
+    const trimmed = raw?.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+    // Strip uuid: prefix and validate strictly.
+    const unprefixed = trimmed.toLowerCase().startsWith("uuid:")
+      ? trimmed.slice("uuid:".length).trim()
+      : undefined;
+    if (unprefixed !== undefined) {
+      return isStrictUuid(unprefixed) ? `uuid:${unprefixed}` : undefined;
+    }
+    // Bare UUID without prefix.
+    if (isStrictUuid(trimmed)) {
+      return `uuid:${trimmed}`;
+    }
+    // E.164 phone number: normalize then validate.
+    const normalized = normalizeE164(trimmed);
+    return STRICT_E164_RE.test(normalized) ? normalized : undefined;
+  };
+
+  const rememberMessageAuthor = (params: {
+    conversationKey: string;
+    messageId?: string;
+    senderRecipient?: string;
+  }) => {
+    const id = params.messageId?.trim();
+    const senderRecipient = normalizeCachedMessageAuthor(params.senderRecipient);
+    if (!id || !senderRecipient) {
+      return;
+    }
+    const key = `${params.conversationKey}:${id}`;
+    // Refresh insertion order for simple LRU-style eviction.
+    if (messageAuthorIndex.has(key)) {
+      messageAuthorIndex.delete(key);
+    }
+    messageAuthorIndex.set(key, senderRecipient);
+    while (messageAuthorIndex.size > MAX_MESSAGE_AUTHOR_INDEX) {
+      const oldest = messageAuthorIndex.keys().next().value;
+      if (oldest === undefined) {
+        break;
+      }
+      messageAuthorIndex.delete(oldest);
+    }
+  };
+
+  const resolveQuotedAuthor = (params: {
+    conversationKey: string;
+    replyToId?: string;
+  }): string | undefined => {
+    const replyToId = params.replyToId?.trim();
+    if (!replyToId) {
+      return undefined;
+    }
+    return messageAuthorIndex.get(`${params.conversationKey}:${replyToId}`);
+  };
+
   type SignalInboundEntry = {
     senderName: string;
     senderDisplay: string;
@@ -119,9 +194,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
     mediaTypes?: string[];
     commandAuthorized: boolean;
     wasMentioned?: boolean;
-    replyToBody?: string;
-    replyToSender?: string;
-    replyToIsQuote?: boolean;
+    quoteTarget?: SignalReplyTarget;
   };
 
   async function handleSignalInboundMessage(entry: SignalInboundEntry) {
@@ -148,11 +221,18 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       storePath,
       sessionKey: route.sessionKey,
     });
+    const quoteBlock = entry.quoteTarget
+      ? `[Quoting ${entry.quoteTarget.author ?? "unknown"}${
+          entry.quoteTarget.id ? ` id:${entry.quoteTarget.id}` : ""
+        }]\n"${entry.quoteTarget.body}"\n[/Quoting]`
+      : "";
+    const bodyForAgent = entry.bodyText || entry.quoteTarget?.body || "";
+    const bodyWithQuote = [entry.bodyText, quoteBlock].filter(Boolean).join("\n\n");
     const body = formatInboundEnvelope({
       channel: "Signal",
       from: fromLabel,
       timestamp: entry.timestamp ?? undefined,
-      body: entry.bodyText,
+      body: bodyWithQuote,
       chatType: entry.isGroup ? "group" : "direct",
       sender: { name: entry.senderName, id: entry.senderDisplay },
       previousTimestamp,
@@ -194,7 +274,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
         : undefined;
     const ctxPayload = finalizeInboundContext({
       Body: combinedBody,
-      BodyForAgent: entry.bodyText,
+      BodyForAgent: bodyForAgent,
       InboundHistory: inboundHistory,
       RawBody: entry.bodyText,
       CommandBody: entry.commandBody,
@@ -213,9 +293,10 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       Provider: "signal" as const,
       Surface: "signal" as const,
       MessageSid: entry.messageId,
-      ReplyToBody: entry.replyToBody,
-      ReplyToSender: entry.replyToSender,
-      ReplyToIsQuote: entry.replyToIsQuote,
+      ReplyToId: entry.quoteTarget?.id,
+      ReplyToBody: entry.quoteTarget?.body,
+      ReplyToSender: entry.quoteTarget?.author,
+      ReplyToIsQuote: entry.quoteTarget ? true : undefined,
       Timestamp: entry.timestamp ?? undefined,
       MediaPath: entry.mediaPath,
       MediaType: entry.mediaType,
@@ -263,11 +344,14 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
         },
       });
 
+    const replyDeliveryState = { consumed: false };
+
     const { dispatcher, replyOptions, markDispatchIdle } = createReplyDispatcherWithTyping({
       ...replyPipeline,
       humanDelay: resolveHumanDelayConfig(deps.cfg, route.agentId),
       typingCallbacks,
       deliver: async (payload, _info) => {
+        const conversationKey = resolveConversationKey(entry);
         await deps.deliverReplies({
           cfg: deps.cfg,
           replies: [payload],
@@ -278,6 +362,19 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
           runtime: deps.runtime,
           maxBytes: deps.mediaMaxBytes,
           textLimit: deps.textLimit,
+          inheritedReplyToId: entry.messageId,
+          replyDeliveryState,
+          resolveQuoteAuthor: (replyToId) => {
+            const resolvedAuthor = resolveQuotedAuthor({ conversationKey, replyToId });
+            if (resolvedAuthor) {
+              return resolvedAuthor;
+            }
+            // Don't pin explicit reply IDs to the current sender. Only fall back to the
+            // inbound sender when we're still replying to the current Signal message.
+            return replyToId === entry.messageId
+              ? normalizeCachedMessageAuthor(entry.senderRecipient)
+              : undefined;
+          },
         });
       },
       onError: (err, info) => {
@@ -379,10 +476,14 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       return `signal:${deps.accountId}:${conversationId}:${entry.senderPeerId}`;
     },
     shouldDebounce: (entry) => {
+      const hasMedia = Boolean(entry.mediaPath || entry.mediaType || entry.mediaPaths?.length);
+      if (entry.quoteTarget && !hasMedia) {
+        return true;
+      }
       return shouldDebounceTextInbound({
         text: entry.bodyText,
         cfg: deps.cfg,
-        hasMedia: Boolean(entry.mediaPath || entry.mediaType || entry.mediaPaths?.length),
+        hasMedia,
       });
     },
     onFlush: async (entries) => {
@@ -398,7 +499,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
         .map((entry) => entry.bodyText)
         .filter(Boolean)
         .join("\\n");
-      if (!combinedText.trim()) {
+      if (!combinedText.trim() && !last.quoteTarget) {
         return;
       }
       await handleSignalInboundMessage({
@@ -408,6 +509,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
         mediaType: undefined,
         mediaPaths: undefined,
         mediaTypes: undefined,
+        quoteTarget: last.quoteTarget,
       });
     },
     onError: (err) => {
@@ -545,8 +647,22 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
     const rawMessage = dataMessage?.message ?? "";
     const normalizedMessage = renderSignalMentions(rawMessage, dataMessage?.mentions);
     const messageText = normalizedMessage.trim();
+    const senderPeerId = resolveSignalPeerId(sender);
     const groupId = dataMessage?.groupInfo?.groupId ?? reaction?.groupInfo?.groupId ?? undefined;
+    const groupName =
+      dataMessage?.groupInfo?.groupName ?? reaction?.groupInfo?.groupName ?? undefined;
     const isGroup = Boolean(groupId);
+    const conversationKey = resolveConversationKey({
+      isGroup,
+      groupId,
+      senderPeerId,
+    });
+    const rawQuoteTarget = dataMessage
+      ? (describeSignalReplyTarget(dataMessage, {
+          resolveAuthor: resolveQuotedAuthor,
+          conversationKey,
+        }) ?? undefined)
+      : undefined;
     const hasControlCommandInMessage = hasControlCommand(messageText, deps.cfg);
 
     const senderDisplay = formatSignalSenderDisplay(sender);
@@ -563,7 +679,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       hasControlCommand: hasControlCommandInMessage,
     });
     const quoteText = normalizeOptionalString(dataMessage?.quote?.text) ?? "";
-    const { contextVisibilityMode, quoteSenderAllowed, visibleQuoteText, visibleQuoteSender } =
+    const { contextVisibilityMode, decision, quoteSenderAllowed, visibleQuoteText } =
       resolveSignalQuoteContext({
         cfg: deps.cfg,
         accountId: deps.accountId,
@@ -576,8 +692,9 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
         `signal: drop quote context (mode=${contextVisibilityMode}, sender_allowed=${quoteSenderAllowed ? "yes" : "no"})`,
       );
     }
+    const quoteTarget = decision.include ? rawQuoteTarget : undefined;
     const hasBodyContent =
-      Boolean(messageText || visibleQuoteText) ||
+      Boolean(messageText || quoteTarget?.body) ||
       Boolean(!reaction && dataMessage?.attachments?.length);
 
     if (
@@ -598,14 +715,11 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
     }
 
     const senderRecipient = resolveSignalRecipient(sender);
-    const senderPeerId = resolveSignalPeerId(sender);
     const senderAllowId = formatSignalSenderId(sender);
     if (!senderRecipient) {
       return;
     }
     const senderIdLine = formatSignalPairingIdLine(sender);
-    const groupName = dataMessage.groupInfo?.groupName ?? undefined;
-
     if (!isGroup) {
       const allowedDirectMessage = await handleSignalDirectMessageAccess({
         dmPolicy: deps.dmPolicy,
@@ -715,7 +829,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
         const pendingKind = kindFromMime(firstContentType ?? undefined);
         return pendingKind ? `<media:${pendingKind}>` : "<media:attachment>";
       })();
-      const pendingBodyText = messageText || pendingPlaceholder || visibleQuoteText;
+      const pendingBodyText = messageText || pendingPlaceholder || quoteTarget?.body || "";
       const historyKey = groupId ?? "unknown";
       recordPendingHistoryEntryIfEnabled({
         historyMap: deps.groupHistories,
@@ -770,6 +884,11 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
           "signal: mention-skip message hook failed",
         );
       }
+      rememberMessageAuthor({
+        conversationKey,
+        messageId: typeof envelope.timestamp === "number" ? String(envelope.timestamp) : undefined,
+        senderRecipient,
+      });
       return;
     }
 
@@ -820,8 +939,8 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       }
     }
 
-    const bodyText = messageText || placeholder || visibleQuoteText || "";
-    if (!bodyText) {
+    const bodyText = messageText || placeholder || "";
+    if (!bodyText && !quoteTarget) {
       return;
     }
 
@@ -854,6 +973,16 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
     const senderName = envelope.sourceName ?? senderDisplay;
     const messageId =
       typeof envelope.timestamp === "number" ? String(envelope.timestamp) : undefined;
+
+    // Record (conversation, messageId) -> senderRecipient so later explicit reply tags
+    // ([[reply_to:<id>]]) can resolve a correct quote-author.
+    // SECURITY: Only cache from actual envelope senders, never from quote metadata,
+    // which is attacker-controlled and could poison the author cache.
+    rememberMessageAuthor({
+      conversationKey,
+      messageId,
+      senderRecipient,
+    });
     await inboundDebouncer.enqueue({
       senderName,
       senderDisplay,
@@ -872,9 +1001,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       mediaTypes: mediaTypes.length > 0 ? mediaTypes : undefined,
       commandAuthorized,
       wasMentioned: effectiveWasMentioned,
-      replyToBody: visibleQuoteText || undefined,
-      replyToSender: visibleQuoteSender,
-      replyToIsQuote: visibleQuoteText ? true : undefined,
+      quoteTarget,
     });
   };
 }
