@@ -4,6 +4,7 @@ import {
   applyExtraParamsToAgentMock,
   contextEngineCompactMock,
   createOpenClawCodingToolsMock,
+  ensureOpenClawModelsJsonMock,
   ensureRuntimePluginsLoaded,
   estimateTokensMock,
   getMemorySearchManagerMock,
@@ -29,7 +30,7 @@ import {
 
 let compactEmbeddedPiSessionDirect: typeof import("./compact.js").compactEmbeddedPiSessionDirect;
 let compactEmbeddedPiSession: typeof import("./compact.queued.js").compactEmbeddedPiSession;
-let compactTesting: typeof import("./compact.js").__testing;
+let compactTesting: typeof import("./compact.js").testing;
 let onSessionTranscriptUpdate: typeof import("../../sessions/transcript-events.js").onSessionTranscriptUpdate;
 
 const TEST_SESSION_ID = "session-1";
@@ -172,7 +173,7 @@ beforeAll(async () => {
   const loaded = await loadCompactHooksHarness();
   compactEmbeddedPiSessionDirect = loaded.compactEmbeddedPiSessionDirect;
   compactEmbeddedPiSession = loaded.compactEmbeddedPiSession;
-  compactTesting = loaded.__testing;
+  compactTesting = loaded.testing;
   onSessionTranscriptUpdate = loaded.onSessionTranscriptUpdate;
 });
 
@@ -1476,5 +1477,39 @@ describe("compactEmbeddedPiSession hooks (ownsCompaction engine)", () => {
     expect(result.ok).toBe(true);
     expect(result.compacted).toBe(true);
     expect(contextEngineCompactMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("compactEmbeddedPiSessionDirect targetProvider wiring (Clawsweeper P2 round-6 on #73261)", () => {
+  beforeAll(async () => {
+    ({ compactEmbeddedPiSessionDirect, compactEmbeddedPiSession } =
+      await loadCompactHooksHarness());
+  });
+
+  beforeEach(() => {
+    resetCompactHooksHarnessMocks();
+  });
+
+  it("threads targetProvider: provider into ensureOpenClawModelsJson so the short-circuit can fire", async () => {
+    // Without the fix (Clawsweeper P2 on #73261), the compact embedded caller passed only
+    // { workspaceDir } — the targetProvider short-circuit never fired because options.targetProvider
+    // was undefined.  After the fix, the resolved provider is forwarded so the scoped-cache
+    // short-circuit can skip a full models.json plan when the disk config already matches.
+    await compactEmbeddedPiSessionDirect(wrappedCompactionArgs());
+    expect(ensureOpenClawModelsJsonMock).toHaveBeenCalledWith(
+      undefined,
+      expect.any(String),
+      expect.objectContaining({ targetProvider: "openai" }),
+    );
+  });
+
+  it("threads the caller-supplied provider, not only the default, when a provider param is passed", async () => {
+    // Confirm that the wiring follows the resolved provider rather than always "openai".
+    await compactEmbeddedPiSessionDirect(wrappedCompactionArgs({ provider: "anthropic" }));
+    expect(ensureOpenClawModelsJsonMock).toHaveBeenCalledWith(
+      undefined,
+      expect.any(String),
+      expect.objectContaining({ targetProvider: "anthropic" }),
+    );
   });
 });
