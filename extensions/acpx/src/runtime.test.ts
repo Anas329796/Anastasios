@@ -312,7 +312,12 @@ describe("AcpxRuntime fresh reset wrapper", () => {
       },
     });
     vi.spyOn(delegate, "runTurn").mockImplementation(async function* () {
-      yield* [] as AsyncIterable<never>;
+      const emptyAsyncIterable: AsyncIterable<never> = {
+        [Symbol.asyncIterator]: () => ({
+          next: async () => ({ done: true, value: undefined as never }),
+        }),
+      };
+      yield* emptyAsyncIterable;
       throw new Error("Internal error");
     });
 
