@@ -180,8 +180,9 @@ export function resetGlobalUndiciStreamTimeoutsForTests(): void {
 }
 
 /**
- * Re-evaluate proxy env changes for undici. Installs EnvHttpProxyAgent when
- * proxy env is present, and restores a direct Agent after proxy env is cleared.
+ * Re-evaluate proxy env changes for root undici imports. Installs
+ * EnvHttpProxyAgent when proxy env is present, and restores a direct Agent
+ * after proxy env is cleared.
  */
 export function forceResetGlobalDispatcher(): void {
   lastAppliedTimeoutKey = null;
