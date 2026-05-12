@@ -2,7 +2,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { MACOS_APP_SOURCES_DIR } from "../compat/legacy-names.js";
-import { CronDeliverySchema, CronJobStateSchema } from "../gateway/protocol/schema.js";
+import {
+  CronDeliverySchema,
+  CronJobStateSchema,
+  CronRunLogEntrySchema,
+} from "../gateway/protocol/schema.js";
 
 type SchemaLike = {
   anyOf?: Array<SchemaLike>;
@@ -116,5 +120,10 @@ describe("cron protocol conformance", () => {
       "unclassified",
       "unknown",
     ]);
+  });
+
+  it("cron run-log schema declares warning annotations", () => {
+    const properties = (CronRunLogEntrySchema as SchemaLike).properties ?? {};
+    expect(properties.warnings).toBeDefined();
   });
 });

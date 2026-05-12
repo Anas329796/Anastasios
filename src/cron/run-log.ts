@@ -37,6 +37,7 @@ export type CronRunLogEntry = {
   runAtMs?: number;
   durationMs?: number;
   nextRunAtMs?: number;
+  warnings?: string[];
 } & CronRunTelemetry;
 
 type CronRunLogSortDir = "asc" | "desc";
@@ -359,6 +360,14 @@ function parseAllRunLogEntries(raw: string, opts?: { jobId?: string }): CronRunL
       if (typeof obj.sessionKey === "string" && obj.sessionKey.trim().length > 0) {
         entry.sessionKey = obj.sessionKey;
       }
+      if (Array.isArray(obj.warnings)) {
+        const warnings = obj.warnings.filter(
+          (warning): warning is string => typeof warning === "string" && warning.trim().length > 0,
+        );
+        if (warnings.length > 0) {
+          entry.warnings = warnings;
+        }
+      }
       parsed.push(entry);
     } catch {
       // ignore invalid lines
@@ -419,6 +428,7 @@ export async function readCronRunLogEntriesPage(
         entry.delivery?.intended?.channel ?? "",
         entry.delivery?.resolved?.channel ?? "",
         ...(entry.delivery?.messageToolSentTo ?? []).map((target) => target.channel),
+        ...(entry.warnings ?? []),
       ].join(" "),
   });
   const sorted =
