@@ -6,6 +6,7 @@ import {
   getBoundDeviceBootstrapProfile,
   getDeviceBootstrapTokenProfile,
   redeemDeviceBootstrapTokenProfile,
+  resolveDeviceBootstrapTokenBindingId,
   revokeDeviceBootstrapToken,
   verifyDeviceBootstrapToken,
 } from "../../../infra/device-bootstrap.js";
@@ -14,7 +15,6 @@ import {
   normalizeDevicePublicKeyBase64Url,
 } from "../../../infra/device-identity.js";
 import {
-  approveBootstrapDevicePairing,
   approveDevicePairing,
   ensureDeviceToken,
   getPairedDevice,
@@ -44,6 +44,7 @@ import { logRejectedLargePayload } from "../../../logging/diagnostic-payload.js"
 import type { createSubsystemLogger } from "../../../logging/subsystem.js";
 import {
   resolveBootstrapProfileScopesForRole,
+  resolveBootstrapProfileScopesForRoles,
   type DeviceBootstrapProfile,
 } from "../../../shared/device-bootstrap-profile.js";
 import { roleScopesAllow } from "../../../shared/operator-scope-compat.js";
@@ -133,7 +134,7 @@ import {
   shouldSkipControlUiPairing,
 } from "./connect-policy.js";
 import {
-  resolveDeviceSignaturePayloadVersion,
+  resolveDeviceSignaturePayload,
   resolveHandshakeBrowserSecurityContext,
   resolvePairingLocality,
   resolveUnauthorizedHandshakeContext,
@@ -152,6 +153,14 @@ export type WsOriginCheckMetrics = {
 
 function firstHeaderValue(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
+}
+
+function sameStringSet(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+  const rightSet = new Set(right);
+  return left.every((value) => rightSet.has(value));
 }
 
 function resolveTrustedProxyControlUiScopes(params: {
@@ -597,6 +606,7 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
         const deviceRaw = connectParams.device;
         let devicePublicKey: string | null = null;
         let deviceAuthPayloadVersion: "v2" | "v3" | null = null;
+        let deviceBootstrapPublicKeyProof: { payload: string; signature: string } | undefined;
         const hasTokenAuth = Boolean(connectParams.auth?.token);
         const hasPasswordAuth = Boolean(connectParams.auth?.password);
         const hasSharedAuth = hasTokenAuth || hasPasswordAuth;
@@ -808,7 +818,7 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
           }
           const rejectDeviceSignatureInvalid = () =>
             rejectDeviceAuthInvalid("device-signature", "device signature invalid");
-          const payloadVersion = resolveDeviceSignaturePayloadVersion({
+          const payloadMatch = resolveDeviceSignaturePayload({
             device,
             connectParams,
             role,
@@ -816,11 +826,15 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
             signedAtMs: signedAt,
             nonce: providedNonce,
           });
-          if (!payloadVersion) {
+          if (!payloadMatch) {
             rejectDeviceSignatureInvalid();
             return;
           }
-          deviceAuthPayloadVersion = payloadVersion;
+          deviceAuthPayloadVersion = payloadMatch.version;
+          deviceBootstrapPublicKeyProof = {
+            payload: payloadMatch.payload,
+            signature: device.signature,
+          };
           devicePublicKey = normalizeDevicePublicKeyBase64Url(device.publicKey);
           if (!devicePublicKey) {
             rejectDeviceAuthInvalid("device-public-key", "device public key invalid");
@@ -842,18 +856,28 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
           hasDeviceIdentity: Boolean(device),
           deviceId: device?.id,
           publicKey: device?.publicKey,
+          publicKeyProof: deviceBootstrapPublicKeyProof,
           role,
           scopes,
           rateLimiter: authRateLimiter,
           clientIp: browserRateLimitClientIp,
-          verifyBootstrapToken: async ({ deviceId, publicKey, token, role, scopes }) =>
-            await verifyDeviceBootstrapToken({
+          verifyBootstrapToken: async ({
+            deviceId,
+            publicKey,
+            publicKeyProof,
+            token,
+            role,
+            scopes,
+          }) => {
+            return await verifyDeviceBootstrapToken({
               deviceId,
               publicKey,
+              publicKeyProof,
               token,
               role,
               scopes,
-            }),
+            });
+          },
           verifyDeviceToken,
         }));
         pairingLocality = resolvePairingLocality({
@@ -900,8 +924,6 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
           authMethod === "bootstrap-token" && bootstrapTokenCandidate
             ? await getDeviceBootstrapTokenProfile({ token: bootstrapTokenCandidate })
             : null;
-        let boundBootstrapProfile: DeviceBootstrapProfile | null = null;
-        let handoffBootstrapProfile: DeviceBootstrapProfile | null = null;
 
         const trustedProxyAuthOk = isTrustedProxyControlUiOperatorAuth({
           isControlUi,
@@ -997,21 +1019,6 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
                 allowedScopes: pairedScopes,
               });
             };
-            if (
-              boundBootstrapProfile === null &&
-              authMethod === "bootstrap-token" &&
-              reason === "not-paired" &&
-              role === "node" &&
-              scopes.length === 0 &&
-              !existingPairedDevice &&
-              bootstrapTokenCandidate
-            ) {
-              boundBootstrapProfile = await getBoundDeviceBootstrapProfile({
-                token: bootstrapTokenCandidate,
-                deviceId: device.id,
-                publicKey: devicePublicKey,
-              });
-            }
             const allowSilentLocalPairing = shouldAllowSilentLocalPairing({
               locality: pairingLocality,
               hasBrowserOriginHeader,
@@ -1034,30 +1041,43 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
                 autoApproveCidrs: configSnapshot.gateway?.nodes?.pairing?.autoApproveCidrs,
               },
             );
-            const allowSilentBootstrapPairing =
+            const bootstrapPairingProfile =
               authMethod === "bootstrap-token" &&
               reason === "not-paired" &&
               role === "node" &&
               scopes.length === 0 &&
               !existingPairedDevice &&
-              boundBootstrapProfile !== null;
-            const bootstrapProfileForSilentApproval = allowSilentBootstrapPairing
-              ? boundBootstrapProfile
-              : null;
-            const bootstrapPairingRoles = bootstrapProfileForSilentApproval
-              ? Array.from(new Set([role, ...bootstrapProfileForSilentApproval.roles]))
+              issuedBootstrapProfile
+                ? issuedBootstrapProfile
+                : null;
+            const bootstrapPairingRoles = bootstrapPairingProfile?.roles;
+            const bootstrapPairingScopes = bootstrapPairingProfile
+              ? resolveBootstrapProfileScopesForRoles(
+                  bootstrapPairingProfile.roles,
+                  bootstrapPairingProfile.scopes,
+                )
               : undefined;
             const pairing = await requestDevicePairing({
               deviceId: device.id,
               publicKey: devicePublicKey,
               ...clientPairingMetadata,
-              ...(bootstrapPairingRoles ? { roles: bootstrapPairingRoles } : {}),
+              ...(bootstrapPairingProfile
+                ? {
+                    roles: bootstrapPairingRoles,
+                    scopes: bootstrapPairingScopes,
+                    bootstrapProfile: bootstrapPairingProfile,
+                    ...(bootstrapTokenCandidate
+                      ? {
+                          bootstrapTokenBindingId:
+                            resolveDeviceBootstrapTokenBindingId(bootstrapTokenCandidate),
+                        }
+                      : {}),
+                  }
+                : {}),
               silent:
-                reason === "scope-upgrade"
+                reason === "scope-upgrade" || authMethod === "bootstrap-token"
                   ? false
-                  : allowSilentLocalPairing ||
-                    allowSilentBootstrapPairing ||
-                    allowSilentTrustedCidrsNodePairing,
+                  : allowSilentLocalPairing || allowSilentTrustedCidrsNodePairing,
             });
             const context = buildRequestContext();
             let approved: Awaited<ReturnType<typeof approveDevicePairing>> | undefined;
@@ -1078,18 +1098,10 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
               return replacementPending?.requestId;
             };
             if (pairing.request.silent === true) {
-              approved = bootstrapProfileForSilentApproval
-                ? await approveBootstrapDevicePairing(
-                    pairing.request.requestId,
-                    bootstrapProfileForSilentApproval,
-                  )
-                : await approveDevicePairing(pairing.request.requestId, {
-                    callerScopes: scopes,
-                  });
+              approved = await approveDevicePairing(pairing.request.requestId, {
+                callerScopes: scopes,
+              });
               if (approved?.status === "approved") {
-                if (bootstrapProfileForSilentApproval) {
-                  handoffBootstrapProfile = bootstrapProfileForSilentApproval;
-                }
                 logGateway.info(
                   `device pairing auto-approved device=${approved.device.deviceId} role=${approved.device.role ?? "unknown"}`,
                 );
@@ -1280,6 +1292,22 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
           }
         }
 
+        const handoffBootstrapProfile: DeviceBootstrapProfile | null =
+          device &&
+          role === "node" &&
+          hasServerApprovedDeviceTokenBaseline &&
+          authMethod === "bootstrap-token" &&
+          issuedBootstrapProfile &&
+          bootstrapTokenCandidate &&
+          devicePublicKey
+            ? await getBoundDeviceBootstrapProfile({
+                token: bootstrapTokenCandidate,
+                deviceId: device.id,
+                publicKey: devicePublicKey,
+              })
+            : null;
+        let bootstrapHandoffComplete = false;
+
         const deviceToken =
           device && hasServerApprovedDeviceTokenBaseline
             ? await ensureDeviceToken({ deviceId: device.id, role, scopes })
@@ -1299,8 +1327,8 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
           });
         }
         if (device && handoffBootstrapProfile) {
-          const bootstrapProfileForHello = handoffBootstrapProfile as DeviceBootstrapProfile;
-          for (const bootstrapRole of bootstrapProfileForHello.roles) {
+          let issuedAllBootstrapRoles = true;
+          for (const bootstrapRole of handoffBootstrapProfile.roles) {
             if (bootstrapDeviceTokens.some((entry) => entry.role === bootstrapRole)) {
               continue;
             }
@@ -1308,7 +1336,7 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
               bootstrapRole === "operator"
                 ? resolveBootstrapProfileScopesForRole(
                     bootstrapRole,
-                    bootstrapProfileForHello.scopes,
+                    handoffBootstrapProfile.scopes,
                   )
                 : [];
             const extraToken = await ensureDeviceToken({
@@ -1317,6 +1345,11 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
               scopes: bootstrapRoleScopes,
             });
             if (!extraToken) {
+              issuedAllBootstrapRoles = false;
+              continue;
+            }
+            if (!sameStringSet(extraToken.scopes, bootstrapRoleScopes)) {
+              issuedAllBootstrapRoles = false;
               continue;
             }
             bootstrapDeviceTokens.push({
@@ -1326,8 +1359,12 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
               issuedAtMs: extraToken.rotatedAtMs ?? extraToken.createdAtMs,
             });
           }
+          bootstrapHandoffComplete =
+            issuedAllBootstrapRoles &&
+            handoffBootstrapProfile.roles.every((bootstrapRole) =>
+              bootstrapDeviceTokens.some((entry) => entry.role === bootstrapRole),
+            );
         }
-
         if (role === "node") {
           const reconciliation = await reconcileNodePairingOnConnect({
             cfg: getRuntimeConfig(),
@@ -1562,7 +1599,7 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
         }
         if (authMethod === "bootstrap-token" && bootstrapTokenCandidate && device) {
           try {
-            if (handoffBootstrapProfile) {
+            if (handoffBootstrapProfile && bootstrapHandoffComplete) {
               const revoked = await revokeDeviceBootstrapToken({
                 token: bootstrapTokenCandidate,
               });

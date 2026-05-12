@@ -1,8 +1,18 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { PAIRING_SETUP_BOOTSTRAP_PROFILE } from "../shared/device-bootstrap-profile.js";
 import { createSuiteTempRootTracker } from "../test-helpers/temp-dir.js";
-import { issueDeviceBootstrapToken, verifyDeviceBootstrapToken } from "./device-bootstrap.js";
+import {
+  issueDeviceBootstrapToken,
+  resolveDeviceBootstrapTokenBindingId,
+  verifyDeviceBootstrapToken,
+} from "./device-bootstrap.js";
+import {
+  loadOrCreateDeviceIdentity,
+  publicKeyRawBase64UrlFromPem,
+  signDevicePayload,
+} from "./device-identity.js";
 import {
   approveBootstrapDevicePairing,
   approveDevicePairing,
@@ -587,6 +597,13 @@ describe("device pairing tokens", () => {
 
   test("rejects bootstrap token replay before pending scope escalation can be approved", async () => {
     const baseDir = await makeDevicePairingDir();
+    const identity = loadOrCreateDeviceIdentity(path.join(baseDir, "device.json"));
+    const publicKey = publicKeyRawBase64UrlFromPem(identity.publicKeyPem);
+    const proofPayload = `openclaw-device-pairing-test:${identity.deviceId}`;
+    const publicKeyProof = {
+      payload: proofPayload,
+      signature: signDevicePayload(identity.privateKeyPem, proofPayload),
+    };
     const issued = await issueDeviceBootstrapToken({
       baseDir,
       roles: ["operator"],
@@ -596,8 +613,9 @@ describe("device pairing tokens", () => {
     await expect(
       verifyDeviceBootstrapToken({
         token: issued.token,
-        deviceId: "device-1",
-        publicKey: "public-key-1",
+        deviceId: identity.deviceId,
+        publicKey,
+        publicKeyProof,
         role: "operator",
         scopes: ["operator.read"],
         baseDir,
@@ -606,8 +624,8 @@ describe("device pairing tokens", () => {
 
     const first = await requestDevicePairing(
       {
-        deviceId: "device-1",
-        publicKey: "public-key-1",
+        deviceId: identity.deviceId,
+        publicKey,
         role: "operator",
         scopes: ["operator.read"],
       },
@@ -617,8 +635,9 @@ describe("device pairing tokens", () => {
     await expect(
       verifyDeviceBootstrapToken({
         token: issued.token,
-        deviceId: "device-1",
-        publicKey: "public-key-1",
+        deviceId: identity.deviceId,
+        publicKey,
+        publicKeyProof,
         role: "operator",
         scopes: ["operator.admin"],
         baseDir,
@@ -630,7 +649,7 @@ describe("device pairing tokens", () => {
       { callerScopes: ["operator.read"] },
       baseDir,
     );
-    const paired = await getPairedDevice("device-1", baseDir);
+    const paired = await getPairedDevice(identity.deviceId, baseDir);
     expect(paired?.scopes).toEqual(["operator.read"]);
     expect(paired?.approvedScopes).toEqual(["operator.read"]);
     expect(paired?.tokens?.operator?.scopes).toEqual(["operator.read"]);
@@ -1019,6 +1038,127 @@ describe("device pairing tokens", () => {
       PAIRING_SETUP_BOOTSTRAP_PROFILE.scopes,
       "operator token scopes",
     );
+  });
+
+  test("bootstrap-marked pairing requires pairing approval scope", async () => {
+    const baseDir = await makeDevicePairingDir();
+    const request = await requestDevicePairing(
+      {
+        deviceId: "bootstrap-device-approval-scope",
+        publicKey: "bootstrap-public-key-approval-scope",
+        role: "node",
+        roles: ["node", "operator"],
+        scopes: PAIRING_SETUP_BOOTSTRAP_PROFILE.scopes,
+        bootstrapProfile: PAIRING_SETUP_BOOTSTRAP_PROFILE,
+      },
+      baseDir,
+    );
+
+    await expect(
+      approveDevicePairing(request.request.requestId, { callerScopes: [] }, baseDir),
+    ).resolves.toEqual({
+      status: "forbidden",
+      reason: "caller-missing-scope",
+      scope: "operator.pairing",
+    });
+    await expect(getPairedDevice("bootstrap-device-approval-scope", baseDir)).resolves.toBeNull();
+
+    await expect(
+      approveDevicePairing(
+        request.request.requestId,
+        { callerScopes: ["operator.pairing"] },
+        baseDir,
+      ),
+    ).resolves.toEqual(expect.objectContaining({ status: "approved" }));
+  });
+
+  test("bootstrap-marked pairing binds the token only after approval", async () => {
+    const baseDir = await makeDevicePairingDir();
+    const firstIdentity = loadOrCreateDeviceIdentity(path.join(baseDir, "first-device.json"));
+    const secondIdentity = loadOrCreateDeviceIdentity(path.join(baseDir, "second-device.json"));
+    const firstPublicKey = publicKeyRawBase64UrlFromPem(firstIdentity.publicKeyPem);
+    const secondPublicKey = publicKeyRawBase64UrlFromPem(secondIdentity.publicKeyPem);
+    const firstPayload = `openclaw-device-pairing-test:${firstIdentity.deviceId}`;
+    const secondPayload = `openclaw-device-pairing-test:${secondIdentity.deviceId}`;
+    const issued = await issueDeviceBootstrapToken({ baseDir });
+
+    await expect(
+      verifyDeviceBootstrapToken({
+        token: issued.token,
+        deviceId: firstIdentity.deviceId,
+        publicKey: firstPublicKey,
+        publicKeyProof: {
+          payload: firstPayload,
+          signature: signDevicePayload(firstIdentity.privateKeyPem, firstPayload),
+        },
+        role: "node",
+        scopes: [],
+        baseDir,
+      }),
+    ).resolves.toEqual({ ok: true });
+    await expect(
+      verifyDeviceBootstrapToken({
+        token: issued.token,
+        deviceId: secondIdentity.deviceId,
+        publicKey: secondPublicKey,
+        publicKeyProof: {
+          payload: secondPayload,
+          signature: signDevicePayload(secondIdentity.privateKeyPem, secondPayload),
+        },
+        role: "node",
+        scopes: [],
+        baseDir,
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    const request = await requestDevicePairing(
+      {
+        deviceId: firstIdentity.deviceId,
+        publicKey: firstPublicKey,
+        role: "node",
+        roles: PAIRING_SETUP_BOOTSTRAP_PROFILE.roles,
+        scopes: PAIRING_SETUP_BOOTSTRAP_PROFILE.scopes,
+        bootstrapProfile: PAIRING_SETUP_BOOTSTRAP_PROFILE,
+        bootstrapTokenBindingId: resolveDeviceBootstrapTokenBindingId(issued.token),
+      },
+      baseDir,
+    );
+
+    await expect(
+      approveDevicePairing(
+        request.request.requestId,
+        { callerScopes: ["operator.pairing"] },
+        baseDir,
+      ),
+    ).resolves.toEqual(expect.objectContaining({ status: "approved" }));
+    await expect(
+      verifyDeviceBootstrapToken({
+        token: issued.token,
+        deviceId: firstIdentity.deviceId,
+        publicKey: firstPublicKey,
+        publicKeyProof: {
+          payload: firstPayload,
+          signature: signDevicePayload(firstIdentity.privateKeyPem, firstPayload),
+        },
+        role: "node",
+        scopes: [],
+        baseDir,
+      }),
+    ).resolves.toEqual({ ok: true });
+    await expect(
+      verifyDeviceBootstrapToken({
+        token: issued.token,
+        deviceId: secondIdentity.deviceId,
+        publicKey: secondPublicKey,
+        publicKeyProof: {
+          payload: secondPayload,
+          signature: signDevicePayload(secondIdentity.privateKeyPem, secondPayload),
+        },
+        role: "node",
+        scopes: [],
+        baseDir,
+      }),
+    ).resolves.toEqual({ ok: false, reason: "bootstrap_token_invalid" });
   });
 
   test("bootstrap-issued operator tokens accept handoff scopes and reject admin or pairing", async () => {
