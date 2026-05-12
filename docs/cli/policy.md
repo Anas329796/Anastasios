@@ -209,10 +209,13 @@ policy evidence changes. A stale watch result means the workspace should run
 `policy check`, review the new attestation, and update the out-of-band accepted
 attestation before relying on the previous approval.
 
-The tool runtime gate also includes structured approval metadata on approval
-requests: policy path/hash, configured expected hash when present, the policy
-evidence hash, and the target tool reference. That keeps audit values separate
-from the human-readable approval message.
+The tool runtime gate also includes structured approval metadata on gateway
+approval requests: policy path/hash, configured expected hash when present, the
+policy evidence hash, and the target tool reference. Gateway approval request,
+list, and resolve events preserve that metadata so supervisors can audit the
+decision against the policy and workspace state that produced it. The UI and
+text approval surfaces summarize those values, but the audit trail remains
+structured.
 
 Policy findings can include both `target` and `requirement`. `target` is the
 observed workspace thing that does not conform. `requirement` is the authored
