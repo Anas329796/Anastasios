@@ -312,9 +312,7 @@ describe("AcpxRuntime fresh reset wrapper", () => {
       },
     });
     vi.spyOn(delegate, "runTurn").mockImplementation(async function* () {
-      if (false) {
-        yield {} as never;
-      }
+      yield* [] as AsyncIterable<never>;
       throw new Error("Internal error");
     });
 
