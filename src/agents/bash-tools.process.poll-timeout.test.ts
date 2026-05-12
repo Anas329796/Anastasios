@@ -10,6 +10,12 @@ import { createProcessSessionFixture } from "./bash-process-registry.test-helper
 import { createProcessTool } from "./bash-tools.process.js";
 import { processSchema } from "./bash-tools.schemas.js";
 
+const fakeSecretOutput = "OPENAI_API_KEY=sk-proj-redaction-canary-1234567890";
+
+function resultText(result: Awaited<ReturnType<ReturnType<typeof createProcessTool>["execute"]>>) {
+  return (result.content[0] as { text?: string }).text ?? "";
+}
+
 afterEach(() => {
   resetProcessRegistryForTests();
   resetDiagnosticSessionStateForTest();
@@ -158,6 +164,35 @@ test("process poll aborts while waiting for completion", async () => {
   } finally {
     vi.useRealTimers();
   }
+});
+
+test("process poll redacts secret-shaped output before returning results", async () => {
+  const sessionId = "sess-redact-poll";
+  const { processTool, session } = createProcessSessionHarness(sessionId);
+
+  appendOutput(session, "stdout", `${fakeSecretOutput}\n`);
+  markExited(session, 0, null, "completed");
+
+  const poll = await pollSession(processTool, "toolcall-redact-poll", sessionId);
+  const details = poll.details as { aggregated?: string };
+  expect(resultText(poll)).not.toContain(fakeSecretOutput);
+  expect(details.aggregated).not.toContain(fakeSecretOutput);
+  expect(resultText(poll)).toContain("OPENAI_API_KEY=sk-pro…7890");
+  expect(details.aggregated).toContain("OPENAI_API_KEY=sk-pro…7890");
+});
+
+test("process log redacts secret-shaped output before returning results", async () => {
+  const sessionId = "sess-redact-log";
+  const { processTool, session } = createProcessSessionHarness(sessionId);
+
+  appendOutput(session, "stdout", `${fakeSecretOutput}\n`);
+  const log = await processTool.execute("toolcall-redact-log", {
+    action: "log",
+    sessionId,
+  });
+
+  expect(resultText(log)).not.toContain(fakeSecretOutput);
+  expect(resultText(log)).toContain("OPENAI_API_KEY=sk-pro…7890");
 });
 
 test("process poll exposes adaptive retryInMs for repeated no-output polls", async () => {
