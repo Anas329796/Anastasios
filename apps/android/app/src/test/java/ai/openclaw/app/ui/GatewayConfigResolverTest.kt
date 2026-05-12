@@ -99,16 +99,33 @@ class GatewayConfigResolverTest {
   }
 
   @Test
-  fun parseGatewayEndpointRejectsPrivateLanCleartextWsUrls() {
+  fun parseGatewayEndpointAllowsPrivateLanCleartextWsUrls() {
     val parsed = parseGatewayEndpoint("ws://192.168.1.20:18789")
-    assertNull(parsed)
+
+    assertEquals(
+      GatewayEndpointConfig(
+        host = "192.168.1.20",
+        port = 18789,
+        tls = false,
+        displayUrl = "http://192.168.1.20:18789",
+      ),
+      parsed,
+    )
   }
 
   @Test
-  fun parseGatewayEndpointRejectsMdnsCleartextWsUrls() {
+  fun parseGatewayEndpointAllowsMdnsCleartextWsUrls() {
     val parsed = parseGatewayEndpoint("ws://gateway.local:18789")
 
-    assertNull(parsed)
+    assertEquals(
+      GatewayEndpointConfig(
+        host = "gateway.local",
+        port = 18789,
+        tls = false,
+        displayUrl = "http://gateway.local:18789",
+      ),
+      parsed,
+    )
   }
 
   @Test
@@ -146,9 +163,13 @@ class GatewayConfigResolverTest {
   }
 
   @Test
-  fun parseGatewayEndpointRejectsLinkLocalIpv6ZoneCleartextWsUrls() {
+  fun parseGatewayEndpointAllowsLinkLocalIpv6ZoneCleartextWsUrls() {
     val parsed = parseGatewayEndpoint("ws://[fe80::1%25eth0]")
-    assertNull(parsed)
+
+    assertEquals("fe80::1%25eth0", parsed?.host)
+    assertEquals(18789, parsed?.port)
+    assertEquals(false, parsed?.tls)
+    assertEquals("http://[fe80::1%25eth0]:18789", parsed?.displayUrl)
   }
 
   @Test
@@ -250,6 +271,26 @@ class GatewayConfigResolverTest {
   }
 
   @Test
+  fun resolveScannedSetupCodeAcceptsPrivateLanCleartextGateway() {
+    val setupCode =
+      encodeSetupCode("""{"url":"ws://192.168.1.20:18789","bootstrapToken":"bootstrap-1"}""")
+
+    val resolved = resolveScannedSetupCode(setupCode)
+
+    assertEquals(setupCode, resolved)
+  }
+
+  @Test
+  fun resolveScannedSetupCodeAcceptsMdnsCleartextGateway() {
+    val setupCode =
+      encodeSetupCode("""{"url":"ws://gateway.local:18789","bootstrapToken":"bootstrap-1"}""")
+
+    val resolved = resolveScannedSetupCode(setupCode)
+
+    assertEquals(setupCode, resolved)
+  }
+
+  @Test
   fun resolveScannedSetupCodeResultFlagsInsecureRemoteGateway() {
     val setupCode =
       encodeSetupCode("""{"url":"ws://attacker.example:18789","bootstrapToken":"bootstrap-1"}""")
@@ -269,10 +310,14 @@ class GatewayConfigResolverTest {
   }
 
   @Test
-  fun parseGatewayEndpointResultFlagsInsecureLanCleartextGateway() {
+  fun parseGatewayEndpointResultAllowsLanAndFlagsInsecureTailnetCleartextGateway() {
     val parsed = parseGatewayEndpointResult("ws://192.168.1.20:18789")
-    assertNull(parsed.config)
-    assertEquals(GatewayEndpointValidationError.INSECURE_REMOTE_URL, parsed.error)
+    assertEquals("192.168.1.20", parsed.config?.host)
+    assertEquals(false, parsed.config?.tls)
+
+    val tailnet = parseGatewayEndpointResult("ws://100.64.0.9:18789")
+    assertNull(tailnet.config)
+    assertEquals(GatewayEndpointValidationError.INSECURE_REMOTE_URL, tailnet.error)
   }
 
   @Test
@@ -413,7 +458,7 @@ class GatewayConfigResolverTest {
   }
 
   @Test
-  fun resolveGatewayConnectConfigRejectsPrivateLanManualCleartextEndpoint() {
+  fun resolveGatewayConnectConfigAcceptsPrivateLanManualCleartextEndpoint() {
     val resolved =
       resolveGatewayConnectConfig(
         useSetupCode = false,
@@ -429,7 +474,9 @@ class GatewayConfigResolverTest {
         fallbackPassword = "",
       )
 
-    assertNull(resolved)
+    assertEquals("192.168.31.100", resolved?.host)
+    assertEquals(18789, resolved?.port)
+    assertEquals(false, resolved?.tls)
   }
 
   @Test

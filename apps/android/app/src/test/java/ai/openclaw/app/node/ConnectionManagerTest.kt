@@ -108,7 +108,7 @@ class ConnectionManagerTest {
   }
 
   @Test
-  fun resolveTlsParamsForEndpoint_manualPrivateLanForcesTlsWhenToggleIsOff() {
+  fun resolveTlsParamsForEndpoint_manualPrivateLanCanStayCleartextWhenToggleIsOff() {
     val endpoint = GatewayEndpoint.manual(host = "192.168.1.20", port = 18789)
 
     val params =
@@ -118,9 +118,7 @@ class ConnectionManagerTest {
         manualTlsEnabled = false,
       )
 
-    assertEquals(true, params?.required)
-    assertNull(params?.expectedFingerprint)
-    assertEquals(false, params?.allowTOFU)
+    assertNull(params)
   }
 
   @Test
@@ -148,7 +146,7 @@ class ConnectionManagerTest {
   }
 
   @Test
-  fun resolveTlsParamsForEndpoint_discoveryPrivateLanWithoutHintsStillRequiresTls() {
+  fun resolveTlsParamsForEndpoint_discoveryPrivateLanWithoutHintsCanStayCleartext() {
     val endpoint =
       GatewayEndpoint(
         stableId = "_openclaw-gw._tcp.|local.|Test",
@@ -166,9 +164,7 @@ class ConnectionManagerTest {
         manualTlsEnabled = false,
       )
 
-    assertEquals(true, params?.required)
-    assertNull(params?.expectedFingerprint)
-    assertEquals(false, params?.allowTOFU)
+    assertNull(params)
   }
 
   @Test
@@ -244,11 +240,37 @@ class ConnectionManagerTest {
   }
 
   @Test
-  fun isPrivateLanGatewayHost_acceptsLanIpsButRejectsMdnsAndTailnetHosts() {
+  fun isPrivateLanGatewayHost_acceptsLanMdnsAndRejectsTailnetHosts() {
     assertTrue(isPrivateLanGatewayHost("192.168.1.20"))
-    assertFalse(isPrivateLanGatewayHost("gateway.local"))
+    assertTrue(isPrivateLanGatewayHost("169.254.1.20"))
+    assertTrue(isPrivateLanGatewayHost("fd00::1"))
+    assertTrue(isPrivateLanGatewayHost("fe80::1%25wlan0"))
+    assertTrue(isPrivateLanGatewayHost("gateway.local"))
     assertFalse(isPrivateLanGatewayHost("100.64.0.9"))
     assertFalse(isPrivateLanGatewayHost("gateway.tailnet.ts.net"))
+    assertFalse(isPrivateLanGatewayHost("gateway.example"))
+  }
+
+  @Test
+  fun resolveTlsParamsForEndpoint_discoveryMdnsWithoutHintsCanStayCleartext() {
+    val endpoint =
+      GatewayEndpoint(
+        stableId = "_openclaw-gw._tcp.|local.|Test",
+        name = "Test",
+        host = "gateway.local",
+        port = 18789,
+        tlsEnabled = false,
+        tlsFingerprintSha256 = null,
+      )
+
+    val params =
+      ConnectionManager.resolveTlsParamsForEndpoint(
+        endpoint,
+        storedFingerprint = null,
+        manualTlsEnabled = false,
+      )
+
+    assertNull(params)
   }
 
   @Test

@@ -1,6 +1,6 @@
 package ai.openclaw.app.ui
 
-import ai.openclaw.app.gateway.isLoopbackGatewayHost
+import ai.openclaw.app.gateway.isPrivateLanGatewayHost
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -56,9 +56,9 @@ internal data class GatewayScannedSetupCodeResult(
 
 private val gatewaySetupJson = Json { ignoreUnknownKeys = true }
 private const val remoteGatewaySecurityRule =
-  "Tailscale and public mobile nodes require wss:// or Tailscale Serve. ws:// is allowed only for localhost and the Android emulator."
+  "Tailscale and public mobile nodes require wss:// or Tailscale Serve. ws:// is allowed only for localhost, private LAN or link-local addresses, .local hosts, and the Android emulator."
 private const val remoteGatewaySecurityFix =
-  "Use localhost/the Android emulator, or enable Tailscale Serve / expose a wss:// gateway URL."
+  "Use localhost, a private LAN/.local route, the Android emulator, or enable Tailscale Serve / expose a wss:// gateway URL."
 
 internal fun resolveGatewayConnectConfig(
   useSetupCode: Boolean,
@@ -149,7 +149,7 @@ internal fun parseGatewayEndpointResult(rawInput: String): GatewayEndpointParseR
       "wss", "https" -> true
       else -> true
     }
-  if (!tls && !isLoopbackGatewayHost(host)) {
+  if (!tls && !isPrivateLanGatewayHost(host)) {
     return GatewayEndpointParseResult(error = GatewayEndpointValidationError.INSECURE_REMOTE_URL)
   }
   val defaultPort =
