@@ -349,6 +349,7 @@ export function createSubagentRegistryLifecycleController(params: {
       expectsCompletionMessage:
         entry.pendingFinalDeliveryPayload?.expectsCompletionMessage ??
         entry.expectsCompletionMessage,
+      completionOwner: entry.pendingFinalDeliveryPayload?.completionOwner ?? entry.completionOwner,
       spawnMode: entry.pendingFinalDeliveryPayload?.spawnMode ?? entry.spawnMode,
       frozenResultText:
         entry.pendingFinalDeliveryPayload?.frozenResultText ?? entry.frozenResultText,
@@ -733,6 +734,7 @@ export function createSubagentRegistryLifecycleController(params: {
         outcome: pendingPayload.outcome,
         spawnMode: pendingPayload.spawnMode,
         expectsCompletionMessage: pendingPayload.expectsCompletionMessage,
+        completionOwner: pendingPayload.completionOwner,
         wakeOnDescendantSettle: pendingPayload.wakeOnDescendantSettle === true,
         onDeliveryResult: (delivery) => {
           if (delivery.delivered) {
