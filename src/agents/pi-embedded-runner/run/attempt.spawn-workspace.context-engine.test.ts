@@ -372,7 +372,14 @@ describe("runEmbeddedAttempt context engine sessionKey forwarding", () => {
       0,
       "createOpenClawCodingTools params",
     );
-    expect(toolParams.skillsSnapshot?.resolvedSkills?.[0]?.filePath).toBe(sandboxSkillPath);
+    const telemetrySnapshot = requireRecord(
+      toolParams.skillsSnapshot,
+      "createOpenClawCodingTools skillsSnapshot",
+    );
+    const resolvedSkills = telemetrySnapshot.resolvedSkills;
+    expect(Array.isArray(resolvedSkills) ? resolvedSkills[0]?.filePath : undefined).toBe(
+      sandboxSkillPath,
+    );
   });
 
   it("keeps before_prompt_build prependContext out of system prompt on transcriptPrompt runs", async () => {
