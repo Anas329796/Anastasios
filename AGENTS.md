@@ -8,6 +8,7 @@ Skills own workflows; root owns hard policy and routing.
 - Repo: `https://github.com/openclaw/openclaw`
 - Replies: repo-root refs only: `extensions/telegram/src/index.ts:80`. No absolute paths, no `~/`.
 - Docs/user-visible work: `pnpm docs:list`, then read relevant docs only.
+- Capability Discovery: check `capabilities/index.md` for local workspace integrations (Bridge, Mail, CAD, etc.) before concluding a task is unsupported.
 - Fix/triage answers need source, tests, current/shipped behavior, and dependency contract proof.
 - Dependency-backed behavior: read upstream docs/source/types first. No API/default/error/timing guesses.
 - Live-verify when feasible. Check env/`~/.profile` for keys before saying blocked; never print secrets.
