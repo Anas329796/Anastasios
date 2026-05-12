@@ -86,7 +86,6 @@ export async function deleteSubagentSessionWithRetry(params: {
   }) => Promise<unknown>;
   sessionKey: string;
 }): Promise<void> {
-<<<<<<< HEAD
   let lastError: unknown;
   for (let attempt = 0; attempt <= SWEEP_DELETE_MAX_RETRIES; attempt++) {
     try {
@@ -113,17 +112,6 @@ export async function deleteSubagentSessionWithRetry(params: {
   }
   // Re-throw the last transient error if all retries were exhausted.
   throw lastError;
-=======
-  await params.callGateway({
-    method: "sessions.delete",
-    params: {
-      key: params.sessionKey,
-      deleteTranscript: true,
-      emitLifecycleHooks: false,
-    },
-    timeoutMs: 10_000,
-  });
->>>>>>> b1298f47 (fix(agents): restore subagent sweep delete helper wiring)
 }
 
 function findSessionEntryByKey(store: Record<string, SessionEntry>, sessionKey: string) {
