@@ -40,6 +40,7 @@ type CliCompactionDeps = {
     agentDir: string;
     cfg?: OpenClawConfig;
     contextTokenBudget?: number;
+    contextEngineInfo?: ContextEngine["info"];
   }) => SettingsManagerLike | Promise<SettingsManagerLike>;
   applyPiAutoCompactionGuard: (params: {
     settingsManager: SettingsManagerLike;
