@@ -2042,8 +2042,8 @@ describe("short-term promotion", () => {
     ]);
   });
 
-  describe("MEMORY.md budget compaction (#73691)", () => {
-    it("drops the oldest promoted section before write when memoryFileMaxChars would be exceeded", async () => {
+  describe("MEMORY.md archive-first compaction (#73691)", () => {
+    it("migrates existing root promoted sections and new details into the archive", async () => {
       await withTempWorkspace(async (workspaceDir) => {
         // Source daily note that the candidate references (rehydrate reads it).
         await writeDailyMemoryNote(workspaceDir, "2026-04-29", [
@@ -2103,18 +2103,24 @@ describe("short-term promotion", () => {
         });
 
         expect(applied.applied).toBe(1);
-        expect(applied.compactedSections).toBeGreaterThan(0);
-        expect(applied.compactedDates).toContain("2026-04-10");
+        expect(applied.compactedSections).toBe(2);
+        expect(applied.compactedDates).toEqual(["2026-04-10", "2026-04-20"]);
 
         const memoryText = await fs.readFile(memoryPath, "utf-8");
+        expect(memoryText).toContain("Latest promotion archive:");
         expect(memoryText).not.toContain("(2026-04-10)");
         expect(memoryText).not.toContain("legacy-old");
-        // Newer pre-existing section + the freshly-written one survive.
-        expect(memoryText).toContain("Rotate the staging Postgres credentials");
+        expect(memoryText).not.toContain("legacy-newer");
+        expect(memoryText).not.toContain("Rotate the staging Postgres credentials");
+
+        const archiveText = await fs.readFile(applied.archivePath, "utf-8");
+        expect(archiveText).toContain("legacy-old");
+        expect(archiveText).toContain("legacy-newer");
+        expect(archiveText).toContain("Rotate the staging Postgres credentials");
       });
     });
 
-    it("leaves MEMORY.md untouched when total stays within memoryFileMaxChars", async () => {
+    it("keeps MEMORY.md compact while preserving existing non-promotion content", async () => {
       await withTempWorkspace(async (workspaceDir) => {
         await writeDailyMemoryNote(workspaceDir, "2026-04-29", [
           "Notes",
@@ -2162,6 +2168,10 @@ describe("short-term promotion", () => {
         expect(applied.compactedDates).toEqual([]);
         const memoryText = await fs.readFile(memoryPath, "utf-8");
         expect(memoryText).toContain("Some small existing content.");
+        expect(memoryText).toContain("Latest promotion archive:");
+        expect(memoryText).not.toContain("A short snippet that fits comfortably.");
+        const archiveText = await fs.readFile(applied.archivePath, "utf-8");
+        expect(archiveText).toContain("A short snippet that fits comfortably.");
       });
     });
   });

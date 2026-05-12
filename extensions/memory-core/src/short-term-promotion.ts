@@ -220,9 +220,9 @@ type ApplyShortTermPromotionsResult = {
   appended: number;
   reconciledExisting: number;
   appliedCandidates: PromotionCandidate[];
-  /** Number of older promotion sections compacted out to honor the budget. */
+  /** Number of detailed promotion sections removed from MEMORY.md into archives. */
   compactedSections: number;
-  /** Dates of the compacted promotion sections, oldest first. */
+  /** Dates of archived root promotion sections, oldest first when available. */
   compactedDates: string[];
 };
 
@@ -1615,6 +1615,17 @@ function ensurePromotionPointerSection(memoryText: string, archiveRelativePath: 
   return `${baseText}\n\n${pointerSection}\n`;
 }
 
+function extractPromotionSectionDates(sections: string[]): string[] {
+  const dates: string[] = [];
+  for (const section of sections) {
+    const match = section.match(/^## Promoted From Short-Term Memory \((\d{4}-\d{2}-\d{2})\)/m);
+    if (match?.[1]) {
+      dates.push(match[1]);
+    }
+  }
+  return dates;
+}
+
 function extractDetailedPromotionSections(memoryText: string): {
   memoryText: string;
   sections: string[];
@@ -1822,7 +1833,7 @@ export async function applyShortTermPromotions(
       (key) => !alreadyWrittenKeys.has(key),
     ).length;
 
-    const compactedDates: string[] = [];
+    const compactedDates = extractPromotionSectionDates(migrated.sections);
     if (toAppend.length > 0 || migrated.sections.length > 0) {
       const existingArchive = await fs.readFile(archivePath, "utf-8").catch((err: unknown) => {
         if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
@@ -1890,7 +1901,7 @@ export async function applyShortTermPromotions(
       appended: toAppend.length,
       reconciledExisting: alreadyWritten.length + migratedOnlyCount,
       appliedCandidates: rehydratedSelected,
-      compactedSections: compactedDates.length,
+      compactedSections: migrated.sections.length,
       compactedDates,
     };
   });
