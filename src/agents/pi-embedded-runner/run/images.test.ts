@@ -127,15 +127,41 @@ describe("detectImageReferences", () => {
   });
 
   it("deduplicates repeated image references", () => {
-    expectImageReferenceCount("Look at /path/image.png and also /path/image.png again", 1);
+    expect(
+      detectImageReferences("Look at /path/image.png and also /path/image.png again"),
+    ).toStrictEqual([
+      {
+        raw: "/path/image.png",
+        type: "path",
+        resolved: "/path/image.png",
+      },
+    ]);
   });
 
   it("dedupe casing follows host filesystem conventions", () => {
+    const prompt = "Look at /tmp/Image.png and /tmp/image.png";
     if (process.platform === "win32") {
-      expectImageReferenceCount("Look at /tmp/Image.png and /tmp/image.png", 1);
+      expect(detectImageReferences(prompt)).toStrictEqual([
+        {
+          raw: "/tmp/Image.png",
+          type: "path",
+          resolved: "/tmp/Image.png",
+        },
+      ]);
       return;
     }
-    expectImageReferenceCount("Look at /tmp/Image.png and /tmp/image.png", 2);
+    expect(detectImageReferences(prompt)).toStrictEqual([
+      {
+        raw: "/tmp/Image.png",
+        type: "path",
+        resolved: "/tmp/Image.png",
+      },
+      {
+        raw: "/tmp/image.png",
+        type: "path",
+        resolved: "/tmp/image.png",
+      },
+    ]);
   });
 
   it("returns empty array when no images found", () => {
@@ -149,21 +175,32 @@ describe("detectImageReferences", () => {
   it("handles paths inside quotes (without spaces)", () => {
     const ref = expectSingleImageReference('The file is at "/path/to/image.png"');
 
-    expect(ref?.raw).toBe("/path/to/image.png");
+    expect(ref).toStrictEqual({
+      raw: "/path/to/image.png",
+      type: "path",
+      resolved: "/path/to/image.png",
+    });
   });
 
   it("handles paths in parentheses", () => {
     const ref = expectSingleImageReference("See the image (./screenshot.png) for details");
 
-    expect(ref?.raw).toBe("./screenshot.png");
+    expect(ref).toStrictEqual({
+      raw: "./screenshot.png",
+      type: "path",
+      resolved: "./screenshot.png",
+    });
   });
 
   it("detects [Image: source: ...] format from messaging systems", () => {
     const ref = expectSingleImageReference(`What does this image show?
 [Image: source: /Users/tyleryust/Library/Messages/Attachments/IMG_0043.jpeg]`);
 
-    expect(ref?.raw).toBe("/Users/tyleryust/Library/Messages/Attachments/IMG_0043.jpeg");
-    expect(ref?.type).toBe("path");
+    expect(ref).toStrictEqual({
+      raw: "/Users/tyleryust/Library/Messages/Attachments/IMG_0043.jpeg",
+      type: "path",
+      resolved: "/Users/tyleryust/Library/Messages/Attachments/IMG_0043.jpeg",
+    });
   });
 
   it("handles complex message attachment paths", () => {
@@ -171,7 +208,12 @@ describe("detectImageReferences", () => {
       "[Image: source: /Users/tyleryust/Library/Messages/Attachments/23/03/AA4726EA-DB27-4269-BA56-1436936CC134/5E3E286A-F585-4E5E-9043-5BC2AFAFD81BIMG_0043.jpeg]",
     );
 
-    expect(ref?.resolved).toContain("IMG_0043.jpeg");
+    expect(ref).toStrictEqual({
+      raw: "/Users/tyleryust/Library/Messages/Attachments/23/03/AA4726EA-DB27-4269-BA56-1436936CC134/5E3E286A-F585-4E5E-9043-5BC2AFAFD81BIMG_0043.jpeg",
+      type: "path",
+      resolved:
+        "/Users/tyleryust/Library/Messages/Attachments/23/03/AA4726EA-DB27-4269-BA56-1436936CC134/5E3E286A-F585-4E5E-9043-5BC2AFAFD81BIMG_0043.jpeg",
+    });
   });
 
   it("detects multiple images in [media attached: ...] format", () => {
@@ -219,7 +261,13 @@ Also https://cdn.mysite.com/img.jpg`,
       1,
     );
 
-    expect(refs[0]?.raw).toBe("/path/to/real.png");
+    expect(refs).toStrictEqual([
+      {
+        raw: "/path/to/real.png",
+        type: "path",
+        resolved: "/path/to/real.png",
+      },
+    ]);
   });
 
   it("handles single file format with URL (no index)", () => {
@@ -227,7 +275,11 @@ Also https://cdn.mysite.com/img.jpg`,
       expectSingleImageReference(`[media attached: /cache/photo.jpeg (image/jpeg) | https://example.com/url]
 what is this?`);
 
-    expect(ref?.resolved).toContain("photo.jpeg");
+    expect(ref).toStrictEqual({
+      raw: "/cache/photo.jpeg",
+      type: "path",
+      resolved: "/cache/photo.jpeg",
+    });
   });
 
   it("handles paths with spaces in filename", () => {
@@ -236,8 +288,11 @@ what is this?`);
       expectSingleImageReference(`[media attached: /Users/test/.openclaw/media/ChatGPT Image Apr 21, 2025.png (image/png) | https://example.com/same.png]
 what is this?`);
 
-    // Only 1 ref - the local path (example.com URLs are skipped)
-    expect(ref?.resolved).toContain("ChatGPT Image Apr 21, 2025.png");
+    expect(ref).toStrictEqual({
+      raw: "/Users/test/.openclaw/media/ChatGPT Image Apr 21, 2025.png",
+      type: "path",
+      resolved: "/Users/test/.openclaw/media/ChatGPT Image Apr 21, 2025.png",
+    });
   });
 
   it("ignores remote-host file URLs", () => {
