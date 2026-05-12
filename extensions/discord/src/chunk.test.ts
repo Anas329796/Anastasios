@@ -1,6 +1,14 @@
-import { countLines, hasBalancedFences } from "openclaw/plugin-sdk/test-fixtures";
 import { describe, expect, it } from "vitest";
 import { chunkDiscordText, chunkDiscordTextWithMode } from "./chunk.js";
+
+function countLines(text: string) {
+  return text === "" ? 0 : text.split(/\r?\n/).length;
+}
+
+function hasBalancedFences(text: string) {
+  const fenceMatches = text.match(/(^|\n)( {0,3})(`{3,}|~{3,})/g);
+  return (fenceMatches?.length ?? 0) % 2 === 0;
+}
 
 describe("chunkDiscordText", () => {
   it("splits tall messages even when under 2000 chars", () => {
@@ -159,6 +167,7 @@ describe("chunkDiscordText", () => {
 
     expect(chunks.length).toBeGreaterThan(1);
     expect(chunks.every((chunk) => chunk.startsWith("> "))).toBe(true);
+    expect(chunks.every((chunk) => chunk.length <= 120)).toBe(true);
   });
 
   it("does not add an empty blockquote line on line-limit splits", () => {

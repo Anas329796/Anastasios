@@ -1,4 +1,4 @@
-import { chunkMarkdownTextWithMode, type ChunkMode } from "openclaw/plugin-sdk/reply-chunking";
+import { chunkMarkdownTextWithMode, type ChunkMode } from "openclaw/plugin-sdk/reply-runtime";
 
 export type ChunkDiscordTextOpts = {
   /** Max characters per Discord message. Default: 2000. */
@@ -215,7 +215,8 @@ export function chunkDiscordText(text: string, opts: ChunkDiscordTextOpts = {}):
     const charLimit = effectiveMaxChars > 0 ? effectiveMaxChars : maxChars;
     const lineLimit = effectiveMaxLines > 0 ? effectiveMaxLines : maxLines;
     const prefixLen = current.length > 0 ? current.length + 1 : 0;
-    const segmentLimit = Math.max(1, charLimit - prefixLen);
+    const continuationPrefixLen = !nextOpenFence && blockquotePrefix ? blockquotePrefix.length : 0;
+    const segmentLimit = Math.max(1, charLimit - prefixLen - continuationPrefixLen);
     const segments = splitLongLine(originalLine, segmentLimit, {
       preserveWhitespace: wasInsideFence,
     });
