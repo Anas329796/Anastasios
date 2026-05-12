@@ -1070,7 +1070,7 @@ export async function runPreparedReply(
         }
       : undefined;
 
-  return runReplyAgent({
+  const reply = await runReplyAgent({
     commandBody: prefixedCommandBody,
     transcriptCommandBody,
     followupRun,
@@ -1109,4 +1109,25 @@ export async function runPreparedReply(
     resetTriggered: effectiveResetTriggered,
     replyThreadingOverride,
   });
+
+  // Trigger async AI title generation after a successful reply.
+  const titleSessionEntry = preparedSessionState.sessionEntry;
+  if (!isHeartbeat && reply && titleSessionEntry && storePath) {
+    import("./session-title-generator.js")
+      .then(({ maybeGenerateSessionTitle }) =>
+        maybeGenerateSessionTitle({
+          cfg,
+          sessionKey,
+          sessionEntry: titleSessionEntry,
+          storePath,
+          agentId,
+          agentDir,
+          provider,
+          model,
+        }),
+      )
+      .catch(() => undefined);
+  }
+
+  return reply;
 }

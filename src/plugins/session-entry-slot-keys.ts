@@ -59,6 +59,7 @@ const SESSION_ENTRY_RESERVED_SLOT_KEY_LIST = [
   "authProfileOverride",
   "authProfileOverrideSource",
   "authProfileOverrideCompactionCount",
+  "autoTitle",
   "liveModelSwitchPending",
   "groupActivation",
   "groupActivationNeedsSystemIntro",
