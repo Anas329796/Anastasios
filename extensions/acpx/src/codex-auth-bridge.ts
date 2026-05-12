@@ -6,7 +6,7 @@ import path from "node:path";
 import { readJsonFileWithFallback } from "openclaw/plugin-sdk/json-store";
 import {
   extractTrustedCodexProjectPaths,
-  renderIsolatedCodexProjectTrustConfig,
+  renderIsolatedCodexConfig,
 } from "./codex-trust-config.js";
 import { resolveAcpxPluginRoot } from "./config.js";
 import type { ResolvedAcpxPluginConfig } from "./config.js";
@@ -549,7 +549,10 @@ async function prepareIsolatedCodexHome(params: {
   await fs.mkdir(codexHome, { recursive: true });
   await fs.writeFile(
     path.join(codexHome, "config.toml"),
-    renderIsolatedCodexProjectTrustConfig(trustedProjectPaths),
+    renderIsolatedCodexConfig({
+      sourceConfigToml: sourceConfig,
+      projectPaths: trustedProjectPaths,
+    }),
     "utf8",
   );
   return codexHome;

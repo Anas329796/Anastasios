@@ -358,7 +358,23 @@ describe("prepareAcpxCodexAuthConfig", () => {
     );
     await fs.writeFile(
       path.join(sourceCodexHome, "config.toml"),
-      'notify = ["SkyComputerUseClient", "turn-ended"]\n',
+      [
+        'model = "gpt-5.5-1"',
+        'model_provider = "azure_foundry"',
+        'model_reasoning_effort = "high"',
+        'sandbox_mode = "workspace-write"',
+        'notify = ["SkyComputerUseClient", "turn-ended"]',
+        "",
+        "[model_providers.azure_foundry]",
+        'name = "Azure Foundry"',
+        'base_url = "https://example.azure.com/openai/v1"',
+        'wire_api = "responses"',
+        "",
+        "[model_providers.azure_foundry.auth]",
+        'command = "bash"',
+        'args = ["-lc", "printf %s test-key"]',
+        "",
+      ].join("\n"),
     );
     process.env.CODEX_HOME = sourceCodexHome;
     process.env.OPENCLAW_AGENT_DIR = agentDir;
@@ -376,6 +392,14 @@ describe("prepareAcpxCodexAuthConfig", () => {
 
     expectCodexWrapperCommand(resolved.agents.codex, generated.wrapperPath);
     const isolatedConfig = await fs.readFile(generated.configPath, "utf8");
+    expect(isolatedConfig).toContain('model = "gpt-5.5-1"');
+    expect(isolatedConfig).toContain('model_provider = "azure_foundry"');
+    expect(isolatedConfig).toContain('model_reasoning_effort = "high"');
+    expect(isolatedConfig).toContain('sandbox_mode = "workspace-write"');
+    expect(isolatedConfig).toContain("[model_providers.azure_foundry]");
+    expect(isolatedConfig).toContain('base_url = "https://example.azure.com/openai/v1"');
+    expect(isolatedConfig).toContain("[model_providers.azure_foundry.auth]");
+    expect(isolatedConfig).toContain('args = ["-lc", "printf %s test-key"]');
     expect(isolatedConfig).not.toContain("notify");
     expect(isolatedConfig).not.toContain("SkyComputerUseClient");
     expect(isolatedConfig).toContain(`[projects.${JSON.stringify(path.resolve(root))}]`);
