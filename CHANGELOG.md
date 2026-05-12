@@ -6,6 +6,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Cron/delivery: reject `--announce --channel webchat` at `cron add`/`cron edit` with a clear, actionable error pointing at the supported reminder shapes, and surface a typed `WebchatNotDeliverableError` from `resolveMessageChannelSelection` so RPC, agent-tool, and raw `jobs.json` callers fail fast at runtime instead of with the generic "Channel is required (no configured channels detected)". Webchat is the internal session-bound surface, not a deliverable channel plugin; the supported patterns are `sessionTarget: "main"` + `payload.kind: "systemEvent"` for the default agent, or `sessionTarget: "session:agent:<id>:main"` + `payload.kind: "agentTurn"` + `delivery.mode: "none"` for any non-default agent. See `docs/automation/cron-jobs.md` “Webchat is not an announce target”.
 - fix(memory-wiki): require admin scope for ingest [AI]. (#80897) Thanks @pgondhi987.
 - memory-wiki: require write scope for Obsidian search [AI]. (#80904) Thanks @pgondhi987.
 - Build: skip copied metadata for bundled plugins that are excluded from build entries, preventing update/status rebuilds from advertising missing QQ Bot runtime files. (#80925)
