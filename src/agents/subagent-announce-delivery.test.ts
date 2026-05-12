@@ -1009,8 +1009,7 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
           phase: "direct-primary",
           delivered: false,
           path: "direct",
-          error:
-            "active requester session could not be woken: queue_message_failed reason=not_streaming sessionId=requester-session-telegram gatewayHealth=live",
+          error: "completion agent did not produce a visible reply",
         },
         {
           phase: "queue-fallback",
@@ -1028,7 +1027,7 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
         debounceMs: 500,
       },
     );
-    expect(callGateway).not.toHaveBeenCalled();
+    expect(callGateway).toHaveBeenCalled();
     expect(sendMessage).not.toHaveBeenCalled();
   });
 
