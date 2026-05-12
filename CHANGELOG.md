@@ -7,6 +7,7 @@ Docs: https://docs.openclaw.ai
 ### Changes
 
 - Models/OpenAI CLI auth: make `openclaw models auth login --provider openai` start the ChatGPT/Codex account login by default, while `--method api-key` remains the explicit OpenAI API-key setup path.
+- Google/Gemini: normalize retired Gemini 3 Pro Preview ids inside SDK OAuth auth-result default config patches, so helper-built provider auth flows emit `google/gemini-3.1-pro-preview` for Gemini 3.1 testing.
 - Google/Gemini: normalize retired Gemini 3 Pro Preview ids returned by direct `openclaw models auth login --set-default` provider auth flows before writing config, so Gemini testing targets `google/gemini-3.1-pro-preview`.
 - Google/Gemini: normalize retired Gemini 3 Pro Preview ids in provider catalog rows when API-key onboarding only reapplies the agent default, so emitted config keeps testing `google/gemini-3.1-pro-preview`.
 - Docs/subagents: document `agents.defaults.subagents.announceTimeoutMs` in the sub-agent and configuration references. (#75509) Thanks @akrimm702.
@@ -921,6 +922,7 @@ Docs: https://docs.openclaw.ai
 - Discord/status: add degraded Discord transport and gateway event-loop starvation signals to `openclaw channels status`, `openclaw status --deep`, and fetch-timeout logs so intermittent socket resets do not look like a healthy running channel. (#76327) Thanks @joshavant.
 - Providers/OpenRouter: add opt-in response caching params that send OpenRouter's `X-OpenRouter-Cache`, `X-OpenRouter-Cache-TTL`, and cache-clear headers only on verified OpenRouter routes. Thanks @vincentkoc.
 - Providers/OpenRouter: expand app-attribution categories so OpenClaw advertises coding, programming, writing, chat, and personal-agent usage on verified OpenRouter routes. Thanks @vincentkoc.
+- Providers/OpenRouter: add inbound audio STT support to media-understanding via OpenRouter's JSON `/audio/transcriptions` contract, including default audio model metadata and auto-selection priority. (#77490) Thanks @remdev.
 - Plugins/update: make package upgrades swap pnpm/npm-prefix installs cleanly, keep legacy plugin install runtime chunks working, and on the beta channel fall back default-line npm plugins to default/latest when plugin beta releases are missing or fail install validation. Thanks @vincentkoc and @joshavant.
 - Channels/WhatsApp: support explicit WhatsApp Channel/Newsletter `@newsletter` outbound message targets with channel session metadata instead of DM routing. Fixes #13417; carries forward the narrow outbound target idea from #13424. Thanks @vincentkoc and @agentz-manfred.
 - Exec approvals: add a tree-sitter-backed shell command explainer for future approval and command-review surfaces. (#75004) Thanks @jesse-merhi.
