@@ -164,7 +164,7 @@ import { fileURLToPath } from "node:url";
 
 ${params.envSetup}
 const stderrLogPath = ${params.stderrLogFileName ? `fileURLToPath(new URL("./${params.stderrLogFileName}", import.meta.url))` : "undefined"};
-const stderrLogMaxChars = 64 * 1024;
+const stderrLogMaxChars = 256 * 1024;
 
 function appendStderrLog(chunk) {
   if (!stderrLogPath) {
