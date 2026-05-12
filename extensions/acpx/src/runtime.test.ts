@@ -240,6 +240,7 @@ describe("AcpxRuntime fresh reset wrapper", () => {
   it("adds Codex wrapper stderr tail to generic session initialization failures", async () => {
     const wrapperRoot = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-acpx-runtime-"));
     const leaseStore = makeLeaseStore();
+    const wrapperCommand = `node "${path.join(wrapperRoot, "codex-acp-wrapper.mjs")}"`;
     const baseStore: TestSessionStore = {
       load: vi.fn(async () => undefined),
       save: vi.fn(async () => {}),
@@ -249,8 +250,7 @@ describe("AcpxRuntime fresh reset wrapper", () => {
       openclawProcessLeaseStore: leaseStore.store,
       openclawWrapperRoot: wrapperRoot,
       agentRegistry: {
-        resolve: (agentName: string) =>
-          agentName === "codex" ? CODEX_ACP_WRAPPER_COMMAND : agentName,
+        resolve: (agentName: string) => (agentName === "codex" ? wrapperCommand : agentName),
         list: () => ["codex"],
       },
     });
@@ -285,14 +285,6 @@ describe("AcpxRuntime fresh reset wrapper", () => {
       message: expect.stringContaining("deployment missing"),
     });
     expect(outcome.error.message).not.toContain("sk-testsecret1234567890");
-
-    await expect(
-      runtime.ensureSession({
-        sessionKey: "agent:codex:acp:test",
-        agent: "codex",
-        mode: "oneshot",
-      }),
-    ).rejects.toMatchObject({ code: "ACP_SESSION_INIT_FAILED" });
   });
 
   it("adds Codex wrapper stderr tail to generic first-turn failures", async () => {

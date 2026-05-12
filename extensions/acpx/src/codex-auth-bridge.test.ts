@@ -506,7 +506,13 @@ describe("prepareAcpxCodexAuthConfig", () => {
     const stderrScript = path.join(root, "emit-stderr.mjs");
     await fs.writeFile(
       stderrScript,
-      'process.stderr.write("token=sk-testsecret1234567890\\n"); process.exit(1);',
+      `process.stderr.write([
+        "token=sk-testsecret1234567890",
+        "Authorization: Bearer bearer-secret-token-1234567890",
+        "standalone sk-live-secret1234567890",
+        "url=https://example.test/callback?token=query-secret-1234567890",
+        "github_pat_1234567890abcdefghijklmnopqrstuvwxyz",
+      ].join("\\n") + "\\n"); process.exit(1);`,
       "utf8",
     );
     const pluginConfig = resolveAcpxPluginConfig({
@@ -544,8 +550,14 @@ describe("prepareAcpxCodexAuthConfig", () => {
       "utf8",
     );
     expect(log).toContain("token=[REDACTED]");
-    expect(log).toContain("[REDACTED_OPENAI_KEY]");
+    expect(log).toContain("Authorization: Bearer [REDACTED]");
+    expect(log).toContain("standalone [REDACTED_OPENAI_KEY]");
+    expect(log).toContain("?token=[REDACTED]");
+    expect(log).toContain("[REDACTED_GITHUB_TOKEN]");
     expect(log).not.toContain("sk-testsecret1234567890");
+    expect(log).not.toContain("bearer-secret-token-1234567890");
+    expect(log).not.toContain("query-secret-1234567890");
+    expect(log).not.toContain("github_pat_1234567890abcdefghijklmnopqrstuvwxyz");
     await expectPathMissing(path.join(stateDir, "acpx", "codex-acp-wrapper.stderr.log"));
   });
 

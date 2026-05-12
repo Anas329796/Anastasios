@@ -152,6 +152,118 @@ async function resolveInstalledClaudeAcpBinPath(): Promise<string | undefined> {
   return await resolveInstalledAcpPackageBinPath(CLAUDE_ACP_PACKAGE, CLAUDE_ACP_BIN);
 }
 
+type DiagnosticRedactionRuleSpec = {
+  source: string;
+  flags: string;
+  replacement: string;
+};
+
+const DIAGNOSTIC_REDACTION_RULES: DiagnosticRedactionRuleSpec[] = [
+  {
+    source: String.raw`(authorization\s*[:=]\s*bearer\s+)[^\s'"<>]+`,
+    flags: "gi",
+    replacement: "$1[REDACTED]",
+  },
+  {
+    source: String.raw`((?:api[_-]?key|apiKey|access[_-]?token|refresh[_-]?token|client[_-]?secret|token|secret|password|passwd|credential)\s*[:=]\s*)[^\s'"<>]+`,
+    flags: "gi",
+    replacement: "$1[REDACTED]",
+  },
+  {
+    source: String.raw`("(?:apiKey|token|secret|password|passwd|accessToken|refreshToken)"\s*:\s*")[^"]+`,
+    flags: "g",
+    replacement: "$1[REDACTED]",
+  },
+  {
+    source: String.raw`([?&](?:access[-_]?token|auth[-_]?token|refresh[-_]?token|api[-_]?key|client[-_]?secret|token|key|secret|password|pass|passwd|auth|signature)=)[^&\s'"<>]+`,
+    flags: "gi",
+    replacement: "$1[REDACTED]",
+  },
+  {
+    source: String.raw`(--(?:api[-_]?key|token|secret|password|passwd)\s+)[^\s'"]+`,
+    flags: "gi",
+    replacement: "$1[REDACTED]",
+  },
+  {
+    source:
+      String.raw`-----BEGIN [A-Z ]*PRI` +
+      String.raw`VATE KEY-----[\s\S]+?-----END [A-Z ]*PRI` +
+      String.raw`VATE KEY-----`,
+    flags: "g",
+    replacement: "[REDACTED_PRIVATE_KEY]",
+  },
+  {
+    source: String.raw`\b(sk-[A-Za-z0-9_-]{8,})\b`,
+    flags: "g",
+    replacement: "[REDACTED_OPENAI_KEY]",
+  },
+  {
+    source: String.raw`\b(gh[pousr]_[A-Za-z0-9_]{20,})\b`,
+    flags: "g",
+    replacement: "[REDACTED_GITHUB_TOKEN]",
+  },
+  {
+    source: String.raw`\b(github_pat_[A-Za-z0-9_]{20,})\b`,
+    flags: "g",
+    replacement: "[REDACTED_GITHUB_TOKEN]",
+  },
+  {
+    source: String.raw`\b(xox[baprs]-[A-Za-z0-9-]{10,})\b`,
+    flags: "g",
+    replacement: "[REDACTED_SLACK_TOKEN]",
+  },
+  {
+    source: String.raw`\b(gsk_[A-Za-z0-9_-]{10,})\b`,
+    flags: "g",
+    replacement: "[REDACTED_API_KEY]",
+  },
+  {
+    source: String.raw`\b(AIza[0-9A-Za-z\-_]{20,})\b`,
+    flags: "g",
+    replacement: "[REDACTED_GOOGLE_KEY]",
+  },
+  {
+    source: String.raw`\b(ya29\.[0-9A-Za-z_\-./+=]{10,})\b`,
+    flags: "g",
+    replacement: "[REDACTED_GOOGLE_TOKEN]",
+  },
+  {
+    source: String.raw`\b(eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})\b`,
+    flags: "g",
+    replacement: "[REDACTED_JWT]",
+  },
+  {
+    source: String.raw`\b(pplx-[A-Za-z0-9_-]{10,})\b`,
+    flags: "g",
+    replacement: "[REDACTED_API_KEY]",
+  },
+  {
+    source: String.raw`\b(npm_[A-Za-z0-9]{10,})\b`,
+    flags: "g",
+    replacement: "[REDACTED_NPM_TOKEN]",
+  },
+  {
+    source: String.raw`\b(LTAI[A-Za-z0-9]{10,})\b`,
+    flags: "g",
+    replacement: "[REDACTED_ACCESS_KEY]",
+  },
+  { source: String.raw`\b(hf_[A-Za-z0-9]{10,})\b`, flags: "g", replacement: "[REDACTED_API_KEY]" },
+  {
+    source: String.raw`\bbot(\d{6,}:[A-Za-z0-9_-]{20,})\b`,
+    flags: "g",
+    replacement: "bot[REDACTED_TELEGRAM_TOKEN]",
+  },
+  {
+    source: String.raw`\b(\d{6,}:[A-Za-z0-9_-]{20,})\b`,
+    flags: "g",
+    replacement: "[REDACTED_TELEGRAM_TOKEN]",
+  },
+];
+
+function renderDiagnosticRedactionRuleSpecs(): string {
+  return JSON.stringify(DIAGNOSTIC_REDACTION_RULES);
+}
+
 function buildAdapterWrapperScript(params: {
   displayName: string;
   packageSpec: string;
@@ -201,13 +313,17 @@ function resolveStderrLogPath(args) {
   return fileURLToPath(new URL("./" + fileName, import.meta.url));
 }
 
+const diagnosticRedactionRules = ${renderDiagnosticRedactionRuleSpecs()}.map((rule) => [
+  new RegExp(rule.source, rule.flags),
+  rule.replacement,
+]);
+
 function redactDiagnosticText(text) {
-  return text
-    .replace(/(authorization\s*[:=]\s*bearer\s+)[^\s'"]+/gi, "$1[REDACTED]")
-    .replace(/((?:api[_-]?key|token|secret|password|credential)\s*[:=]\s*)[^\s'"]+/gi, "$1[REDACTED]")
-    .replace(/\b(sk-[A-Za-z0-9_-]{10,})\b/g, "[REDACTED_OPENAI_KEY]")
-    .replace(/\b(gh[pousr]_[A-Za-z0-9_]{20,})\b/g, "[REDACTED_GITHUB_TOKEN]")
-    .replace(/\b(xox[baprs]-[A-Za-z0-9-]{20,})\b/g, "[REDACTED_SLACK_TOKEN]");
+  let redacted = text;
+  for (const [pattern, replacement] of diagnosticRedactionRules) {
+    redacted = redacted.replace(pattern, replacement);
+  }
+  return redacted;
 }
 
 function appendStderrLog(chunk) {
