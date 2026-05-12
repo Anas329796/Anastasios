@@ -1,3 +1,4 @@
+import { promises as fs } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Command } from "commander";
 import {
@@ -28,6 +29,10 @@ export interface PolicyCheckOptions {
 export interface PolicyWatchOptions extends PolicyCheckOptions {
   readonly intervalMs?: string | number;
   readonly once?: boolean;
+}
+
+export interface PolicyDiffOptions {
+  readonly json?: boolean;
 }
 
 type PolicyCheckReport = {
@@ -75,6 +80,16 @@ export function registerPolicyCli(program: Command): void {
     .action(async (options: PolicyWatchOptions) => {
       process.exitCode = await policyWatchCommand(options);
     });
+
+  policy
+    .command("diff")
+    .description("Compare two policy check JSON outputs")
+    .argument("<before>", "Earlier policy check JSON output")
+    .argument("<after>", "Later policy check JSON output")
+    .option("--json", "Emit JSON output")
+    .action(async (before: string, after: string, options: PolicyDiffOptions) => {
+      process.exitCode = await policyDiffCommand(before, after, options);
+    });
 }
 
 export async function policyCheckCommand(
@@ -92,7 +107,7 @@ export async function policyWatchCommand(
 ): Promise<number> {
   const intervalMs = normalizeWatchIntervalMs(options.intervalMs);
   let previousKey: string | undefined;
-  do {
+  for (;;) {
     const report = await buildPolicyCheckReport(options, runtime);
     const status = policyWatchStatus(report);
     const key = `${status}:${report.attestation.attestationHash ?? ""}:${report.exitCode}`;
@@ -104,7 +119,20 @@ export async function policyWatchCommand(
       return status === "stale" ? 1 : report.exitCode;
     }
     await (runtime.sleep ?? sleep)(intervalMs);
-  } while (true);
+  }
+}
+
+export async function policyDiffCommand(
+  beforePath: string,
+  afterPath: string,
+  options: PolicyDiffOptions,
+  runtime: PolicyCommandRuntime = defaultRuntime,
+): Promise<number> {
+  const before = await readPolicyCheckOutput(beforePath);
+  const after = await readPolicyCheckOutput(afterPath);
+  const diff = buildPolicyDiff(before, after);
+  writePolicyDiffReport(diff, options, runtime);
+  return diff.changed.length === 0 ? 0 : 1;
 }
 
 async function buildPolicyCheckReport(
@@ -165,6 +193,72 @@ async function buildPolicyCheckReport(
   };
 }
 
+type PolicyDiffReport = {
+  readonly changed: readonly string[];
+  readonly before: PolicyDiffSnapshot;
+  readonly after: PolicyDiffSnapshot;
+};
+
+type PolicyDiffSnapshot = {
+  readonly ok?: boolean;
+  readonly policyHash?: string;
+  readonly evidenceHash?: string;
+  readonly findingsHash?: string;
+  readonly attestationHash?: string;
+  readonly checkedAt?: string;
+};
+
+function buildPolicyDiff(before: unknown, after: unknown): PolicyDiffReport {
+  const beforeSnapshot = policyDiffSnapshot(before);
+  const afterSnapshot = policyDiffSnapshot(after);
+  const changed = [
+    ...changedField(beforeSnapshot, afterSnapshot, "ok", "result"),
+    ...changedField(beforeSnapshot, afterSnapshot, "policyHash", "policy"),
+    ...changedField(beforeSnapshot, afterSnapshot, "evidenceHash", "evidence"),
+    ...changedField(beforeSnapshot, afterSnapshot, "findingsHash", "findings"),
+    ...changedField(beforeSnapshot, afterSnapshot, "attestationHash", "attestation"),
+  ];
+  return {
+    changed,
+    before: beforeSnapshot,
+    after: afterSnapshot,
+  };
+}
+
+function changedField(
+  before: PolicyDiffSnapshot,
+  after: PolicyDiffSnapshot,
+  key: keyof PolicyDiffSnapshot,
+  label: string,
+): readonly string[] {
+  return before[key] === after[key] ? [] : [label];
+}
+
+function policyDiffSnapshot(value: unknown): PolicyDiffSnapshot {
+  if (!isRecord(value)) {
+    return {};
+  }
+  const attestation = isRecord(value.attestation) ? value.attestation : {};
+  const policy = isRecord(attestation.policy) ? attestation.policy : {};
+  const workspace = isRecord(attestation.workspace) ? attestation.workspace : {};
+  return {
+    ...(typeof value.ok === "boolean" ? { ok: value.ok } : {}),
+    ...(typeof policy.hash === "string" ? { policyHash: policy.hash } : {}),
+    ...(typeof workspace.hash === "string" ? { evidenceHash: workspace.hash } : {}),
+    ...(typeof attestation.findingsHash === "string"
+      ? { findingsHash: attestation.findingsHash }
+      : {}),
+    ...(typeof attestation.attestationHash === "string"
+      ? { attestationHash: attestation.attestationHash }
+      : {}),
+    ...(typeof attestation.checkedAt === "string" ? { checkedAt: attestation.checkedAt } : {}),
+  };
+}
+
+async function readPolicyCheckOutput(path: string): Promise<unknown> {
+  return JSON.parse(await fs.readFile(path, "utf-8"));
+}
+
 function writePolicyCheckReport(
   report: PolicyCheckReport,
   options: PolicyCheckOptions,
@@ -195,6 +289,30 @@ function writePolicyCheckReport(
       );
     }
   }
+}
+
+function writePolicyDiffReport(
+  report: PolicyDiffReport,
+  options: PolicyDiffOptions,
+  runtime: PolicyCommandRuntime,
+): void {
+  if (options.json === true || !process.stdout.isTTY) {
+    runtime.writeStdout(JSON.stringify(report) + "\n");
+    return;
+  }
+  if (report.changed.length === 0) {
+    runtime.writeStdout(
+      `policy diff: no drift (attestation ${report.after.attestationHash ?? "missing"})\n`,
+    );
+    return;
+  }
+  runtime.writeStdout(`policy diff: changed ${report.changed.join(", ")}\n`);
+  runtime.writeStdout(
+    `  before: attestation ${report.before.attestationHash ?? "missing"}, evidence ${report.before.evidenceHash ?? "missing"}\n`,
+  );
+  runtime.writeStdout(
+    `  after:  attestation ${report.after.attestationHash ?? "missing"}, evidence ${report.after.evidenceHash ?? "missing"}\n`,
+  );
 }
 
 function writePolicyWatchReport(
@@ -258,4 +376,8 @@ function toJsonFinding(finding: HealthFinding): Record<string, unknown> {
     ...(finding.requirement !== undefined ? { requirement: finding.requirement } : {}),
     ...(finding.fixHint !== undefined ? { fixHint: finding.fixHint } : {}),
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }

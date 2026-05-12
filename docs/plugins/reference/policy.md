@@ -80,6 +80,11 @@ with the check result, giving operators a compact value to record when a
 workspace is clean. The emitted `checkedAt` timestamp is audit metadata, but it
 is intentionally excluded from the stable attestation hash.
 
+The stable attestation hash answers whether the current policy state still
+matches an accepted clean state. `openclaw policy diff` can compare two saved
+policy-check outputs to explain what changed without making every repeated
+clean check produce a new accepted hash.
+
 When policy is enabled, the extension registers its health checks with the
 shared health registry. Doctor then runs registered checks; doctor does not
 load plugins itself. Runtime tool policy uses OpenClaw's existing trusted tool

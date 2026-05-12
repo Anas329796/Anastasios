@@ -105,6 +105,7 @@ openclaw policy check
 openclaw policy check --json
 openclaw policy check --severity-min error
 openclaw policy watch --once
+openclaw policy diff before.json after.json
 ```
 
 `policy check` runs only the policy check set and emits the observed workspace
@@ -208,6 +209,11 @@ has accepted a clean policy check and the workspace needs a local signal when
 policy evidence changes. A stale watch result means the workspace should run
 `policy check`, review the new attestation, and update the out-of-band accepted
 attestation before relying on the previous approval.
+
+`policy diff` compares two saved `policy check --json` outputs to explain what
+changed: the authored policy, observed evidence, finding set, or clean/dirty
+result. It ignores `checkedAt` for drift decisions because that timestamp is
+audit metadata, not part of the accepted stable attestation.
 
 The tool runtime gate also includes structured approval metadata on gateway
 approval requests: policy path/hash, configured expected hash when present, the
