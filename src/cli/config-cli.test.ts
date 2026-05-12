@@ -2450,16 +2450,16 @@ describe("config cli", () => {
           list: [
             {
               id: "mason-vale",
-              model: { primary: "ollama/qwen3-coder-next", fallback: "ollama/kimi-k2.6" },
+              model: { primary: "ollama/qwen3-coder-next", fallbacks: ["ollama/kimi-k2.6"] },
             },
           ],
         },
       };
       setSnapshot(resolved, withRuntimeDefaults(resolved));
 
-      await runConfigCommand(["config", "unset", "agents.list[0].model.fallback"]);
+      await runConfigCommand(["config", "unset", "agents.list[0].model.fallbacks"]);
 
-      expectLogIncludes("Removed agents.list[0].model.fallback");
+      expectLogIncludes("Removed agents.list[0].model.fallbacks");
       expectLogIncludes("Change will apply on next agent invocation.");
       expectLogExcludes("Restart the gateway to apply.");
     });
