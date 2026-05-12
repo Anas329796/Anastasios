@@ -167,6 +167,14 @@ describe("session-compaction-checkpoints", () => {
       content: "before disk discovery",
       timestamp: Date.now(),
     });
+    session.appendMessage({
+      role: "assistant",
+      content: [{ type: "text", text: "checkpoint discovery fixture" }],
+      api: "responses",
+      provider: "openai",
+      model: "gpt-test",
+      timestamp: Date.now(),
+    } as AssistantMessage);
     const leafId = requireNonEmptyString(session.getLeafId(), "session leaf id missing");
     const sessionFile = requireNonEmptyString(session.getSessionFile(), "session file missing");
     const snapshot = await captureCompactionCheckpointSnapshotAsync({
