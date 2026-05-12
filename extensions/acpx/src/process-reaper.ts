@@ -6,6 +6,7 @@ const execFileAsync = promisify(execFile);
 const GENERATED_WRAPPER_BASENAMES = new Set([
   "codex-acp-wrapper.mjs",
   "claude-agent-acp-wrapper.mjs",
+  "gemini-acp-wrapper.mjs",
 ]);
 const OPENCLAW_PLUGIN_DEPS_MARKER = "/plugin-runtime-deps/";
 const ACP_PACKAGE_MARKERS = [
