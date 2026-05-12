@@ -856,6 +856,7 @@ export class OpenClawApp extends LitElement {
     this.pluginUiBridgeKey = bridgeKey;
     this.pluginUiBridgeLoadHandler = () => this.installPluginUiBridgePort(frame, bridgeKey);
     frame.addEventListener("load", this.pluginUiBridgeLoadHandler);
+    this.installPluginUiBridgePort(frame, bridgeKey);
   }
 
   createRenderRoot() {
