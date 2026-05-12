@@ -1699,6 +1699,7 @@ export async function runEmbeddedAttempt(
           workspaceDir: effectiveWorkspace,
         }),
         contextTokenBudget: params.contextTokenBudget,
+        contextEngineInfo: activeContextEngine?.info,
       });
       const piAutoCompactionGuardArgs = {
         settingsManager,
@@ -1734,11 +1735,13 @@ export async function runEmbeddedAttempt(
       // DefaultResourceLoader.reload() rehydrates settings from disk and can drop OpenClaw
       // compaction overrides applied in createPreparedEmbeddedPiSettingsManager — same
       // rehydration also restores Pi's auto-compaction (openclaw#75799), so re-apply
-      // both guards.
+      // both guards. `contextEngineInfo` must be threaded again here because the
+      // reserve-token floor is recomputed from scratch on every re-apply.
       applyPiCompactionSettingsFromConfig({
         settingsManager,
         cfg: params.config,
         contextTokenBudget: params.contextTokenBudget,
+        contextEngineInfo: activeContextEngine?.info,
       });
       applyPiAutoCompactionGuard(piAutoCompactionGuardArgs);
       prepStages.mark("session-resource-loader");
