@@ -1,4 +1,8 @@
 import { adaptScopedAccountAccessor } from "openclaw/plugin-sdk/channel-config-helpers";
+import type {
+  ChannelThreadingContext,
+  ChannelThreadingToolContext,
+} from "openclaw/plugin-sdk/channel-contract";
 import {
   createMessageReceiptFromOutboundResults,
   defineChannelMessageAdapter,
@@ -135,6 +139,30 @@ export const googlechatThreadingAdapter = {
     resolveReplyToMode: (account: ResolvedGoogleChatAccount, _chatType?: string | null) =>
       account.config.replyToMode,
     fallback: "off" as const,
+  },
+  buildToolContext: ({
+    cfg,
+    accountId,
+    context,
+    hasRepliedRef,
+  }: {
+    cfg: OpenClawConfig;
+    accountId?: string | null;
+    context: ChannelThreadingContext;
+    hasRepliedRef?: { value: boolean };
+  }): ChannelThreadingToolContext => {
+    const currentChannelId = normalizeOptionalString(context.To);
+    const replyToId = normalizeOptionalString(context.ReplyToId);
+    const currentMessageId =
+      replyToId ?? normalizeOptionalString(context.CurrentMessageId);
+
+    return {
+      currentChannelId,
+      currentMessageId,
+      currentThreadTs: replyToId,
+      replyToMode: resolveGoogleChatAccount({ cfg, accountId }).config.replyToMode,
+      hasRepliedRef,
+    };
   },
 };
 
