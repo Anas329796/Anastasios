@@ -37,6 +37,21 @@ describe("normalizeSafeBuiltins", () => {
   it("returns empty set for non-array input", () => {
     expect(normalizeSafeBuiltins(undefined).size).toBe(0);
   });
+
+  it("drops code-evaluating builtins to prevent allowlist bypass", () => {
+    const result = normalizeSafeBuiltins(["cd", "eval", "source", ".", "pwd"]);
+    expect([...result].toSorted()).toEqual(["cd", "pwd"]);
+  });
+
+  it("drops unsupported names while keeping supported ones", () => {
+    const result = normalizeSafeBuiltins(["cd", "rm", "curl", "echo", "printf", "alias", "pwd"]);
+    expect([...result].toSorted()).toEqual(["cd", "pwd"]);
+  });
+
+  it("accepts every name in the supported set", () => {
+    const result = normalizeSafeBuiltins([":", "cd", "export", "false", "pwd", "true", "unset"]);
+    expect([...result].toSorted()).toEqual([":", "cd", "export", "false", "pwd", "true", "unset"]);
+  });
 });
 
 describe("resolveSafeBuiltins", () => {

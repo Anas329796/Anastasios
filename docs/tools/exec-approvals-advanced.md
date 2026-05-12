@@ -151,14 +151,28 @@ allowlisting `/usr/bin/bash`, a chained command like `cd /path && git status` st
 the `cd` segment.
 
 `tools.exec.safeBuiltins` is an opt-in list of builtins that auto-allow without a path
-resolution. The conservative default set (use it as-is or pick a subset) is:
+resolution. The conservative default set (stateless, no shell-state mutation) is:
 
-`:`, `cd`, `export`, `false`, `pwd`, `true`, `unset`
+`:`, `false`, `pwd`, `true`
 
-These cannot execute external code on their own. They are intentionally narrower than the
-full bash builtin list: `eval`, `source`, and `.` are excluded because they evaluate code,
-and `echo` and `printf` are excluded because shell behavior varies (use the
-`/usr/bin/echo` / `/usr/bin/printf` binaries via `safeBins` if needed).
+Additional supported names you can opt into explicitly if you accept the cwd/env-mutation
+trade-off (see "State-mutating builtins" below):
+
+`cd`, `export`, `unset`
+
+These seven names form the full supported set. Anything else you configure is silently
+dropped at normalization — including `eval`, `source`, and `.` (they evaluate arbitrary
+shell code; auto-allowing them would defeat the allowlist by letting a configured-as-safe
+builtin run a different non-safe binary) and `echo` / `printf` (shell-builtin variants
+differ across shells; the `/usr/bin/echo` / `/usr/bin/printf` binaries can be allowlisted
+via `safeBins` if needed).
+
+#### State-mutating builtins
+
+`cd`, `export`, and `unset` are supported but **not** in the conservative default. The
+allowlist evaluator resolves each segment against the original cwd/env, so auto-allowing
+them can approve a different executable than the one the shell eventually runs after the
+mutation. Enable them only when you accept that trade-off for your workflow.
 
 Off by default. Enable per-agent or globally:
 

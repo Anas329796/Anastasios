@@ -281,9 +281,12 @@ export type ExecToolConfig = {
   safeBins?: string[];
   /**
    * POSIX shell builtins to auto-allow in exec allowlist mode. Off by default.
-   * Stateless builtins (`:`, `true`, `false`, `pwd`) are safe; state-mutating ones
-   * (`cd`, `export`, `unset`) can be added explicitly if the trade-off is understood.
-   * Use `DEFAULT_SAFE_BUILTINS` from the SDK as a starting point, or list entries manually.
+   * Supported names: `:`, `true`, `false`, `pwd`, `cd`, `export`, `unset`. Any other
+   * configured value is silently dropped at normalization to prevent misconfiguration
+   * from bypassing approval for code-evaluating builtins like `eval`, `source`, or `.`.
+   * Stateless builtins (`:`, `true`, `false`, `pwd`) are the conservative default-style
+   * choice; state-mutating ones (`cd`, `export`, `unset`) can be added explicitly if the
+   * cwd/env-mutation trade-off is understood. See `docs/tools/exec-approvals-advanced.md`.
    */
   safeBuiltins?: string[];
   /**

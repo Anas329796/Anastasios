@@ -1,19 +1,41 @@
 import { isWindowsPlatform, type ExecCommandSegment } from "./exec-approvals-analysis.js";
 import { resolveExecutionTargetResolution } from "./exec-command-resolution.js";
 
-// POSIX shell builtins that cannot execute external code on their own and do not mutate
-// shell state (cwd or env) that the allowlist evaluator observes. These are safe to
-// auto-allow when the user has opted in via `tools.exec.safeBuiltins`:
+// POSIX shell builtins users may configure under `tools.exec.safeBuiltins`. This is the
+// closed supported set — anything outside this list is silently dropped at normalization
+// time so a misconfiguration like `safeBuiltins: ["eval"]` cannot bypass approval for
+// code-evaluating builtins. To extend the supported surface, add a name here and document
+// the rationale.
+//
+// Members:
 //   :, true, false — no-ops / status returns
 //   pwd            — reads cwd, does not change it
+//   cd, export, unset — mutate cwd/env before later segments run; opt-in only because the
+//     allowlist evaluator resolves each segment against the original cwd/env, so auto-
+//     allowing them can approve a different executable than the one the shell eventually
+//     runs. Users who understand this trade-off can enable them explicitly via config.
 //
-// Notably excluded from this default set:
-//   cd, export, unset — these mutate cwd/env before later segments run; the allowlist
-//     evaluator resolves each segment against the original cwd/env, so auto-allowing them
-//     can approve a different executable than the one the shell eventually runs. Users who
-//     understand this trade-off can add them explicitly via config.
-//   echo, printf, eval, source, . — eval/source/. evaluate code; echo/printf differ across
-//     shells and are often available as /usr/bin/echo via safeBins.
+// Notably excluded:
+//   eval, source, .       — evaluate arbitrary shell code; auto-allowing them defeats
+//                           the entire allowlist by letting the configured-as-safe builtin
+//                           run a different non-safe binary.
+//   echo, printf          — shell-builtin variants differ across shells; the `/usr/bin/`
+//                           binaries can be allowlisted via `safeBins` if needed.
+//   any non-listed name   — including future shell extensions like aliases or functions;
+//                           must be added to this set with explicit review first.
+export const SUPPORTED_SAFE_BUILTINS: ReadonlySet<string> = new Set([
+  ":",
+  "cd",
+  "export",
+  "false",
+  "pwd",
+  "true",
+  "unset",
+]);
+
+// Conservative default: stateless, no shell-state mutation. Users opting into the wider
+// supported set (`cd`, `export`, `unset`) take on the cwd/env-mutation trade-off documented
+// above and in `docs/tools/exec-approvals-advanced.md`.
 export const DEFAULT_SAFE_BUILTINS: readonly string[] = [":", "false", "pwd", "true"];
 
 export function normalizeSafeBuiltins(entries?: readonly string[]): Set<string> {
@@ -22,7 +44,7 @@ export function normalizeSafeBuiltins(entries?: readonly string[]): Set<string> 
   }
   const normalized = entries
     .map((entry) => entry.trim().toLowerCase())
-    .filter((entry) => entry.length > 0);
+    .filter((entry) => entry.length > 0 && SUPPORTED_SAFE_BUILTINS.has(entry));
   return new Set(normalized);
 }
 
