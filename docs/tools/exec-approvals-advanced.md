@@ -167,7 +167,7 @@ builtin run a different non-safe binary) and `echo` / `printf` (shell-builtin va
 differ across shells; the `/usr/bin/echo` / `/usr/bin/printf` binaries can be allowlisted
 via `safeBins` if needed).
 
-#### State-mutating builtins
+### State-mutating builtins
 
 `cd`, `export`, and `unset` are supported but **not** in the conservative default. The
 allowlist evaluator resolves each segment against the original cwd/env, so auto-allowing
