@@ -657,6 +657,70 @@ function toDotPath(path: PathSegment[]): string {
   return path.join(".");
 }
 
+/**
+ * Decide whether a config mutation at `requestedPath` can be picked up by an
+ * already-running gateway, given the post-mutation config in `nextConfig`.
+ *
+ * Active agents (no `agents.list[N].agentRuntime.id` configured) hot-load
+ * their config on the next invocation, so a gateway restart is not required
+ * after editing `agents.list[N].*`. Dormant agents that pin a runtime via
+ * `agentRuntime.id` (e.g. `codex`) cache their runtime plan eagerly and DO
+ * require a restart. Edits that touch `agentRuntime` itself are treated as
+ * restart-required because they change runtime structure.
+ *
+ * The default is conservative: anything we are not sure about returns false
+ * (i.e. "keep the restart hint"). See issue #80722.
+ */
+function operationCanHotLoad(
+  nextConfig: unknown,
+  requestedPath: PathSegment[] | undefined,
+): boolean {
+  if (!requestedPath || requestedPath.length < 3) return false;
+  if (requestedPath[0] !== "agents" || requestedPath[1] !== "list") return false;
+  const indexSegment = requestedPath[2];
+  if (typeof indexSegment !== "string" || indexSegment.length === 0) return false;
+  // Only canonical, non-negative integer indices like "0", "3"; reject "01", "-1".
+  if (!/^(0|[1-9][0-9]*)$/.test(indexSegment)) return false;
+  const index = Number(indexSegment);
+  // Any edit that touches the agentRuntime sub-tree changes runtime structure
+  // and is treated as restart-required, even on an otherwise-active agent.
+  if (requestedPath.slice(3).includes("agentRuntime")) return false;
+  const root = nextConfig as { agents?: { list?: unknown } } | undefined;
+  const agentsList = root?.agents?.list;
+  if (!Array.isArray(agentsList)) return false;
+  const agent = agentsList[index];
+  if (!agent || typeof agent !== "object" || Array.isArray(agent)) return false;
+  const agentRuntime = (agent as { agentRuntime?: unknown }).agentRuntime;
+  if (
+    agentRuntime &&
+    typeof agentRuntime === "object" &&
+    !Array.isArray(agentRuntime) &&
+    typeof (agentRuntime as { id?: unknown }).id === "string" &&
+    ((agentRuntime as { id: string }).id).length > 0
+  ) {
+    // Dormant agent — runtime plan is cached; restart is genuinely needed.
+    return false;
+  }
+  return true;
+}
+
+function operationsCanHotLoad(
+  nextConfig: unknown,
+  operations: ReadonlyArray<{ requestedPath?: PathSegment[] }>,
+): boolean {
+  if (operations.length === 0) return false;
+  return operations.every((operation) =>
+    operationCanHotLoad(nextConfig, operation.requestedPath),
+  );
+}
+
+const RESTART_HINT = "Restart the gateway to apply.";
+const HOT_LOAD_HINT = "Change will apply on next agent invocation.";
+
+function applyHint(nextConfig: unknown, operations: ReadonlyArray<{ requestedPath?: PathSegment[] }>): string {
+  return operationsCanHotLoad(nextConfig, operations) ? HOT_LOAD_HINT : RESTART_HINT;
+}
+
 function parseSecretRefSource(raw: string, label: string): SecretRefSource {
   const source = raw.trim();
   if (source === "env" || source === "file" || source === "exec") {
@@ -1614,19 +1678,20 @@ async function runConfigOperations(params: {
       ),
     );
   }
+  const hint = applyHint(nextConfig, operations);
   if (params.successMode === "set" && operations.length === 1) {
     const operation = operations[0];
     const action = operation?.mutation === "delete" ? "Removed" : "Updated";
     runtime.log(
-      info(`${action} ${toDotPath(operation?.requestedPath ?? [])}. Restart the gateway to apply.`),
+      info(`${action} ${toDotPath(operation?.requestedPath ?? [])}. ${hint}`),
     );
     return;
   }
   if (params.successMode === "set") {
-    runtime.log(info(`Updated ${operations.length} config paths. Restart the gateway to apply.`));
+    runtime.log(info(`Updated ${operations.length} config paths. ${hint}`));
     return;
   }
-  runtime.log(info(`Applied ${operations.length} config update(s). Restart the gateway to apply.`));
+  runtime.log(info(`Applied ${operations.length} config update(s). ${hint}`));
 }
 
 function handleConfigMutationError(params: {
@@ -1789,7 +1854,8 @@ export async function runConfigUnset(opts: { path: string; runtime?: RuntimeEnv 
         ? {}
         : { writeOptions: { unsetPaths: [parsedPath] } }),
     });
-    runtime.log(info(`Removed ${opts.path}. Restart the gateway to apply.`));
+    const hint = applyHint(next, [{ requestedPath: parsedPath }]);
+    runtime.log(info(`Removed ${opts.path}. ${hint}`));
   } catch (err) {
     runtime.error(danger(String(err)));
     runtime.exit(1);

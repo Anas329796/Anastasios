@@ -2359,4 +2359,109 @@ describe("config cli", () => {
       expect(mockLog).toHaveBeenCalledWith("/home/user/.openclaw/openclaw.json");
     });
   });
+
+  describe("restart hint - issue #80722", () => {
+    it("omits restart hint for agents.list[N].model.* on active agents (no agentRuntime)", async () => {
+      const resolved: OpenClawConfig = {
+        agents: {
+          list: [
+            { id: "main" },
+            { id: "mason-vale", model: { primary: "ollama/qwen3-coder-next" } },
+          ],
+        },
+      };
+      setSnapshot(resolved, withRuntimeDefaults(resolved));
+
+      await runConfigCommand([
+        "config",
+        "set",
+        "agents.list[1].model.primary",
+        '"ollama/kimi-k2.6"',
+        "--strict-json",
+      ]);
+
+      expectLogIncludes("Updated agents.list.1.model.primary");
+      expectLogIncludes("Change will apply on next agent invocation.");
+      expectLogExcludes("Restart the gateway to apply.");
+    });
+
+    it("keeps restart hint for agents.list[N].model.* on dormant agents (agentRuntime.id set)", async () => {
+      const resolved: OpenClawConfig = {
+        agents: {
+          list: [
+            { id: "main" },
+            {
+              id: "codex-pinned",
+              agentRuntime: { id: "codex" },
+              model: { primary: "openai/gpt-5.5" },
+            },
+          ],
+        },
+      } as unknown as OpenClawConfig;
+      setSnapshot(resolved, withRuntimeDefaults(resolved));
+
+      await runConfigCommand([
+        "config",
+        "set",
+        "agents.list[1].model.primary",
+        '"openai/gpt-5.5-codex"',
+        "--strict-json",
+      ]);
+
+      expectLogIncludes("Restart the gateway to apply.");
+      expectLogExcludes("Change will apply on next agent invocation.");
+    });
+
+    it("keeps restart hint for non-agent config paths", async () => {
+      const resolved: OpenClawConfig = {
+        agents: { list: [{ id: "main" }] },
+        gateway: { port: 18789 },
+      };
+      setSnapshot(resolved, withRuntimeDefaults(resolved));
+
+      await runConfigCommand(["config", "set", "gateway.auth.mode", "token"]);
+
+      expectLogIncludes("Restart the gateway to apply.");
+      expectLogExcludes("Change will apply on next agent invocation.");
+    });
+
+    it("keeps restart hint when the path touches agentRuntime itself", async () => {
+      const resolved: OpenClawConfig = {
+        agents: {
+          list: [
+            {
+              id: "mason-vale",
+              agentRuntime: { id: "codex" },
+            },
+          ],
+        },
+      } as unknown as OpenClawConfig;
+      setSnapshot(resolved, withRuntimeDefaults(resolved));
+
+      await runConfigCommand(["config", "unset", "agents.list[0].agentRuntime"]);
+
+      expectLogIncludes("Restart the gateway to apply.");
+      expectLogExcludes("Change will apply on next agent invocation.");
+    });
+
+    it("omits restart hint for unset on agents.list[N].model.* on active agents", async () => {
+      const resolved: OpenClawConfig = {
+        agents: {
+          list: [
+            {
+              id: "mason-vale",
+              model: { primary: "ollama/qwen3-coder-next", fallback: "ollama/kimi-k2.6" },
+            },
+          ],
+        },
+      };
+      setSnapshot(resolved, withRuntimeDefaults(resolved));
+
+      await runConfigCommand(["config", "unset", "agents.list[0].model.fallback"]);
+
+      expectLogIncludes("Removed agents.list[0].model.fallback");
+      expectLogIncludes("Change will apply on next agent invocation.");
+      expectLogExcludes("Restart the gateway to apply.");
+    });
+  });
 });
