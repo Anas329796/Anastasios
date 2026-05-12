@@ -52,5 +52,6 @@ export function buildCopilotModelDefinition(modelId: string): ModelDefinitionCon
     contextWindow: staticOverride?.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
     maxTokens: staticOverride?.maxTokens ?? DEFAULT_MAX_TOKENS,
     ...(staticOverride?.compat ? { compat: staticOverride.compat } : {}),
+    ...(!staticOverride?.compat ? { compat: { supportsEagerToolInputStreaming: false } } : {}),
   };
 }
