@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { prepareAcpxCodexAuthConfig } from "./codex-auth-bridge.js";
 import { resolveAcpxPluginConfig } from "./config.js";
+import { OPENCLAW_ACPX_LEASE_ID_ARG, OPENCLAW_GATEWAY_INSTANCE_ID_ARG } from "./process-lease.js";
 
 const execFileAsync = promisify(execFile);
 const tempDirs: string[] = [];
@@ -496,6 +497,56 @@ describe("prepareAcpxCodexAuthConfig", () => {
     expect(resolved.agents.claude).not.toContain("npx -y @agentclientprotocol/claude-agent-acp");
     expect(resolved.agents.claude).toContain("--permission-mode");
     expect(resolved.agents.claude).toContain("bypass");
+  });
+
+  it("captures Codex wrapper stderr in a redacted per-lease log", async () => {
+    const root = await makeTempDir();
+    const stateDir = path.join(root, "state");
+    const generated = generatedCodexPaths(stateDir);
+    const stderrScript = path.join(root, "emit-stderr.mjs");
+    await fs.writeFile(
+      stderrScript,
+      'process.stderr.write("token=sk-testsecret1234567890\\n"); process.exit(1);',
+      "utf8",
+    );
+    const pluginConfig = resolveAcpxPluginConfig({
+      rawConfig: {
+        agents: {
+          codex: {
+            command: `${process.execPath} ${stderrScript}`,
+          },
+        },
+      },
+      workspaceDir: root,
+    });
+
+    await prepareAcpxCodexAuthConfig({
+      pluginConfig,
+      stateDir,
+      resolveInstalledCodexAcpBinPath: async () => path.join(root, "codex-acp.js"),
+    });
+
+    await expect(
+      execFileAsync(process.execPath, [
+        generated.wrapperPath,
+        "--openclaw-run-configured",
+        process.execPath,
+        stderrScript,
+        OPENCLAW_ACPX_LEASE_ID_ARG,
+        "lease-secret",
+        OPENCLAW_GATEWAY_INSTANCE_ID_ARG,
+        "gateway-test",
+      ]),
+    ).rejects.toMatchObject({ code: 1 });
+
+    const log = await fs.readFile(
+      path.join(stateDir, "acpx", "codex-acp-wrapper.stderr.lease-secret.log"),
+      "utf8",
+    );
+    expect(log).toContain("token=[REDACTED]");
+    expect(log).toContain("[REDACTED_OPENAI_KEY]");
+    expect(log).not.toContain("sk-testsecret1234567890");
+    await expectPathMissing(path.join(stateDir, "acpx", "codex-acp-wrapper.stderr.log"));
   });
 
   it("leaves a custom Claude agent command alone", async () => {

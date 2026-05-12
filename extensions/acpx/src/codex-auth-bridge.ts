@@ -10,7 +10,11 @@ import {
 } from "./codex-trust-config.js";
 import { resolveAcpxPluginRoot } from "./config.js";
 import type { ResolvedAcpxPluginConfig } from "./config.js";
-import { OPENCLAW_ACPX_LEASE_ID_ARG, OPENCLAW_GATEWAY_INSTANCE_ID_ARG } from "./process-lease.js";
+import {
+  OPENCLAW_ACPX_LEASE_ID_ARG,
+  OPENCLAW_ACPX_LEASE_ID_ENV,
+  OPENCLAW_GATEWAY_INSTANCE_ID_ARG,
+} from "./process-lease.js";
 
 const CODEX_ACP_PACKAGE = "@zed-industries/codex-acp";
 const CODEX_ACP_BIN = "codex-acp";
@@ -154,7 +158,7 @@ function buildAdapterWrapperScript(params: {
   binName: string;
   installedBinPath?: string;
   envSetup: string;
-  stderrLogFileName?: string;
+  stderrLogFileNamePrefix?: string;
 }): string {
   return `#!/usr/bin/env node
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -163,8 +167,48 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 ${params.envSetup}
-const stderrLogPath = ${params.stderrLogFileName ? `fileURLToPath(new URL("./${params.stderrLogFileName}", import.meta.url))` : "undefined"};
+const stderrLogFileNamePrefix = ${params.stderrLogFileNamePrefix ? JSON.stringify(params.stderrLogFileNamePrefix) : "undefined"};
 const stderrLogMaxChars = 256 * 1024;
+
+const openClawWrapperArgs = new Set([
+  ${quoteCommandPart(OPENCLAW_ACPX_LEASE_ID_ARG)},
+  ${quoteCommandPart(OPENCLAW_GATEWAY_INSTANCE_ID_ARG)},
+]);
+
+function readOpenClawWrapperArg(args, name) {
+  const index = args.indexOf(name);
+  if (index < 0) {
+    return undefined;
+  }
+  const value = args[index + 1];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function safeDiagnosticFilePart(value) {
+  const sanitized = String(value || "").replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120);
+  return sanitized || "pid-" + process.pid;
+}
+
+function resolveStderrLogPath(args) {
+  if (!stderrLogFileNamePrefix) {
+    return undefined;
+  }
+  const leaseId =
+    process.env[${JSON.stringify(OPENCLAW_ACPX_LEASE_ID_ENV)}] ||
+    readOpenClawWrapperArg(args, ${quoteCommandPart(OPENCLAW_ACPX_LEASE_ID_ARG)}) ||
+    "pid-" + process.pid;
+  const fileName = stderrLogFileNamePrefix + "." + safeDiagnosticFilePart(leaseId) + ".log";
+  return fileURLToPath(new URL("./" + fileName, import.meta.url));
+}
+
+function redactDiagnosticText(text) {
+  return text
+    .replace(/(authorization\s*[:=]\s*bearer\s+)[^\s'"]+/gi, "$1[REDACTED]")
+    .replace(/((?:api[_-]?key|token|secret|password|credential)\s*[:=]\s*)[^\s'"]+/gi, "$1[REDACTED]")
+    .replace(/\b(sk-[A-Za-z0-9_-]{10,})\b/g, "[REDACTED_OPENAI_KEY]")
+    .replace(/\b(gh[pousr]_[A-Za-z0-9_]{20,})\b/g, "[REDACTED_GITHUB_TOKEN]")
+    .replace(/\b(xox[baprs]-[A-Za-z0-9-]{20,})\b/g, "[REDACTED_SLACK_TOKEN]");
+}
 
 function appendStderrLog(chunk) {
   if (!stderrLogPath) {
@@ -175,7 +219,7 @@ function appendStderrLog(chunk) {
     return;
   }
   try {
-    appendFileSync(stderrLogPath, text, "utf8");
+    appendFileSync(stderrLogPath, redactDiagnosticText(text), "utf8");
     const current = readFileSync(stderrLogPath, "utf8");
     if (current.length > stderrLogMaxChars) {
       writeFileSync(stderrLogPath, current.slice(-stderrLogMaxChars), "utf8");
@@ -184,19 +228,6 @@ function appendStderrLog(chunk) {
     // Stderr capture is diagnostic-only; never break the ACP adapter.
   }
 }
-
-try {
-  if (stderrLogPath) {
-    writeFileSync(stderrLogPath, "", "utf8");
-  }
-} catch {
-  // Stderr capture is diagnostic-only; never break the ACP adapter.
-}
-
-const openClawWrapperArgs = new Set([
-  ${quoteCommandPart(OPENCLAW_ACPX_LEASE_ID_ARG)},
-  ${quoteCommandPart(OPENCLAW_GATEWAY_INSTANCE_ID_ARG)},
-]);
 
 function stripOpenClawWrapperArgs(args) {
   const stripped = [];
@@ -211,7 +242,18 @@ function stripOpenClawWrapperArgs(args) {
   return stripped;
 }
 
-const configuredArgs = stripOpenClawWrapperArgs(process.argv.slice(2));
+const rawConfiguredArgs = process.argv.slice(2);
+const stderrLogPath = resolveStderrLogPath(rawConfiguredArgs);
+
+try {
+  if (stderrLogPath) {
+    writeFileSync(stderrLogPath, "", "utf8");
+  }
+} catch {
+  // Stderr capture is diagnostic-only; never break the ACP adapter.
+}
+
+const configuredArgs = stripOpenClawWrapperArgs(rawConfiguredArgs);
 
 function resolveNpmCliPath() {
   const candidate = path.resolve(
@@ -344,7 +386,7 @@ function buildCodexAcpWrapperScript(installedBinPath?: string): string {
     packageSpec: `${CODEX_ACP_PACKAGE}@${CODEX_ACP_PACKAGE_VERSION}`,
     binName: CODEX_ACP_BIN,
     installedBinPath,
-    stderrLogFileName: "codex-acp-wrapper.stderr.log",
+    stderrLogFileNamePrefix: "codex-acp-wrapper.stderr",
     envSetup: `const codexHome = fileURLToPath(new URL("./codex-home/", import.meta.url));
 const env = {
   ...process.env,

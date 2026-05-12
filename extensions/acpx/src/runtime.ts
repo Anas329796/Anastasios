@@ -56,8 +56,16 @@ type AcpxLaunchLeaseContext = {
   stableCommand?: string;
 };
 
-const CODEX_WRAPPER_STDERR_LOG_FILE = "codex-acp-wrapper.stderr.log";
+const CODEX_WRAPPER_STDERR_LOG_PREFIX = "codex-acp-wrapper.stderr";
 const CODEX_WRAPPER_ERROR_TAIL_MAX_CHARS = 6_000;
+
+function safeDiagnosticFilePart(value: string): string {
+  return value.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120) || "unknown";
+}
+
+function codexWrapperStderrLogFileName(leaseId: string): string {
+  return `${CODEX_WRAPPER_STDERR_LOG_PREFIX}.${safeDiagnosticFilePart(leaseId)}.log`;
+}
 
 function compactDiagnosticText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
@@ -70,12 +78,18 @@ function isGenericInternalAcpError(error: unknown): boolean {
   return error.message.trim() === "Internal error";
 }
 
-async function readCodexWrapperStderrTail(wrapperRoot: string | undefined): Promise<string> {
-  if (!wrapperRoot) {
+async function readCodexWrapperStderrTail(params: {
+  wrapperRoot: string | undefined;
+  leaseId: string | undefined;
+}): Promise<string> {
+  if (!params.wrapperRoot || !params.leaseId) {
     return "";
   }
   try {
-    const text = await fs.readFile(path.join(wrapperRoot, CODEX_WRAPPER_STDERR_LOG_FILE), "utf8");
+    const text = await fs.readFile(
+      path.join(params.wrapperRoot, codexWrapperStderrLogFileName(params.leaseId)),
+      "utf8",
+    );
     return compactDiagnosticText(
       redactSensitiveText(text.slice(-CODEX_WRAPPER_ERROR_TAIL_MAX_CHARS)),
     );
@@ -134,7 +148,7 @@ function readRecordAgentPid(record: unknown): number | undefined {
   return numericPid && Number.isInteger(numericPid) && numericPid > 0 ? numericPid : undefined;
 }
 
-function readOpenClawLeaseIdFromRecord(record: AcpLoadedSessionRecord): string | undefined {
+function readOpenClawLeaseIdFromRecord(record: unknown): string | undefined {
   if (typeof record !== "object" || record === null) {
     return undefined;
   }
@@ -780,7 +794,10 @@ export class AcpxRuntime implements AcpRuntime {
       if (!isCodexAcpCommand(params.command) || !isGenericInternalAcpError(error)) {
         throw error;
       }
-      const stderrTail = await readCodexWrapperStderrTail(this.wrapperRoot);
+      const stderrTail = await readCodexWrapperStderrTail({
+        wrapperRoot: this.wrapperRoot,
+        leaseId: this.launchLeaseScope.getStore()?.leaseId,
+      });
       if (!stderrTail) {
         throw error;
       }
@@ -932,7 +949,13 @@ export class AcpxRuntime implements AcpRuntime {
       if (!isCodexAcpCommand(command) || !isGenericInternalAcpError(error)) {
         throw error;
       }
-      const stderrTail = await readCodexWrapperStderrTail(this.wrapperRoot);
+      const record = await this.sessionStore.load(
+        input.handle.acpxRecordId ?? input.handle.sessionKey,
+      );
+      const stderrTail = await readCodexWrapperStderrTail({
+        wrapperRoot: this.wrapperRoot,
+        leaseId: readOpenClawLeaseIdFromRecord(record),
+      });
       if (!stderrTail) {
         throw error;
       }

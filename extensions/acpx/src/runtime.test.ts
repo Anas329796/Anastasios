@@ -239,16 +239,14 @@ describe("AcpxRuntime fresh reset wrapper", () => {
 
   it("adds Codex wrapper stderr tail to generic session initialization failures", async () => {
     const wrapperRoot = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-acpx-runtime-"));
-    await fs.writeFile(
-      path.join(wrapperRoot, "codex-acp-wrapper.stderr.log"),
-      "noise\nUnhandled error during session/new: deployment missing token=sk-testsecret1234567890\n",
-      "utf8",
-    );
+    const leaseStore = makeLeaseStore();
     const baseStore: TestSessionStore = {
       load: vi.fn(async () => undefined),
       save: vi.fn(async () => {}),
     };
     const { runtime, delegate } = makeRuntime(baseStore, {
+      openclawGatewayInstanceId: "gateway-test",
+      openclawProcessLeaseStore: leaseStore.store,
       openclawWrapperRoot: wrapperRoot,
       agentRegistry: {
         resolve: (agentName: string) =>
@@ -256,7 +254,15 @@ describe("AcpxRuntime fresh reset wrapper", () => {
         list: () => ["codex"],
       },
     });
-    vi.spyOn(delegate, "ensureSession").mockRejectedValue(new Error("Internal error"));
+    vi.spyOn(delegate, "ensureSession").mockImplementation(async () => {
+      const leaseId = String(Array.from(leaseStore.leases.values())[0]?.leaseId);
+      await fs.writeFile(
+        path.join(wrapperRoot, `codex-acp-wrapper.stderr.${leaseId}.log`),
+        "noise\nUnhandled error during session/new: deployment missing token=[REDACTED] sk-testsecret1234567890\n",
+        "utf8",
+      );
+      throw new Error("Internal error");
+    });
 
     const outcome = await runtime
       .ensureSession({
@@ -292,7 +298,7 @@ describe("AcpxRuntime fresh reset wrapper", () => {
   it("adds Codex wrapper stderr tail to generic first-turn failures", async () => {
     const wrapperRoot = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-acpx-runtime-"));
     await fs.writeFile(
-      path.join(wrapperRoot, "codex-acp-wrapper.stderr.log"),
+      path.join(wrapperRoot, "codex-acp-wrapper.stderr.lease-turn.log"),
       "Unhandled error during turn: upstream model returned 404\n",
       "utf8",
     );
@@ -300,6 +306,7 @@ describe("AcpxRuntime fresh reset wrapper", () => {
       load: vi.fn(async () => ({
         acpxRecordId: "agent:codex:acp:test",
         agentCommand: CODEX_ACP_WRAPPER_COMMAND,
+        openclawLeaseId: "lease-turn",
       })),
       save: vi.fn(async () => {}),
     };
