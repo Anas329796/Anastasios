@@ -118,6 +118,7 @@ export async function executeJobCoreWithTimeout(
   }
 
   const runAbortController = new AbortController();
+  let deadlineAtMs: number | undefined;
   let timeoutId: NodeJS.Timeout | undefined;
   let setupTimeoutId: NodeJS.Timeout | undefined;
   let preExecutionTimeoutId: NodeJS.Timeout | undefined;
@@ -143,6 +144,7 @@ export async function executeJobCoreWithTimeout(
   };
   const startTimeout = () => {
     if (!timeoutId) {
+      deadlineAtMs = Date.now() + jobTimeoutMs;
       timeoutId = setTimeout(() => {
         triggerTimeout(timeoutErrorMessage(activeExecution));
       }, jobTimeoutMs);
@@ -201,13 +203,15 @@ export async function executeJobCoreWithTimeout(
   const onExecutionPhase = (info: CronAgentExecutionPhaseUpdate) => {
     noteExecutionProgress(info);
   };
+  if (!deferTimeoutUntilExecutionStart) {
+    startTimeout();
+  }
   const corePromise = executeJobCore(state, job, runAbortController.signal, {
     onExecutionStarted: deferTimeoutUntilExecutionStart ? onExecutionStarted : undefined,
     onExecutionPhase: deferTimeoutUntilExecutionStart ? onExecutionPhase : undefined,
+    getDeadlineAtMs: () => deadlineAtMs,
   });
-  if (!deferTimeoutUntilExecutionStart) {
-    startTimeout();
-  } else {
+  if (deferTimeoutUntilExecutionStart) {
     startSetupTimeout();
   }
   void corePromise.catch((err) => {
@@ -1467,6 +1471,8 @@ export async function executeJobCore(
   options?: {
     onExecutionStarted?: (info?: CronAgentExecutionStarted) => void;
     onExecutionPhase?: (info: CronAgentExecutionPhaseUpdate) => void;
+    deadlineAtMs?: number;
+    getDeadlineAtMs?: () => number | undefined;
   },
 ): Promise<
   CronRunOutcome &
@@ -1630,6 +1636,8 @@ async function executeDetachedCronJob(
   options?: {
     onExecutionStarted?: (info?: CronAgentExecutionStarted) => void;
     onExecutionPhase?: (info: CronAgentExecutionPhaseUpdate) => void;
+    deadlineAtMs?: number;
+    getDeadlineAtMs?: () => number | undefined;
   },
 ): Promise<
   CronRunOutcome &
@@ -1666,6 +1674,8 @@ async function executeDetachedCronJob(
     abortSignal,
     onExecutionStarted: options?.onExecutionStarted,
     onExecutionPhase: options?.onExecutionPhase,
+    deadlineAtMs: options?.deadlineAtMs,
+    getDeadlineAtMs: options?.getDeadlineAtMs,
   });
 
   if (abortSignal?.aborted) {
