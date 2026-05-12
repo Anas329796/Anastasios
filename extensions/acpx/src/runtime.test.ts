@@ -475,7 +475,14 @@ describe("AcpxRuntime fresh reset wrapper", () => {
     expect(setConfigOption).not.toHaveBeenCalled();
   });
 
-  it("forwards timeout config controls for non-Codex ACP agents", async () => {
+  // Previously asserted that `timeout` was forwarded for non-Codex agents. That
+  // matched the implementation but not the wire: claude-agent-acp 0.32 (and
+  // every other ACP backend we've checked) only advertises `mode`/`model`/
+  // `effort` as configIds and rejects `timeout` with `-32603` "Unknown config
+  // option", which surfaces upstream as `ACP_TURN_FAILED`. Since `timeout` is
+  // an acpx-runtime concept (`plugins.entries.acpx.config.timeoutSeconds`) and
+  // not part of the ACP wire contract, drop it for every backend.
+  it("ignores unsupported timeout config controls for non-Codex ACP agents", async () => {
     const baseStore: TestSessionStore = {
       load: vi.fn(async () => ({
         acpxRecordId: "agent:claude:acp:test",
@@ -497,12 +504,43 @@ describe("AcpxRuntime fresh reset wrapper", () => {
       key: "timeout",
       value: "60",
     });
+    await runtime.setConfigOption({
+      handle,
+      key: "Timeout_Seconds",
+      value: "60",
+    });
+
+    expect(setConfigOption).not.toHaveBeenCalled();
+  });
+
+  it("still forwards non-timeout config controls for non-Codex ACP agents", async () => {
+    const baseStore: TestSessionStore = {
+      load: vi.fn(async () => ({
+        acpxRecordId: "agent:claude:acp:test",
+        agentCommand: "npx @agentclientprotocol/claude-agent-acp",
+      })),
+      save: vi.fn(async () => {}),
+    };
+    const { runtime, delegate } = makeRuntime(baseStore);
+    const setConfigOption = vi.spyOn(delegate, "setConfigOption").mockResolvedValue(undefined);
+    const handle: Parameters<NonNullable<AcpRuntime["setConfigOption"]>>[0]["handle"] = {
+      sessionKey: "agent:claude:acp:test",
+      backend: "acpx",
+      runtimeSessionName: "agent:claude:acp:test",
+      acpxRecordId: "agent:claude:acp:test",
+    };
+
+    await runtime.setConfigOption({
+      handle,
+      key: "mode",
+      value: "bypassPermissions",
+    });
 
     expect(setConfigOption).toHaveBeenCalledOnce();
     expect(setConfigOption).toHaveBeenCalledWith({
       handle,
-      key: "timeout",
-      value: "60",
+      key: "mode",
+      value: "bypassPermissions",
     });
   });
 

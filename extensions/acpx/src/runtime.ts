@@ -889,10 +889,15 @@ export class AcpxRuntime implements AcpRuntime {
     const delegate = await this.resolveDelegateForHandle(input.handle);
     const command = await this.resolveCommandForHandle(input.handle);
     const key = input.key.trim().toLowerCase();
+    // `timeout` / `timeout_seconds` is an acpx-runtime concept derived from
+    // `plugins.entries.acpx.config.timeoutSeconds`; no ACP agent treats it as
+    // a session config option. Forwarding it causes claude-agent-acp 0.32+ to
+    // reject with -32603 "Unknown config option", which surfaces upstream as
+    // ACP_TURN_FAILED. Skip for every backend, not just Codex.
+    if (key === "timeout" || key === "timeout_seconds") {
+      return;
+    }
     if (isCodexAcpCommand(command)) {
-      if (key === "timeout" || key === "timeout_seconds") {
-        return;
-      }
       if (
         key === "model" ||
         key === "thinking" ||
