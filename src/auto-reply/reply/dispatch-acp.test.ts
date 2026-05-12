@@ -141,11 +141,12 @@ vi.mock("./dispatch-acp-media.runtime.js", () => ({
     mediaUnderstandingMocks.applyMediaUnderstanding(params),
   isMediaUnderstandingSkipError: (error: unknown): error is MediaUnderstandingSkipError =>
     error instanceof Error && error.name === "MediaUnderstandingSkipError",
-  normalizeAttachments: (ctx: { MediaPath?: string; MediaType?: string }) =>
-    ctx.MediaPath
+  normalizeAttachments: (ctx: { MediaPath?: string; MediaUrl?: string; MediaType?: string }) =>
+    ctx.MediaPath || ctx.MediaUrl
       ? [
           {
-            path: ctx.MediaPath,
+            path: ctx.MediaPath || undefined,
+            url: ctx.MediaUrl || undefined,
             mime: ctx.MediaType,
             index: 0,
           },
@@ -159,7 +160,23 @@ vi.mock("./dispatch-acp-media.runtime.js", () => ({
     return params.cfg.channels?.[channel]?.attachmentRoots ?? [];
   },
   MediaAttachmentCache: class {
-    async getBuffer(): Promise<never> {
+    private readonly attachments: Array<{ path?: string; url?: string; mime?: string }>;
+
+    constructor(attachments: Array<{ path?: string; url?: string; mime?: string }>) {
+      this.attachments = attachments;
+    }
+
+    async getBuffer({ attachmentIndex }: { attachmentIndex: number }) {
+      const attachment = this.attachments[attachmentIndex];
+      if (!attachment?.path && attachment?.url) {
+        const response = await fetch(attachment.url);
+        return {
+          buffer: Buffer.from(await response.arrayBuffer()),
+          mime: attachment.mime,
+          fileName: undefined,
+          size: Number(response.headers.get("content-length") ?? 0),
+        };
+      }
       const error = new Error("outside allowed roots");
       error.name = "MediaUnderstandingSkipError";
       throw error;
