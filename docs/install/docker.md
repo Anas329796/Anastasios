@@ -69,7 +69,7 @@ Docker is **optional**. Use it only if you want a containerized gateway or to va
     Need the URL again?
 
     ```bash
-    docker compose run --rm openclaw-cli dashboard --no-open
+    docker compose run --rm --no-deps openclaw-cli dashboard --no-open
     ```
 
   </Step>
@@ -521,7 +521,7 @@ For npm installs without a source checkout, see [Sandboxing § Images and setup]
     Fetch a fresh dashboard link and approve the browser device:
 
     ```bash
-    docker compose run --rm openclaw-cli dashboard --no-open
+    docker compose run --rm --no-deps openclaw-cli dashboard --no-open
     docker compose run --rm openclaw-cli devices list
     docker compose run --rm openclaw-cli devices approve <requestId>
     ```
