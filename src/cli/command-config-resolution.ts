@@ -6,6 +6,10 @@ import {
   resolveCommandSecretRefsViaGateway,
 } from "./command-secret-gateway.js";
 
+function shouldRouteSecretDiagnosticsToStderr(commandName: string): boolean {
+  return commandName.split(/\s+/).includes("--json");
+}
+
 export async function resolveCommandConfigWithSecrets<TConfig extends OpenClawConfig>(params: {
   config: TConfig;
   commandName: string;
@@ -28,8 +32,11 @@ export async function resolveCommandConfigWithSecrets<TConfig extends OpenClawCo
     ...(params.allowedPaths ? { allowedPaths: params.allowedPaths } : {}),
   });
   if (params.runtime) {
+    const emitDiagnostic = shouldRouteSecretDiagnosticsToStderr(params.commandName)
+      ? params.runtime.error
+      : params.runtime.log;
     for (const entry of diagnostics) {
-      params.runtime.log(`[secrets] ${entry}`);
+      emitDiagnostic(`[secrets] ${entry}`);
     }
   }
   const effectiveConfig = params.autoEnable
