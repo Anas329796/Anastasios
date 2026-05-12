@@ -11,6 +11,7 @@ Docs: https://docs.openclaw.ai
 
 ### Changes
 
+- Trajectory: allow `OPENCLAW_TRAJECTORY_RUNTIME_EVENT_MAX_BYTES` to override the 256 KiB per-event runtime trajectory cap, accepting human-friendly suffixes like `512kb` or `2mb`. Thanks @wAngByg.
 - Models/OpenAI CLI auth: make `openclaw models auth login --provider openai` start the ChatGPT/Codex account login by default, while `--method api-key` remains the explicit OpenAI API-key setup path.
 - Google/Gemini: normalize retired Gemini 3 Pro Preview ids inside SDK OAuth auth-result default config patches, so helper-built provider auth flows emit `google/gemini-3.1-pro-preview` for Gemini 3.1 testing.
 - Google/Gemini: normalize retired Gemini 3 Pro Preview ids returned by direct `openclaw models auth login --set-default` provider auth flows before writing config, so Gemini testing targets `google/gemini-3.1-pro-preview`.

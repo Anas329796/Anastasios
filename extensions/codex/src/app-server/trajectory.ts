@@ -1,15 +1,11 @@
 import nodeFs from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { resolveUserPath } from "openclaw/plugin-sdk/agent-harness-runtime";
 import type {
   EmbeddedRunAttemptParams,
   EmbeddedRunAttemptResult,
-} from "openclaw/plugin-sdk/agent-harness-runtime";
-import {
-  appendRegularFile,
-  resolveRegularFileAppendFlags,
-} from "openclaw/plugin-sdk/security-runtime";
+} from "openclaw/plugin-sdk/agent-harness";
+import { resolveUserPath } from "openclaw/plugin-sdk/agent-harness";
 
 type CodexTrajectoryRecorder = {
   filePath: string;
@@ -32,7 +28,50 @@ const AUTHORIZATION_VALUE_RE = /\b(Bearer|Basic)\s+[A-Za-z0-9+/._~=-]{8,}/giu;
 const JWT_VALUE_RE = /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/gu;
 const COOKIE_PAIR_RE = /\b([A-Za-z][A-Za-z0-9_.-]{1,64})=([A-Za-z0-9+/._~%=-]{16,})(?=;|\s|$)/gu;
 const TRAJECTORY_RUNTIME_FILE_MAX_BYTES = 50 * 1024 * 1024;
-const TRAJECTORY_RUNTIME_EVENT_MAX_BYTES = 256 * 1024;
+
+const DEFAULT_TRAJECTORY_RUNTIME_EVENT_MAX_BYTES = 256 * 1024;
+
+function resolveCodexTrajectoryRuntimeEventMaxBytes(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const raw = env.OPENCLAW_TRAJECTORY_RUNTIME_EVENT_MAX_BYTES?.trim();
+  if (!raw) return DEFAULT_TRAJECTORY_RUNTIME_EVENT_MAX_BYTES;
+  try {
+    const parsed = parseCodexTrajectoryEventByteSize(raw);
+    if (parsed > 0) return parsed;
+  } catch {
+    // Fall through to default on invalid input.
+  }
+  return DEFAULT_TRAJECTORY_RUNTIME_EVENT_MAX_BYTES;
+}
+
+/**
+ * Minimal byte-size parser for the trajectory event cap env var.
+ * Supports: raw integers, `kb`, `mb`, `gb` suffixes.
+ */
+function parseCodexTrajectoryEventByteSize(raw: string): number {
+  const lower = raw.toLowerCase().replace(/\s+/g, "");
+  const m = /^(\d+(?:\.\d+)?)([a-z]*)$/.exec(lower);
+  if (!m) throw new Error(`invalid byte size: ${raw}`);
+  const [, numStr, unit] = m;
+  const num = parseFloat(numStr);
+  switch (unit) {
+    case "kb":
+    case "k":
+      return Math.floor(num * 1024);
+    case "mb":
+    case "m":
+      return Math.floor(num * 1024 * 1024);
+    case "gb":
+    case "g":
+      return Math.floor(num * 1024 * 1024 * 1024);
+    case "":
+    case "b":
+      return Math.floor(num);
+    default:
+      throw new Error(`invalid byte size unit: ${unit}`);
+  }
+}
 
 type CodexTrajectoryOpenFlagConstants = Pick<
   typeof nodeFs.constants,
@@ -43,7 +82,13 @@ type CodexTrajectoryOpenFlagConstants = Pick<
 export function resolveCodexTrajectoryAppendFlags(
   constants: CodexTrajectoryOpenFlagConstants = nodeFs.constants,
 ): number {
-  return resolveRegularFileAppendFlags(constants);
+  const noFollow = constants.O_NOFOLLOW;
+  return (
+    constants.O_CREAT |
+    constants.O_APPEND |
+    constants.O_WRONLY |
+    (typeof noFollow === "number" ? noFollow : 0)
+  );
 }
 
 export function resolveCodexTrajectoryPointerFlags(
@@ -58,19 +103,87 @@ export function resolveCodexTrajectoryPointerFlags(
   );
 }
 
-async function safeAppendTrajectoryFile(filePath: string, line: string): Promise<void> {
-  await appendRegularFile({
-    filePath,
-    content: line,
-    maxFileBytes: TRAJECTORY_RUNTIME_FILE_MAX_BYTES,
-    rejectSymlinkParents: true,
-  });
+async function assertNoSymlinkParents(filePath: string): Promise<void> {
+  const resolvedDir = path.resolve(path.dirname(filePath));
+  const parsed = path.parse(resolvedDir);
+  const relativeParts = path.relative(parsed.root, resolvedDir).split(path.sep).filter(Boolean);
+  let current = parsed.root;
+  for (const part of relativeParts) {
+    current = path.join(current, part);
+    const stat = await fs.lstat(current);
+    if (stat.isSymbolicLink()) {
+      if (path.dirname(current) === parsed.root) {
+        continue;
+      }
+      throw new Error(`Refusing to write trajectory under symlinked directory: ${current}`);
+    }
+    if (!stat.isDirectory()) {
+      throw new Error(`Refusing to write trajectory under non-directory: ${current}`);
+    }
+  }
 }
 
-function boundedTrajectoryLine(event: Record<string, unknown>): string | undefined {
+function verifyStableOpenedTrajectoryFile(params: {
+  preOpenStat?: nodeFs.Stats;
+  postOpenStat: nodeFs.Stats;
+  filePath: string;
+}): void {
+  if (!params.postOpenStat.isFile()) {
+    throw new Error(`Refusing to write trajectory to non-file: ${params.filePath}`);
+  }
+  if (params.postOpenStat.nlink > 1) {
+    throw new Error(`Refusing to write trajectory to hardlinked file: ${params.filePath}`);
+  }
+  const pre = params.preOpenStat;
+  if (pre && (pre.dev !== params.postOpenStat.dev || pre.ino !== params.postOpenStat.ino)) {
+    throw new Error(`Refusing to write trajectory after file changed: ${params.filePath}`);
+  }
+}
+
+async function safeAppendTrajectoryFile(filePath: string, line: string): Promise<void> {
+  await assertNoSymlinkParents(filePath);
+
+  let preOpenStat: nodeFs.Stats | undefined;
+  try {
+    const stat = await fs.lstat(filePath);
+    if (stat.isSymbolicLink()) {
+      throw new Error(`Refusing to write trajectory through symlink: ${filePath}`);
+    }
+    if (!stat.isFile()) {
+      throw new Error(`Refusing to write trajectory to non-file: ${filePath}`);
+    }
+    preOpenStat = stat;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw err;
+    }
+  }
+  const lineBytes = Buffer.byteLength(line, "utf8");
+  if ((preOpenStat?.size ?? 0) + lineBytes > TRAJECTORY_RUNTIME_FILE_MAX_BYTES) {
+    return;
+  }
+
+  const handle = await fs.open(filePath, resolveCodexTrajectoryAppendFlags(), 0o600);
+  try {
+    const stat = await handle.stat();
+    verifyStableOpenedTrajectoryFile({ preOpenStat, postOpenStat: stat, filePath });
+    if (stat.size + lineBytes > TRAJECTORY_RUNTIME_FILE_MAX_BYTES) {
+      return;
+    }
+    await handle.chmod(0o600);
+    await handle.appendFile(line, "utf8");
+  } finally {
+    await handle.close();
+  }
+}
+
+function boundedTrajectoryLine(
+  event: Record<string, unknown>,
+  maxBytes: number,
+): string | undefined {
   const line = JSON.stringify(event);
   const bytes = Buffer.byteLength(line, "utf8");
-  if (bytes <= TRAJECTORY_RUNTIME_EVENT_MAX_BYTES) {
+  if (bytes <= maxBytes) {
     return `${line}\n`;
   }
   const truncated = JSON.stringify({
@@ -78,11 +191,11 @@ function boundedTrajectoryLine(event: Record<string, unknown>): string | undefin
     data: {
       truncated: true,
       originalBytes: bytes,
-      limitBytes: TRAJECTORY_RUNTIME_EVENT_MAX_BYTES,
+      limitBytes: maxBytes,
       reason: "trajectory-event-size-limit",
     },
   });
-  if (Buffer.byteLength(truncated, "utf8") <= TRAJECTORY_RUNTIME_EVENT_MAX_BYTES) {
+  if (Buffer.byteLength(truncated, "utf8") <= maxBytes) {
     return `${truncated}\n`;
   }
   return undefined;
@@ -148,6 +261,7 @@ export function createCodexTrajectoryRecorder(
     return null;
   }
 
+  const eventMaxBytes = resolveCodexTrajectoryRuntimeEventMaxBytes(env);
   const filePath = resolveTrajectoryFilePath({
     env,
     sessionFile: params.attempt.sessionFile,
@@ -185,7 +299,7 @@ export function createCodexTrajectoryRecorder(
         modelApi: params.attempt.model.api,
         data: data ? sanitizeValue(data) : undefined,
       };
-      const line = boundedTrajectoryLine(event);
+      const line = boundedTrajectoryLine(event, eventMaxBytes);
       if (!line) {
         return;
       }
