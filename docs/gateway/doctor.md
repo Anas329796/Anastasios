@@ -493,7 +493,6 @@ That stages grounded durable candidates into the short-term dreaming store while
 
     Newly installed or repaired macOS LaunchAgents use a canonical system PATH (`/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`) instead of copying the interactive shell PATH, so Homebrew-managed system binaries remain available while Volta, asdf, fnm, pnpm, and other version-manager directories do not change which Node child processes resolve. Linux services now keep only stable user-bin and package-manager roots in the durable service PATH (for example `~/.local/bin`, `~/.npm-global/bin`, `~/bin`, `~/.local/share/pnpm`, Nix profiles, `PNPM_HOME`, and `NPM_CONFIG_PREFIX`) and intentionally leave `NVM_DIR`, `FNM_DIR`, `VOLTA_HOME`, `ASDF_DATA_DIR`, and `BUN_INSTALL` version-manager roots out.
 
-
   </Accordion>
   <Accordion title="18. Config write + wizard metadata">
     Doctor persists any config changes and stamps wizard metadata to record the doctor run.
