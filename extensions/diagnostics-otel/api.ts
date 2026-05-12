@@ -1,6 +1,7 @@
 export {
   createChildDiagnosticTraceContext,
   createDiagnosticTraceContext,
+  resolveDiagnosticContentCapturePolicy,
   emitDiagnosticEvent,
   formatDiagnosticTraceparent,
   isValidDiagnosticSpanId,
@@ -8,6 +9,7 @@ export {
   isValidDiagnosticTraceId,
   onDiagnosticEvent,
   parseDiagnosticTraceparent,
+  type DiagnosticContentCapturePolicy,
   type DiagnosticEventMetadata,
   type DiagnosticEventPayload,
   type DiagnosticTraceContext,

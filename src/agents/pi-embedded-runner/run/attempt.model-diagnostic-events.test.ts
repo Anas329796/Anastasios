@@ -106,6 +106,7 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
           spanId: "00f067aa0ba902b7",
         }),
         nextCallId: () => "call-1",
+        contentCapture: { inputMessages: false, outputMessages: true },
       },
     );
 
@@ -168,6 +169,7 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
         model: "gpt-5.4",
         trace: createDiagnosticTraceContext(),
         nextCallId: () => "call-payload",
+        contentCapture: { inputMessages: true, outputMessages: true },
       },
     );
 
@@ -220,6 +222,7 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
           traceFlags: "01",
         }),
         nextCallId: () => "call-traceparent",
+        contentCapture: { inputMessages: true, outputMessages: true },
       },
     );
 
@@ -261,6 +264,7 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
         model: "sonnet-4.6",
         trace: createDiagnosticTraceContext(),
         nextCallId: () => "call-err",
+        contentCapture: { inputMessages: true, outputMessages: true },
       },
     );
 
@@ -299,6 +303,7 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
         model: "qwen/qwen3.5-9b",
         trace: createDiagnosticTraceContext(),
         nextCallId: () => "call-terminated",
+        contentCapture: { inputMessages: true, outputMessages: true },
       },
     );
 
@@ -339,6 +344,7 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
         model: "gpt-5.4",
         trace: createDiagnosticTraceContext(),
         nextCallId: () => "call-frozen",
+        contentCapture: { inputMessages: true, outputMessages: true },
       },
     );
 
@@ -383,6 +389,7 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
         transport: "http",
         trace: createDiagnosticTraceContext(),
         nextCallId: () => "call-hook",
+        contentCapture: { inputMessages: true, outputMessages: true },
       },
     );
 
@@ -438,6 +445,7 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
         model: "gpt-5.4",
         trace: createDiagnosticTraceContext(),
         nextCallId: () => "call-abandoned",
+        contentCapture: { inputMessages: true, outputMessages: true },
       },
     );
 
@@ -460,5 +468,344 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
     expect(completedEvent.callId).toBe("call-abandoned");
     expectNumberField(completedEvent, "durationMs");
     expect(events[1]).not.toHaveProperty("errorCategory");
+  });
+
+  it("respects contentCapture policy - omits inputMessages when disabled", async () => {
+    async function* stream() {
+      yield { type: "text_delta", delta: "output text" };
+    }
+    const requestPayload = {
+      input: [{ role: "user", content: "hello" }],
+      model: "gpt-5.4",
+    };
+    const wrapped = wrapStreamFnWithDiagnosticModelCallEvents(
+      ((
+        model: Parameters<StreamFn>[0],
+        _context: Parameters<StreamFn>[1],
+        options: Parameters<StreamFn>[2],
+      ) => {
+        options?.onPayload?.(requestPayload, model);
+        return stream();
+      }) as unknown as StreamFn,
+      {
+        runId: "run-1",
+        provider: "openai",
+        model: "gpt-5.4",
+        trace: createDiagnosticTraceContext(),
+        nextCallId: () => "call-no-input",
+        contentCapture: { inputMessages: false, outputMessages: true },
+      },
+    );
+
+    const events = await collectModelCallEvents(async () => {
+      const streamResult = await wrapped({} as never, {} as never, {} as never);
+      await drain(streamResult as unknown as AsyncIterable<unknown>);
+    });
+
+    const completed = events.find((e) => e.type === "model.call.completed");
+    expect(completed).toBeDefined();
+    expect(completed).not.toHaveProperty("inputMessages");
+    expect(completed).toHaveProperty("outputMessages");
+  });
+
+  it("respects contentCapture policy - omits outputMessages when disabled", async () => {
+    async function* stream() {
+      yield { type: "text_delta", delta: "output text" };
+    }
+    const requestPayload = {
+      input: [{ role: "user", content: "hello" }],
+      model: "gpt-5.4",
+    };
+    const wrapped = wrapStreamFnWithDiagnosticModelCallEvents(
+      ((
+        model: Parameters<StreamFn>[0],
+        _context: Parameters<StreamFn>[1],
+        options: Parameters<StreamFn>[2],
+      ) => {
+        options?.onPayload?.(requestPayload, model);
+        return stream();
+      }) as unknown as StreamFn,
+      {
+        runId: "run-1",
+        provider: "openai",
+        model: "gpt-5.4",
+        trace: createDiagnosticTraceContext(),
+        nextCallId: () => "call-no-output",
+        contentCapture: { inputMessages: true, outputMessages: false },
+      },
+    );
+
+    const events = await collectModelCallEvents(async () => {
+      const streamResult = await wrapped({} as never, {} as never, {} as never);
+      await drain(streamResult as unknown as AsyncIterable<unknown>);
+    });
+
+    const completed = events.find((e) => e.type === "model.call.completed");
+    expect(completed).toBeDefined();
+    expect(completed).not.toHaveProperty("outputMessages");
+    expect(completed).toHaveProperty("inputMessages");
+  });
+
+  it("does not inspect streamed output text when output capture is disabled", async () => {
+    async function* stream() {
+      yield {
+        type: "text_delta",
+        get delta() {
+          throw new Error("raw output should not be read");
+        },
+      };
+    }
+    const wrapped = wrapStreamFnWithDiagnosticModelCallEvents(
+      (() => stream()) as unknown as StreamFn,
+      {
+        runId: "run-1",
+        provider: "openai",
+        model: "gpt-5.4",
+        trace: createDiagnosticTraceContext(),
+        nextCallId: () => "call-no-output-read",
+        contentCapture: { inputMessages: true, outputMessages: false },
+      },
+    );
+
+    const events = await collectModelCallEvents(async () => {
+      await drain(wrapped({} as never, {} as never, {} as never) as AsyncIterable<unknown>);
+    });
+
+    const completed = events.find((e) => e.type === "model.call.completed");
+    expect(completed).toMatchObject({
+      type: "model.call.completed",
+      callId: "call-no-output-read",
+    });
+    expect(completed).not.toHaveProperty("outputMessages");
+  });
+
+  it("captures Responses input_text content parts as inputMessages", async () => {
+    async function* stream() {
+      yield { type: "text_delta", delta: "output text" };
+    }
+    const requestPayload = {
+      input: [
+        {
+          type: "message",
+          role: "user",
+          content: [
+            { type: "input_text", text: "hello from responses" },
+            { type: "input_image", source: { type: "url", url: "https://example.com/cat.png" } },
+            {
+              type: "input_file",
+              source: { type: "base64", media_type: "text/plain", data: "aGVsbG8=" },
+            },
+          ],
+        },
+      ],
+      model: "gpt-5.4",
+    };
+    const wrapped = wrapStreamFnWithDiagnosticModelCallEvents(
+      ((
+        model: Parameters<StreamFn>[0],
+        _context: Parameters<StreamFn>[1],
+        options: Parameters<StreamFn>[2],
+      ) => {
+        options?.onPayload?.(requestPayload, model);
+        return stream();
+      }) as unknown as StreamFn,
+      {
+        runId: "run-1",
+        provider: "openai",
+        model: "gpt-5.4",
+        trace: createDiagnosticTraceContext(),
+        nextCallId: () => "call-responses-input-text",
+        contentCapture: { inputMessages: true, outputMessages: true },
+      },
+    );
+
+    const events = await collectModelCallEvents(async () => {
+      const streamResult = await wrapped({} as never, {} as never, {} as never);
+      await drain(streamResult as unknown as AsyncIterable<unknown>);
+    });
+
+    const completed = events.find((e) => e.type === "model.call.completed");
+    expect(completed).toMatchObject({
+      type: "model.call.completed",
+      inputMessages: ["hello from responses"],
+      outputMessages: ["output text"],
+    });
+    expect(JSON.stringify(completed)).not.toContain("input_image");
+    expect(JSON.stringify(completed)).not.toContain("input_file");
+  });
+
+  it("does not capture system or developer role Responses input text", async () => {
+    async function* stream() {
+      yield { type: "text_delta", delta: "output text" };
+    }
+    const requestPayload = {
+      input: [
+        {
+          type: "message",
+          role: "system",
+          content: [{ type: "input_text", text: "responses system prompt" }],
+        },
+        {
+          type: "message",
+          role: "developer",
+          content: [{ type: "input_text", text: "responses developer prompt" }],
+        },
+        {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "responses user input" }],
+        },
+      ],
+      model: "gpt-5.4",
+    };
+    const wrapped = wrapStreamFnWithDiagnosticModelCallEvents(
+      ((
+        model: Parameters<StreamFn>[0],
+        _context: Parameters<StreamFn>[1],
+        options: Parameters<StreamFn>[2],
+      ) => {
+        options?.onPayload?.(requestPayload, model);
+        return stream();
+      }) as unknown as StreamFn,
+      {
+        runId: "run-1",
+        provider: "openai",
+        model: "gpt-5.4",
+        trace: createDiagnosticTraceContext(),
+        nextCallId: () => "call-filter-system-developer-input",
+        contentCapture: { inputMessages: true, outputMessages: true },
+      },
+    );
+
+    const events = await collectModelCallEvents(async () => {
+      const streamResult = await wrapped({} as never, {} as never, {} as never);
+      await drain(streamResult as unknown as AsyncIterable<unknown>);
+    });
+
+    const completed = events.find((e) => e.type === "model.call.completed");
+    expect(completed).toMatchObject({
+      type: "model.call.completed",
+      inputMessages: ["responses user input"],
+      outputMessages: ["output text"],
+    });
+    expect(JSON.stringify(completed)).not.toContain("responses system prompt");
+    expect(JSON.stringify(completed)).not.toContain("responses developer prompt");
+  });
+
+  it("does not capture system or developer role chat messages", async () => {
+    async function* stream() {
+      yield { type: "text_delta", delta: "output text" };
+    }
+    const requestPayload = {
+      messages: [
+        { role: "system", content: "hidden system prompt" },
+        { role: "developer", content: "hidden developer prompt" },
+        { role: "user", content: "visible user message" },
+      ],
+      model: "gpt-5.4",
+    };
+    const wrapped = wrapStreamFnWithDiagnosticModelCallEvents(
+      ((
+        model: Parameters<StreamFn>[0],
+        _context: Parameters<StreamFn>[1],
+        options: Parameters<StreamFn>[2],
+      ) => {
+        options?.onPayload?.(requestPayload, model);
+        return stream();
+      }) as unknown as StreamFn,
+      {
+        runId: "run-1",
+        provider: "openai",
+        model: "gpt-5.4",
+        trace: createDiagnosticTraceContext(),
+        nextCallId: () => "call-filter-system-developer-chat",
+        contentCapture: { inputMessages: true, outputMessages: true },
+      },
+    );
+
+    const events = await collectModelCallEvents(async () => {
+      const streamResult = await wrapped({} as never, {} as never, {} as never);
+      await drain(streamResult as unknown as AsyncIterable<unknown>);
+    });
+
+    const completed = events.find((e) => e.type === "model.call.completed");
+    expect(completed).toMatchObject({
+      type: "model.call.completed",
+      inputMessages: ["visible user message"],
+      outputMessages: ["output text"],
+    });
+    expect(JSON.stringify(completed)).not.toContain("hidden system prompt");
+    expect(JSON.stringify(completed)).not.toContain("hidden developer prompt");
+  });
+
+  it("does not capture tool role chat messages as inputMessages", async () => {
+    async function* stream() {
+      yield { type: "text_delta", delta: "output text" };
+    }
+    const requestPayload = {
+      messages: [
+        { role: "user", content: "visible user message" },
+        { role: "tool", content: "hidden tool result" },
+      ],
+      model: "gpt-5.4",
+    };
+    const wrapped = wrapStreamFnWithDiagnosticModelCallEvents(
+      ((
+        model: Parameters<StreamFn>[0],
+        _context: Parameters<StreamFn>[1],
+        options: Parameters<StreamFn>[2],
+      ) => {
+        options?.onPayload?.(requestPayload, model);
+        return stream();
+      }) as unknown as StreamFn,
+      {
+        runId: "run-1",
+        provider: "openai",
+        model: "gpt-5.4",
+        trace: createDiagnosticTraceContext(),
+        nextCallId: () => "call-filter-tool-chat",
+        contentCapture: { inputMessages: true, outputMessages: true },
+      },
+    );
+
+    const events = await collectModelCallEvents(async () => {
+      const streamResult = await wrapped({} as never, {} as never, {} as never);
+      await drain(streamResult as unknown as AsyncIterable<unknown>);
+    });
+
+    const completed = events.find((e) => e.type === "model.call.completed");
+    expect(completed).toMatchObject({
+      type: "model.call.completed",
+      inputMessages: ["visible user message"],
+      outputMessages: ["output text"],
+    });
+    expect(JSON.stringify(completed)).not.toContain("hidden tool result");
+  });
+
+  it("captures output from normalized text_delta chunks", async () => {
+    async function* stream() {
+      yield { type: "text_delta", delta: "hello" };
+    }
+    const wrapped = wrapStreamFnWithDiagnosticModelCallEvents(
+      (() => stream()) as unknown as StreamFn,
+      {
+        runId: "run-1",
+        provider: "openai",
+        model: "gpt-5.4",
+        trace: createDiagnosticTraceContext(),
+        nextCallId: () => "call-text-delta",
+        contentCapture: { inputMessages: true, outputMessages: true },
+      },
+    );
+
+    const events = await collectModelCallEvents(async () => {
+      await drain(wrapped({} as never, {} as never, {} as never) as AsyncIterable<unknown>);
+    });
+
+    const completed = events.find((e) => e.type === "model.call.completed");
+    expect(completed).toMatchObject({
+      type: "model.call.completed",
+      outputMessages: ["hello"],
+    });
   });
 });

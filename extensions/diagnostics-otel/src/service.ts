@@ -16,6 +16,7 @@ import { NodeSDK } from "@opentelemetry/sdk-node";
 import { ParentBasedSampler, TraceIdRatioBasedSampler } from "@opentelemetry/sdk-trace-base";
 import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
 import type {
+  DiagnosticContentCapturePolicy,
   DiagnosticEventMetadata,
   DiagnosticEventPayload,
   DiagnosticTraceContext,
@@ -26,6 +27,7 @@ import {
   isValidDiagnosticTraceFlags,
   isValidDiagnosticTraceId,
   redactSensitiveText,
+  resolveDiagnosticContentCapturePolicy,
 } from "../api.js";
 
 const DEFAULT_SERVICE_NAME = "openclaw";
@@ -65,14 +67,6 @@ const GEN_AI_OPERATION_DURATION_BUCKETS = [
   0.01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1.28, 2.56, 5.12, 10.24, 20.48, 40.96, 81.92,
 ];
 
-type OtelContentCapturePolicy = {
-  inputMessages: boolean;
-  outputMessages: boolean;
-  toolInputs: boolean;
-  toolOutputs: boolean;
-  systemPrompt: boolean;
-};
-
 type MessageDeliveryDiagnosticEvent = Extract<
   DiagnosticEventPayload,
   {
@@ -97,14 +91,6 @@ type SessionRecoveryDiagnosticEvent = Extract<
   { type: "session.recovery.requested" | "session.recovery.completed" }
 >;
 type TalkDiagnosticEvent = Extract<DiagnosticEventPayload, { type: "talk.event" }>;
-
-const NO_CONTENT_CAPTURE: OtelContentCapturePolicy = {
-  inputMessages: false,
-  outputMessages: false,
-  toolInputs: false,
-  toolOutputs: false,
-  systemPrompt: false,
-};
 
 function normalizeEndpoint(endpoint?: string): string | undefined {
   const trimmed = endpoint?.trim();
@@ -298,33 +284,6 @@ function normalizeOtelLogString(value: string, maxChars: number): string {
   return clampOtelLogText(redactSensitiveText(value), maxChars);
 }
 
-function resolveContentCapturePolicy(value: unknown): OtelContentCapturePolicy {
-  if (value === true) {
-    return {
-      inputMessages: true,
-      outputMessages: true,
-      toolInputs: true,
-      toolOutputs: true,
-      systemPrompt: false,
-    };
-  }
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return NO_CONTENT_CAPTURE;
-  }
-
-  const config = value as Record<string, unknown>;
-  if (config.enabled !== true) {
-    return NO_CONTENT_CAPTURE;
-  }
-  return {
-    inputMessages: config.inputMessages === true,
-    outputMessages: config.outputMessages === true,
-    toolInputs: config.toolInputs === true,
-    toolOutputs: config.toolOutputs === true,
-    systemPrompt: config.systemPrompt === true,
-  };
-}
-
 function hasPreloadedOtelSdk(): boolean {
   return process.env[PRELOADED_OTEL_SDK_ENV] === "1";
 }
@@ -361,7 +320,7 @@ function assignOtelContentAttribute(
 function assignOtelModelContentAttributes(
   attributes: Record<string, string | number | boolean>,
   event: Record<string, unknown>,
-  policy: OtelContentCapturePolicy,
+  policy: DiagnosticContentCapturePolicy,
 ): void {
   if (policy.inputMessages) {
     assignOtelContentAttribute(attributes, "openclaw.content.input_messages", event.inputMessages);
@@ -381,7 +340,7 @@ function assignOtelModelContentAttributes(
 function assignOtelToolContentAttributes(
   attributes: Record<string, string | number | boolean>,
   event: Record<string, unknown>,
-  policy: OtelContentCapturePolicy,
+  policy: DiagnosticContentCapturePolicy,
 ): void {
   if (policy.toolInputs) {
     assignOtelContentAttribute(attributes, "openclaw.content.tool_input", event.toolInput);
@@ -607,7 +566,7 @@ export function createDiagnosticsOtelService(): OpenClawPluginService {
       const serviceName =
         otel.serviceName?.trim() || process.env.OTEL_SERVICE_NAME || DEFAULT_SERVICE_NAME;
       const sampleRate = resolveSampleRate(otel.sampleRate);
-      const contentCapturePolicy = resolveContentCapturePolicy(otel.captureContent);
+      const contentCapturePolicy = resolveDiagnosticContentCapturePolicy(otel.captureContent);
       const sdkPreloaded = hasPreloadedOtelSdk();
 
       const resource = resourceFromAttributes({
