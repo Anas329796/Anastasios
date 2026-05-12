@@ -180,7 +180,9 @@ function extractInputMessages(model: unknown): string[] {
       return true;
     }
     const normalizedRole = role.trim().toLowerCase();
-    return normalizedRole !== "system" && normalizedRole !== "developer";
+    return (
+      normalizedRole !== "system" && normalizedRole !== "developer" && normalizedRole !== "tool"
+    );
   };
 
   // OpenAI chat completions: { messages: [{ role, content }] }
