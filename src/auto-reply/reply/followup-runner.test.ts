@@ -742,7 +742,7 @@ describe("createFollowupRunner compaction", () => {
 
     await runner(queued);
 
-    expect(onBlockReply).toHaveBeenCalled();
+    expect(onBlockReply).toHaveBeenCalledTimes(2);
     const firstCall = (onBlockReply.mock.calls as unknown as Array<Array<{ text?: string }>>)[0];
     expect(firstCall?.[0]?.text).toContain("Auto-compaction complete");
     expect(sessionStore.main.compactionCount).toBe(1);
@@ -794,7 +794,7 @@ describe("createFollowupRunner compaction", () => {
 
     await runner(queued);
 
-    expect(onBlockReply).toHaveBeenCalled();
+    expect(onBlockReply).toHaveBeenCalledTimes(2);
     const firstCall = (onBlockReply.mock.calls as unknown as Array<Array<{ text?: string }>>)[0];
     expect(firstCall?.[0]?.text).toContain("Auto-compaction complete");
     expect(sessionStore.main.compactionCount).toBe(2);
@@ -1331,7 +1331,7 @@ describe("createFollowupRunner messaging delivery and dedupe", () => {
     ).resolves.toBeUndefined();
 
     expect(requireMockCallArg(persistSpy, 0).providerUsed).toBe("anthropic");
-    expect(persistSpy.mock.calls[0]?.[0]?.usageIsContextSnapshot).toBeUndefined();
+    expect(persistSpy.mock.calls.at(0)?.[0]?.usageIsContextSnapshot).toBeUndefined();
     persistSpy.mockRestore();
   });
 
