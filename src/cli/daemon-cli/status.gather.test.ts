@@ -65,6 +65,9 @@ const resolveGatewayBindHost = vi.fn(
   async (_bindMode?: string, _customBindHost?: string) => "0.0.0.0",
 );
 const pickPrimaryTailnetIPv4 = vi.fn(() => "100.64.0.9");
+const inspectNetworkInterfaces = vi.fn(() => ({
+  snapshot: {} as Record<string, unknown>,
+}));
 const resolveGatewayPort = vi.fn((_cfg?: unknown, _env?: unknown) => 18789);
 const resolveStateDir = vi.fn(
   (env: NodeJS.ProcessEnv) => env.OPENCLAW_STATE_DIR ?? "/tmp/openclaw-cli",
@@ -168,6 +171,11 @@ vi.mock("../../infra/restart-handoff.js", () => ({
 
 vi.mock("../../infra/tailnet.js", () => ({
   pickPrimaryTailnetIPv4: () => pickPrimaryTailnetIPv4(),
+  listTailnetAddressesFromSnapshot: () => ({ ipv4: [], ipv6: [] }),
+}));
+
+vi.mock("../../infra/network-interfaces.js", () => ({
+  inspectNetworkInterfaces: () => inspectNetworkInterfaces(),
 }));
 
 vi.mock("../../infra/tls/gateway.js", () => ({
@@ -368,9 +376,10 @@ describe("gatherDaemonStatus", () => {
     resolveGatewayBindHost.mockImplementationOnce(async () => {
       throw new Error("uv_interface_addresses failed");
     });
-    pickPrimaryTailnetIPv4.mockImplementationOnce(() => {
-      throw new Error("uv_interface_addresses failed");
-    });
+    inspectNetworkInterfaces.mockImplementation(() => ({
+      snapshot: undefined,
+      error: new Error("uv_interface_addresses failed"),
+    }));
 
     const status = await gatherDaemonStatus({
       rpc: {},

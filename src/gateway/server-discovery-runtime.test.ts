@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../infra/tailnet.js", () => ({
   pickPrimaryTailnetIPv4: mocks.pickPrimaryTailnetIPv4,
   pickPrimaryTailnetIPv6: mocks.pickPrimaryTailnetIPv6,
+  listTailnetAddressesFromSnapshot: () => ({ ipv4: [], ipv6: [] }),
 }));
 
 vi.mock("../infra/widearea-dns.js", () => ({
