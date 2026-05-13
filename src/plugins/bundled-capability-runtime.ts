@@ -11,6 +11,7 @@ import { createCapturedPluginRegistration } from "./captured-registration.js";
 import { discoverOpenClawPlugins } from "./discovery.js";
 import type { PluginLoadOptions } from "./loader.js";
 import { loadPluginManifestRegistry } from "./manifest-registry.js";
+import type { PluginManifestContracts } from "./manifest.js";
 import { unwrapDefaultModuleExport } from "./module-export.js";
 import {
   createPluginModuleLoaderCache,
@@ -136,6 +137,7 @@ function createCapabilityPluginRecord(params: {
   source: string;
   rootDir?: string;
   workspaceDir?: string;
+  contracts?: PluginManifestContracts;
 }): PluginRecord {
   return {
     id: params.id,
@@ -153,17 +155,17 @@ function createCapabilityPluginRecord(params: {
     channelIds: [],
     cliBackendIds: [],
     providerIds: [],
-    speechProviderIds: [],
-    realtimeTranscriptionProviderIds: [],
-    realtimeVoiceProviderIds: [],
-    mediaUnderstandingProviderIds: [],
-    imageGenerationProviderIds: [],
-    videoGenerationProviderIds: [],
-    musicGenerationProviderIds: [],
-    webFetchProviderIds: [],
-    webSearchProviderIds: [],
-    migrationProviderIds: [],
-    memoryEmbeddingProviderIds: [],
+    speechProviderIds: [...(params.contracts?.speechProviders ?? [])],
+    realtimeTranscriptionProviderIds: [...(params.contracts?.realtimeTranscriptionProviders ?? [])],
+    realtimeVoiceProviderIds: [...(params.contracts?.realtimeVoiceProviders ?? [])],
+    mediaUnderstandingProviderIds: [...(params.contracts?.mediaUnderstandingProviders ?? [])],
+    imageGenerationProviderIds: [...(params.contracts?.imageGenerationProviders ?? [])],
+    videoGenerationProviderIds: [...(params.contracts?.videoGenerationProviders ?? [])],
+    musicGenerationProviderIds: [...(params.contracts?.musicGenerationProviders ?? [])],
+    webFetchProviderIds: [...(params.contracts?.webFetchProviders ?? [])],
+    webSearchProviderIds: [...(params.contracts?.webSearchProviders ?? [])],
+    migrationProviderIds: [...(params.contracts?.migrationProviders ?? [])],
+    memoryEmbeddingProviderIds: [...(params.contracts?.memoryEmbeddingProviders ?? [])],
     agentHarnessIds: [],
     gatewayMethods: [],
     cliCommands: [],
@@ -173,6 +175,7 @@ function createCapabilityPluginRecord(params: {
     httpRoutes: 0,
     hookCount: 0,
     configSchema: true,
+    contracts: params.contracts,
   };
 }
 
@@ -275,6 +278,7 @@ export function loadBundledCapabilityRuntimeRegistry(params: {
           : candidate.source,
       rootDir: candidate.rootDir,
       workspaceDir: candidate.workspaceDir,
+      contracts: manifest.contracts,
     });
 
     const opened = openRootFileSync({
