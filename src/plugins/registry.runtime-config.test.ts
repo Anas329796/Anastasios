@@ -55,9 +55,10 @@ describe("plugin registry runtime config scope", () => {
       configSchema: false,
     });
     const api = pluginRegistry.createApi(record, { config });
+    const legacyConfigApi = api.runtime.config;
 
-    expect(api.runtime.config.loadConfig()).toBe(config);
-    await api.runtime.config.writeConfigFile(config);
+    expect(legacyConfigApi["loadConfig"]()).toBe(config);
+    await legacyConfigApi["writeConfigFile"](config);
 
     expect(loadScope).toMatchObject({
       pluginId: "legacy-plugin",
