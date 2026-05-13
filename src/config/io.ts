@@ -423,8 +423,12 @@ function resolveConfigWriteBlockingReasons(
 ): string[] {
   return suspicious.filter(
     (reason) =>
+      reason === "unreadable-config-before-write" ||
       (reason.startsWith("size-drop:") && options.allowConfigSizeDrop !== true) ||
-      reason === "gateway-mode-removed",
+      (reason.startsWith("size-drop-vs-last-good:") && options.allowConfigSizeDrop !== true) ||
+      reason === "gateway-mode-removed" ||
+      reason === "gateway-mode-missing-vs-last-good" ||
+      reason === "update-channel-only-root",
   );
 }
 
@@ -567,6 +571,21 @@ async function readConfigFingerprintForPath(
   } catch {
     return null;
   }
+}
+
+async function resolveConfigWriteLastKnownGoodBaseline(
+  deps: Required<ConfigIoDeps>,
+  configPath: string,
+): Promise<ConfigHealthFingerprint | undefined> {
+  const healthState = await readConfigHealthState(deps);
+  const entry = getConfigHealthEntry(healthState, configPath);
+  return (
+    entry.lastKnownGood ??
+    entry.lastPromotedGood ??
+    (await readConfigFingerprintForPath(deps, `${configPath}.last-good`)) ??
+    (await readConfigFingerprintForPath(deps, `${configPath}.bak`)) ??
+    undefined
+  );
 }
 
 function readConfigFingerprintForPathSync(
@@ -2125,14 +2144,31 @@ export function createConfigIO(
     const hasMetaAfter = hasConfigMeta(stampedOutputConfig);
     const gatewayModeBefore = resolveGatewayMode(snapshot.resolved);
     const gatewayModeAfter = resolveGatewayMode(stampedOutputConfig);
-    const suspiciousReasons = resolveConfigWriteSuspiciousReasons({
-      existsBefore: snapshot.exists,
-      previousBytes,
-      nextBytes,
-      hasMetaBefore,
-      gatewayModeBefore,
-      gatewayModeAfter,
-    });
+    const lastKnownGoodBaseline = snapshot.exists
+      ? await resolveConfigWriteLastKnownGoodBaseline(deps, configPath)
+      : undefined;
+    const suspiciousReasons = Array.from(
+      new Set([
+        ...(snapshot.exists && !snapshot.valid && typeof snapshot.raw !== "string"
+          ? ["unreadable-config-before-write"]
+          : []),
+        ...resolveConfigWriteSuspiciousReasons({
+          existsBefore: snapshot.exists,
+          previousBytes,
+          nextBytes,
+          hasMetaBefore,
+          gatewayModeBefore,
+          gatewayModeAfter,
+        }),
+        ...resolveConfigObserveSuspiciousReasons({
+          bytes: nextBytes,
+          hasMeta: hasMetaAfter,
+          gatewayMode: gatewayModeAfter,
+          parsed: stampedOutputConfig,
+          lastKnownGood: lastKnownGoodBaseline,
+        }),
+      ]),
+    );
     const logConfigOverwrite = () => {
       if (!snapshot.exists) {
         return;
