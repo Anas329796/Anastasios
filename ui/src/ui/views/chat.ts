@@ -34,9 +34,10 @@ import { getOrCreateSessionCacheValue } from "../chat/session-cache.ts";
 import { renderSideResult } from "../chat/side-result-render.ts";
 import type { ChatSideResult } from "../chat/side-result.ts";
 import {
-  CATEGORY_LABELS,
   SLASH_COMMANDS,
   getHiddenCommandCount,
+  getLocalizedArgChoice,
+  getLocalizedCommandDescription,
   getSlashCommandCompletions,
   type SlashCommandCategory,
   type SlashCommandDef,
@@ -180,37 +181,37 @@ function renderRealtimeTalkOptions(props: ChatProps) {
     onChange({ [key]: value });
   };
   return html`
-    <div class="agent-chat__talk-options" aria-label="Talk options">
+    <div class="agent-chat__talk-options" aria-label=${t("chat.talk.options")}>
       <label>
-        <span>Provider</span>
+        <span>${t("chat.talk.provider")}</span>
         <select .value=${options.provider} @change=${update("provider")}>
-          <option value="">Auto</option>
+          <option value="">${t("chat.talk.auto")}</option>
           <option value="openai">OpenAI</option>
           <option value="google">Google</option>
         </select>
       </label>
       <label>
-        <span>Transport</span>
+        <span>${t("chat.talk.transport")}</span>
         <select .value=${options.transport} @change=${update("transport")}>
-          <option value="">Auto</option>
+          <option value="">${t("chat.talk.auto")}</option>
           <option value="webrtc">WebRTC</option>
           <option value="gateway-relay">Gateway relay</option>
           <option value="provider-websocket">Provider WebSocket</option>
         </select>
       </label>
       <label>
-        <span>Model</span>
+        <span>${t("chat.talk.model")}</span>
         <input
           .value=${options.model}
           @input=${update("model")}
-          placeholder="gpt-realtime-2"
+          placeholder=${t("chat.talk.modelPlaceholder")}
           spellcheck="false"
         />
       </label>
       <label>
-        <span>Voice</span>
+        <span>${t("chat.talk.voice")}</span>
         <select .value=${options.voice} @change=${update("voice")}>
-          <option value="">Default</option>
+          <option value="">${t("chat.talk.default")}</option>
           ${[
             "alloy",
             "ash",
@@ -226,17 +227,17 @@ function renderRealtimeTalkOptions(props: ChatProps) {
         </select>
       </label>
       <label>
-        <span>Reasoning</span>
+        <span>${t("chat.talk.reasoning")}</span>
         <select .value=${options.reasoningEffort} @change=${update("reasoningEffort")}>
-          <option value="">Default</option>
-          <option value="minimal">Minimal</option>
-          <option value="low">Low</option>
-          <option value="medium">Medium</option>
-          <option value="high">High</option>
+          <option value="">${t("chat.talk.default")}</option>
+          <option value="minimal">${t("chat.talk.minimal")}</option>
+          <option value="low">${t("chat.talk.low")}</option>
+          <option value="medium">${t("chat.talk.medium")}</option>
+          <option value="high">${t("chat.talk.high")}</option>
         </select>
       </label>
       <label>
-        <span>VAD</span>
+        <span>${t("chat.talk.vad")}</span>
         <input
           type="number"
           min="0"
@@ -244,29 +245,29 @@ function renderRealtimeTalkOptions(props: ChatProps) {
           step="0.05"
           .value=${options.vadThreshold}
           @input=${update("vadThreshold")}
-          placeholder="0.5"
+          placeholder=${t("chat.talk.vadPlaceholder")}
         />
       </label>
       <label>
-        <span>Silence ms</span>
+        <span>${t("chat.talk.silenceMs")}</span>
         <input
           type="number"
           min="1"
           step="50"
           .value=${options.silenceDurationMs}
           @input=${update("silenceDurationMs")}
-          placeholder="500"
+          placeholder=${t("chat.talk.silenceMsPlaceholder")}
         />
       </label>
       <label>
-        <span>Prefix ms</span>
+        <span>${t("chat.talk.prefixMs")}</span>
         <input
           type="number"
           min="0"
           step="50"
           .value=${options.prefixPaddingMs}
           @input=${update("prefixPaddingMs")}
-          placeholder="300"
+          placeholder=${t("chat.talk.prefixMsPlaceholder")}
         />
       </label>
     </div>
@@ -682,8 +683,8 @@ function renderSearchBar(requestUpdate: () => void): TemplateResult | typeof not
       ${icons.search}
       <input
         type="text"
-        placeholder="Search messages..."
-        aria-label="Search messages"
+        placeholder=${t("chat.searchMessages")}
+        aria-label=${t("chat.searchMessages")}
         .value=${vs.searchQuery}
         @input=${(e: Event) => {
           vs.searchQuery = (e.target as HTMLInputElement).value;
@@ -790,11 +791,11 @@ function renderSlashMenu(
         id=${SLASH_MENU_LISTBOX_ID}
         class="slash-menu"
         role="listbox"
-        aria-label="Command arguments"
+        aria-label=${t("chat.slashCommands.commandAriaLabel")}
       >
         <div class="slash-menu-group">
           <div class="slash-menu-group__label">
-            /${vs.slashMenuCommand.name} ${vs.slashMenuCommand.description}
+            /${vs.slashMenuCommand.name} ${getLocalizedCommandDescription(vs.slashMenuCommand)}
           </div>
           ${vs.slashMenuArgItems.map(
             (arg, i) => html`
@@ -812,14 +813,23 @@ function renderSlashMenu(
                 ${vs.slashMenuCommand?.icon
                   ? html`<span class="slash-menu-icon">${icons[vs.slashMenuCommand.icon]}</span>`
                   : nothing}
-                <span class="slash-menu-name">${arg}</span>
-                <span class="slash-menu-desc">/${vs.slashMenuCommand?.name} ${arg}</span>
+                <span class="slash-menu-name"
+                  >${getLocalizedArgChoice(vs.slashMenuCommand?.key ?? "", arg)}</span
+                >
+                <span class="slash-menu-desc"
+                  >/${vs.slashMenuCommand?.name}
+                  ${getLocalizedArgChoice(vs.slashMenuCommand?.key ?? "", arg)}</span
+                >
               </div>
             `,
           )}
         </div>
         <div class="slash-menu-footer">
-          <kbd>↑↓</kbd> navigate <kbd>Tab</kbd> fill <kbd>Enter</kbd> run <kbd>Esc</kbd> close
+          <kbd>↑↓</kbd> ${t("chat.slashCommands.footer.navigate")} <kbd>Tab</kbd> ${t(
+            "chat.slashCommands.footer.fill",
+          )} <kbd>Enter</kbd> ${t("chat.slashCommands.footer.run")} <kbd>Esc</kbd> ${t(
+            "chat.slashCommands.footer.close",
+          )}
         </div>
       </div>
     `;
@@ -849,7 +859,7 @@ function renderSlashMenu(
   for (const [cat, entries] of grouped) {
     sections.push(html`
       <div class="slash-menu-group">
-        <div class="slash-menu-group__label">${CATEGORY_LABELS[cat]}</div>
+        <div class="slash-menu-group__label">${t(`chat.slashCommands.category.${cat}`)}</div>
         ${entries.map(
           ({ cmd, globalIdx }) => html`
             <div
@@ -868,11 +878,17 @@ function renderSlashMenu(
               ${cmd.icon ? html`<span class="slash-menu-icon">${icons[cmd.icon]}</span>` : nothing}
               <span class="slash-menu-name">/${cmd.name}</span>
               ${cmd.args ? html`<span class="slash-menu-args">${cmd.args}</span>` : nothing}
-              <span class="slash-menu-desc">${cmd.description}</span>
+              <span class="slash-menu-desc">${getLocalizedCommandDescription(cmd)}</span>
               ${cmd.argOptions?.length
-                ? html`<span class="slash-menu-badge">${cmd.argOptions.length} options</span>`
+                ? html`<span class="slash-menu-badge"
+                    >${t("chat.slashCommands.badge.options", {
+                      count: String(cmd.argOptions.length),
+                    })}</span
+                  >`
                 : cmd.executeLocal && !cmd.args
-                  ? html` <span class="slash-menu-badge">instant</span> `
+                  ? html`
+                      <span class="slash-menu-badge">${t("chat.slashCommands.badge.instant")}</span>
+                    `
                   : nothing}
             </div>
           `,
@@ -884,7 +900,12 @@ function renderSlashMenu(
   const hiddenCount = vs.slashMenuExpanded ? 0 : getHiddenCommandCount();
 
   return html`
-    <div id=${SLASH_MENU_LISTBOX_ID} class="slash-menu" role="listbox" aria-label="Slash commands">
+    <div
+      id=${SLASH_MENU_LISTBOX_ID}
+      class="slash-menu"
+      role="listbox"
+      aria-label=${t("chat.slashCommands.ariaLabel")}
+    >
       ${sections}
       ${hiddenCount > 0
         ? html`<button
@@ -896,11 +917,20 @@ function renderSlashMenu(
               updateSlashMenu(props.draft, requestUpdate);
             }}
           >
-            Show ${hiddenCount} more command${hiddenCount !== 1 ? "s" : ""}
+            ${t(
+              hiddenCount === 1
+                ? "chat.slashCommands.showMore_one"
+                : "chat.slashCommands.showMore_other",
+              { count: String(hiddenCount) },
+            )}
           </button>`
         : nothing}
       <div class="slash-menu-footer">
-        <kbd>↑↓</kbd> navigate <kbd>Tab</kbd> fill <kbd>Enter</kbd> select <kbd>Esc</kbd> close
+        <kbd>↑↓</kbd> ${t("chat.slashCommands.footer.navigate")} <kbd>Tab</kbd> ${t(
+          "chat.slashCommands.footer.fill",
+        )} <kbd>Enter</kbd> ${t("chat.slashCommands.footer.select")} <kbd>Esc</kbd> ${t(
+          "chat.slashCommands.footer.close",
+        )}
       </div>
     </div>
   `;
@@ -1370,10 +1400,10 @@ export function renderChat(props: ChatProps) {
                 ${props.realtimeTalkDetail ??
                 props.realtimeTalkTranscript ??
                 (props.realtimeTalkStatus === "thinking"
-                  ? "Asking OpenClaw..."
+                  ? t("chat.talk.asking")
                   : props.realtimeTalkStatus === "connecting"
-                    ? "Connecting Talk..."
-                    : "Talk live")}
+                    ? t("chat.talk.connecting")
+                    : t("chat.talk.live"))}
               </div>
             `
           : nothing}
@@ -1440,8 +1470,8 @@ export function renderChat(props: ChatProps) {
                       ? "agent-chat__input-btn--active"
                       : ""}"
                     @click=${props.onToggleRealtimeTalkOptions}
-                    title="Talk options"
-                    aria-label="Talk options"
+                    title=${t("chat.talk.options")}
+                    aria-label=${t("chat.talk.options")}
                     ?disabled=${!props.connected || props.realtimeTalkActive}
                   >
                     ${icons.settings}

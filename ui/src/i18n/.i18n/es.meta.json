@@ -1,11 +1,27 @@
 {
-  "fallbackKeys": [],
-  "generatedAt": "2026-05-11T15:39:36.358Z",
+  "fallbackKeys": [
+    "chat.talk.auto",
+    "chat.talk.default",
+    "chat.talk.high",
+    "chat.talk.low",
+    "chat.talk.medium",
+    "chat.talk.minimal",
+    "chat.talk.modelPlaceholder",
+    "chat.talk.prefixMs",
+    "chat.talk.prefixMsPlaceholder",
+    "chat.talk.silenceMs",
+    "chat.talk.silenceMsPlaceholder",
+    "chat.talk.transport",
+    "chat.talk.vad",
+    "chat.talk.vadPlaceholder",
+    "chat.talk.voice"
+  ],
+  "generatedAt": "2026-05-13T02:37:24.966Z",
   "locale": "es",
   "model": "gpt-5.5",
   "provider": "openai",
-  "sourceHash": "aeecf1f192f6e0aa03b14ef1f310b33ba7dea155928848024d0548f50849f584",
-  "totalKeys": 1108,
-  "translatedKeys": 1108,
+  "sourceHash": "4df9ac5fbcfd43aa980f2de826726ae55d941b1995ab443ac9ec408d593c285b",
+  "totalKeys": 1263,
+  "translatedKeys": 1248,
   "workflow": 1
 }
