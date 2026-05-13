@@ -188,6 +188,33 @@ describe("runEmbeddedAttempt context engine sessionKey forwarding", () => {
     vi.restoreAllMocks();
   });
 
+  it("enables Tool Search controls for embedded PI runs when configured", async () => {
+    await createContextEngineAttemptRunner({
+      contextEngine: {
+        assemble: async ({ messages }) => ({ messages, estimatedTokens: 1 }),
+      },
+      sessionKey,
+      tempPaths,
+      attemptOverrides: {
+        disableTools: false,
+        config: {
+          tools: {
+            toolSearch: true,
+          },
+        } as OpenClawConfig,
+      },
+    });
+
+    expect(hoisted.createOpenClawCodingToolsMock).toHaveBeenCalledTimes(1);
+    const options = mockParams(
+      hoisted.createOpenClawCodingToolsMock,
+      0,
+      "createOpenClawCodingTools options",
+    );
+    expect(options.includeToolSearchControls).toBe(true);
+    expect(options.toolSearchCatalogRef).toEqual({});
+  });
+
   it("sends transcriptPrompt visibly and queues runtime context as hidden custom context", async () => {
     const seen: { prompt?: string; messages?: unknown[]; systemPrompt?: string } = {};
 
@@ -1018,13 +1045,12 @@ describe("runEmbeddedAttempt context engine sessionKey forwarding", () => {
       prePromptMessageCount: 1,
     });
 
-    expect(ingest).toHaveBeenCalled();
-    expect(
-      ingest.mock.calls.every((call) => {
-        const params = call[0];
-        return params.sessionKey === sessionKey;
-      }),
-    ).toBe(true);
+    expect(ingest).toHaveBeenCalledTimes(1);
+    expect(ingest).toHaveBeenCalledWith({
+      message: doneMessage,
+      sessionId: embeddedSessionId,
+      sessionKey,
+    });
   });
 
   it("forwards silentExpected to the embedded subscription", () => {
@@ -1067,7 +1093,7 @@ describe("runEmbeddedAttempt context engine sessionKey forwarding", () => {
 
     await finalizeTurn(sessionKey, createTestContextEngine({ bootstrap, assemble, afterTurn }));
 
-    expect(afterTurn).toHaveBeenCalled();
+    expectCalledWithSessionKey(afterTurn, sessionKey);
     expect(
       hoisted.runContextEngineMaintenanceMock.mock.calls.some(
         ([params]) => requireRecord(params, "maintenance params").reason === "turn",
@@ -1267,7 +1293,7 @@ describe("runEmbeddedAttempt context engine sessionKey forwarding", () => {
       prePromptMessageCount: 1,
     });
 
-    expect(ingestBatch).toHaveBeenCalled();
+    expectCalledWithSessionKey(ingestBatch, sessionKey);
     expect(
       hoisted.runContextEngineMaintenanceMock.mock.calls.some(
         ([params]) => requireRecord(params, "maintenance params").reason === "turn",
