@@ -334,6 +334,7 @@ describe("node.invoke approval bypass", () => {
       platform: "linux",
       mode: GATEWAY_CLIENT_MODES.NODE,
       scopes: [],
+      caps: ["system"],
       commands,
       deviceIdentity: resolvedDeviceIdentity,
       onHelloOk: () => readyResolve?.(),
