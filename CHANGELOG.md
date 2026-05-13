@@ -10,6 +10,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Auto-reply/CLI: bridge `claude-cli` `stream: "assistant"` agent-events through `params.opts.onReasoningStream` so the channel reasoning preview lane reflects the model's live text output during streaming. `claude-opus-4-7` suppresses readable `thinking_delta` events over the wire, leaving the reasoning lane silent under the existing API/native bridge; the new bridge is `isCliProvider`-gated so API/native runtimes keep getting reasoning content from real `thinking_delta` events and do not double-receive `text_delta` as reasoning. The reply lane is unaffected — `onPartialReply` continues to settle the final assistant text via #76914. Mirrors the assistant-text bridge from #76914 and the tool-event bridge from #80046.
 - ACP: preserve redacted numeric JSON-RPC `RequestError` details in runtime failure text, so backend diagnostics are visible instead of only `Internal error`. Fixes #81126. (#81188) Thanks @vyctorbrzezowski.
 - Security/Windows ACL audit: classify Anonymous Logon, Guests, Interactive, Local, and Network SIDs as world-equivalent principals so broadly writable paths stay critical instead of being downgraded to group-writable. Fixes #74350. (#74383) Thanks @dwc1997.
 - Media-understanding: retry transient remote attachment fetch failures before audio or vision processing, so Discord voice notes are not lost after one network/CDN blip. Fixes #74316. Thanks @vyctorbrzezowski and @gabrielexito-stack.
