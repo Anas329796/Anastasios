@@ -3437,8 +3437,8 @@ describe("openai transport stream", () => {
         maxTokens: 256000,
         compat: {
           unsupportedToolSchemaKeywords: ["not"],
-        } as never,
-      } satisfies Model<"openai-completions">,
+        },
+      } as unknown as Parameters<typeof buildOpenAICompletionsParams>[0],
       {
         systemPrompt: "system",
         messages: [],

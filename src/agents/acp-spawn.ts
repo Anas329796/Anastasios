@@ -96,6 +96,21 @@ import { resolveInternalSessionKey, resolveMainSessionAlias } from "./tools/sess
 
 const log = createSubsystemLogger("agents/acp-spawn");
 
+function toRpcAttachments(
+  attachments: Array<{
+    name: string;
+    content: string;
+    encoding?: "utf8" | "base64";
+    mimeType?: string;
+  }>,
+): Array<{ mimeType?: string; content: string }> {
+  return attachments.map((a) => ({
+    mimeType: a.mimeType,
+    content:
+      a.encoding === "base64" ? a.content : Buffer.from(a.content, "utf8").toString("base64"),
+  }));
+}
+
 export const ACP_SPAWN_MODES = ["run", "session"] as const;
 export type SpawnAcpMode = (typeof ACP_SPAWN_MODES)[number];
 export const ACP_SPAWN_SANDBOX_MODES = ["inherit", "require"] as const;
@@ -116,6 +131,12 @@ export type SpawnAcpParams = {
   thread?: boolean;
   sandbox?: SpawnAcpSandboxMode;
   streamTo?: SpawnAcpStreamTarget;
+  attachments?: Array<{
+    name: string;
+    content: string;
+    encoding?: "utf8" | "base64";
+    mimeType?: string;
+  }>;
 };
 
 export type SpawnAcpContext = {
@@ -1426,6 +1447,9 @@ export async function spawnAcpDirect(
         acpTurnSource: "manual_spawn",
         ...(params.runTimeoutSeconds != null ? { timeout: params.runTimeoutSeconds } : {}),
         label: params.label || undefined,
+        ...(params.attachments && params.attachments.length > 0
+          ? { attachments: toRpcAttachments(params.attachments) }
+          : {}),
       },
       timeoutMs: 10_000,
     });

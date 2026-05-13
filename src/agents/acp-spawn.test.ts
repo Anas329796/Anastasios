@@ -981,6 +981,78 @@ describe("spawnAcpDirect", () => {
     expectGatewayMethodNotCalled("agent");
   });
 
+  it("forwards image attachments through the gateway agent call", async () => {
+    const imageBase64 = Buffer.from("png-bytes").toString("base64");
+    const result = await spawnAcpDirect(
+      {
+        task: "describe the image",
+        agentId: "codex",
+        attachments: [
+          {
+            name: "photo.png",
+            content: imageBase64,
+            encoding: "base64",
+            mimeType: "image/png",
+          },
+        ],
+      },
+      {
+        agentSessionKey: "agent:main:main",
+      },
+    );
+
+    expectAcceptedSpawn(result);
+    const agentCall = findAgentGatewayCall();
+    expect(agentCall?.params?.attachments).toEqual([
+      { mimeType: "image/png", content: imageBase64 },
+    ]);
+  });
+
+  it("converts utf8 attachment content to base64 in the gateway call", async () => {
+    const result = await spawnAcpDirect(
+      {
+        task: "analyze this",
+        agentId: "codex",
+        attachments: [
+          {
+            name: "data.json",
+            content: '{"key": "value"}',
+            encoding: "utf8",
+            mimeType: "application/json",
+          },
+        ],
+      },
+      {
+        agentSessionKey: "agent:main:main",
+      },
+    );
+
+    expectAcceptedSpawn(result);
+    const agentCall = findAgentGatewayCall();
+    expect(agentCall?.params?.attachments).toEqual([
+      {
+        mimeType: "application/json",
+        content: Buffer.from('{"key": "value"}', "utf8").toString("base64"),
+      },
+    ]);
+  });
+
+  it("omits attachments from gateway call when none are provided", async () => {
+    const result = await spawnAcpDirect(
+      {
+        task: "hello",
+        agentId: "codex",
+      },
+      {
+        agentSessionKey: "agent:main:main",
+      },
+    );
+
+    expectAcceptedSpawn(result);
+    const agentCall = findAgentGatewayCall();
+    expect(agentCall?.params).not.toHaveProperty("attachments");
+  });
+
   it("maps OpenClaw ACP runtime agent aliases to their configured harness id", async () => {
     replaceSpawnConfig({
       ...createDefaultSpawnConfig(),

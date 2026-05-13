@@ -1,3 +1,4 @@
+import { resolveAcpInlineImageAttachments } from "../auto-reply/reply/dispatch-acp-attachments.js";
 import {
   formatThinkingLevels,
   isThinkingLevelSupported,
@@ -532,10 +533,12 @@ async function agentCommandInternal(
           throw agentPolicyError;
         }
 
+        const acpImageAttachments = resolveAcpInlineImageAttachments(opts.images);
         await acpManager.runTurn({
           cfg,
           sessionKey,
           text: body,
+          attachments: acpImageAttachments.length > 0 ? acpImageAttachments : undefined,
           mode: "prompt",
           requestId: runId,
           signal: opts.abortSignal,

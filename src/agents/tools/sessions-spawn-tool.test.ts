@@ -818,7 +818,7 @@ describe("sessions_spawn tool", () => {
     expect(hoisted.spawnAcpDirectMock).not.toHaveBeenCalled();
   });
 
-  it("rejects attachments for ACP runtime", async () => {
+  it("forwards image attachments for ACP runtime", async () => {
     registerAcpBackendForTest();
     const tool = createSessionsSpawnTool({
       agentSessionKey: "agent:main:main",
@@ -828,16 +828,29 @@ describe("sessions_spawn tool", () => {
       agentThreadId: "456",
     });
 
+    const imageBase64 = Buffer.from("png-bytes").toString("base64");
     const result = await tool.execute("call-3", {
       runtime: "acp",
-      task: "analyze file",
-      attachments: [{ name: "a.txt", content: "hello", encoding: "utf8" }],
+      task: "describe the image",
+      attachments: [
+        { name: "photo.png", content: imageBase64, encoding: "base64", mimeType: "image/png" },
+      ],
     });
 
-    expectDetailFields(result.details, { status: "error" });
-    const details = result.details as { error?: string };
-    expect(details.error).toContain("attachments are currently unsupported for runtime=acp");
-    expect(hoisted.spawnAcpDirectMock).not.toHaveBeenCalled();
+    expect(result.details).toMatchObject({
+      status: "accepted",
+    });
+    expect(hoisted.spawnAcpDirectMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: "describe the image",
+        attachments: [
+          { name: "photo.png", content: imageBase64, encoding: "base64", mimeType: "image/png" },
+        ],
+      }),
+      expect.objectContaining({
+        agentSessionKey: "agent:main:main",
+      }),
+    );
     expect(hoisted.spawnSubagentDirectMock).not.toHaveBeenCalled();
   });
 
