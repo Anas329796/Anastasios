@@ -17,6 +17,7 @@ export type LoadedModelsConfig = {
 export async function loadModelsConfigWithSource(params: {
   commandName: string;
   runtime?: RuntimeEnv;
+  json?: boolean;
 }): Promise<LoadedModelsConfig> {
   const runtimeConfig = getRuntimeConfig();
   const pinnedSourceConfig = getRuntimeConfigSourceSnapshot();
@@ -25,6 +26,7 @@ export async function loadModelsConfigWithSource(params: {
     config: runtimeConfig,
     commandName: params.commandName,
     targetIds: getModelsCommandSecretTargetIds(),
+    diagnosticStream: params.json ? "stderr" : "stdout",
     runtime: params.runtime,
   });
   if (pinnedSourceConfig) {
@@ -42,6 +44,7 @@ export async function loadModelsConfigWithSource(params: {
 export async function loadModelsConfig(params: {
   commandName: string;
   runtime?: RuntimeEnv;
+  json?: boolean;
 }): Promise<OpenClawConfig> {
   return (await loadModelsConfigWithSource(params)).resolvedConfig;
 }

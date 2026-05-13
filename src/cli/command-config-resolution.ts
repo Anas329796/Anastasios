@@ -6,6 +6,8 @@ import {
   resolveCommandSecretRefsViaGateway,
 } from "./command-secret-gateway.js";
 
+export type CommandSecretDiagnosticStream = "stdout" | "stderr";
+
 export async function resolveCommandConfigWithSecrets<TConfig extends OpenClawConfig>(params: {
   config: TConfig;
   commandName: string;
@@ -13,6 +15,7 @@ export async function resolveCommandConfigWithSecrets<TConfig extends OpenClawCo
   mode?: CommandSecretResolutionMode;
   allowedPaths?: Set<string>;
   runtime?: RuntimeEnv;
+  diagnosticStream?: CommandSecretDiagnosticStream;
   autoEnable?: boolean;
   env?: NodeJS.ProcessEnv;
 }): Promise<{
@@ -28,8 +31,10 @@ export async function resolveCommandConfigWithSecrets<TConfig extends OpenClawCo
     ...(params.allowedPaths ? { allowedPaths: params.allowedPaths } : {}),
   });
   if (params.runtime) {
+    const emitDiagnostic =
+      params.diagnosticStream === "stderr" ? params.runtime.error : params.runtime.log;
     for (const entry of diagnostics) {
-      params.runtime.log(`[secrets] ${entry}`);
+      emitDiagnostic(`[secrets] ${entry}`);
     }
   }
   const effectiveConfig = params.autoEnable
