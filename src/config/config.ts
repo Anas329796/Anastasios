@@ -41,6 +41,7 @@ export type {
 } from "./runtime-snapshot.js";
 export type {
   ConfigWriteNotification,
+  ConfigSnapshotReadOptions,
   ReadConfigFileSnapshotWithPluginMetadataResult,
 } from "./io.js";
 export { ConfigMutationConflictError, mutateConfigFile, replaceConfigFile } from "./mutate.js";
