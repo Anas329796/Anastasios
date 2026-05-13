@@ -295,7 +295,7 @@ describe("QmdMemoryManager", () => {
         backend: "qmd",
         qmd: {
           includeDefaultMemory: false,
-          update: { interval: "0s", debounceMs: 60_000, onBoot: false },
+          update: { interval: "0s", debounceMs: 60_000, onBoot: false, embedInterval: "0s" },
           paths: [{ path: workspaceDir, pattern: "**/*.md", name: "workspace" }],
         },
       },
@@ -3644,7 +3644,7 @@ describe("QmdMemoryManager", () => {
     await manager.close();
   });
 
-  it("skips periodic embed maintenance in lexical search mode", async () => {
+  it("skips periodic embed maintenance in lexical search mode when embedInterval is disabled", async () => {
     vi.useFakeTimers();
     cfg = {
       ...cfg,
@@ -3657,7 +3657,7 @@ describe("QmdMemoryManager", () => {
             interval: "0s",
             debounceMs: 0,
             onBoot: false,
-            embedInterval: "5m",
+            embedInterval: "0s",
           },
           paths: [{ path: workspaceDir, pattern: "**/*.md", name: "workspace" }],
         },
@@ -3714,6 +3714,38 @@ describe("QmdMemoryManager", () => {
     expect(beforeCalls).toHaveLength(0);
 
     await vi.advanceTimersByTimeAsync(1);
+    const commandCalls = spawnMock.mock.calls
+      .map((call: unknown[]) => call[1] as string[])
+      .filter((args: string[]) => args[0] === "update" || args[0] === "embed");
+    expect(commandCalls).toEqual([["update"], ["embed"]]);
+
+    await manager.close();
+  });
+
+  it("schedules embed when searchMode is default (search) but embedInterval is explicitly configured", async () => {
+    vi.useFakeTimers();
+    cfg = {
+      ...cfg,
+      memory: {
+        backend: "qmd",
+        qmd: {
+          includeDefaultMemory: false,
+          searchMode: "search",
+          update: {
+            interval: "0s",
+            debounceMs: 0,
+            onBoot: false,
+            embedInterval: "5m",
+          },
+          paths: [{ path: workspaceDir, pattern: "**/*.md", name: "workspace" }],
+        },
+      },
+    } as OpenClawConfig;
+
+    const { manager } = await createManager({ mode: "full" });
+
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+
     const commandCalls = spawnMock.mock.calls
       .map((call: unknown[]) => call[1] as string[])
       .filter((args: string[]) => args[0] === "update" || args[0] === "embed");
@@ -3916,7 +3948,7 @@ describe("QmdMemoryManager", () => {
     }
   });
 
-  it("skips qmd embed in lexical search mode for forced sync", async () => {
+  it("skips qmd embed in lexical search mode for forced sync when embedInterval is disabled", async () => {
     cfg = {
       ...cfg,
       memory: {
@@ -3924,7 +3956,7 @@ describe("QmdMemoryManager", () => {
         qmd: {
           includeDefaultMemory: false,
           searchMode: "search",
-          update: { interval: "0s", debounceMs: 0, onBoot: false },
+          update: { interval: "0s", debounceMs: 0, onBoot: false, embedInterval: "0s" },
           paths: [{ path: workspaceDir, pattern: "**/*.md", name: "workspace" }],
         },
       },
