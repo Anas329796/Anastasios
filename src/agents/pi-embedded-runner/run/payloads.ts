@@ -150,6 +150,9 @@ function resolveToolErrorWarningPolicy(params: {
   if (normalizedToolName === "sessions_send") {
     return { showWarning: false, includeDetails };
   }
+  if (params.suppressToolErrors) {
+    return { showWarning: false, includeDetails };
+  }
   const isMutatingToolError =
     params.lastToolError.mutatingAction ?? isLikelyMutatingToolName(params.lastToolError.toolName);
   if (isMutatingToolError) {
@@ -159,9 +162,6 @@ function resolveToolErrorWarningPolicy(params: {
     };
   }
   if (isExecLikeToolName(params.lastToolError.toolName) && !includeDetails) {
-    return { showWarning: false, includeDetails };
-  }
-  if (params.suppressToolErrors) {
     return { showWarning: false, includeDetails };
   }
   return {
