@@ -381,9 +381,8 @@ describe("resolveCliAuthEpoch", () => {
     expect(second).toBe(first);
     expect(third).toBe(second);
     expect(fourth).toBe(third);
-    expectCliAuthEpoch(fifth);
-    expectCliAuthEpoch(sixth);
     expect(fifth).not.toBe(fourth);
+    expectCliAuthEpoch(sixth);
     expect(sixth).not.toBe(fifth);
   });
 
@@ -468,5 +467,57 @@ describe("resolveCliAuthEpoch", () => {
       ttlMs: 5000,
       allowKeychainPrompt: false,
     });
+  });
+
+  it("keeps identity-less claude-cli OAuth epochs stable across local file presence (#80178)", async () => {
+    let localCredential: {
+      type: "oauth";
+      provider: "anthropic";
+      access: string;
+      refresh: string;
+      expires: number;
+    } | null = null;
+    // Identity-less profile (no email/accountId) — matches the Anthropic Max
+    // plan case reported in #80178.
+    const store: AuthProfileStore = {
+      version: 1,
+      profiles: {
+        "anthropic:claude-cli": {
+          type: "oauth",
+          provider: "claude-cli",
+          access: "profile-access",
+          refresh: "profile-refresh",
+          expires: 1,
+        },
+      },
+    };
+    setCliAuthEpochTestDeps({
+      readClaudeCliCredentialsCached: () => localCredential,
+      loadAuthProfileStoreForRuntime: () => store,
+    });
+
+    const beforeFile = await resolveCliAuthEpoch({
+      provider: "claude-cli",
+      authProfileId: "anthropic:claude-cli",
+      skipLocalCredential: true,
+    });
+
+    localCredential = {
+      type: "oauth",
+      provider: "anthropic",
+      access: "local-access",
+      refresh: "local-refresh",
+      expires: 1,
+    };
+
+    const afterFile = await resolveCliAuthEpoch({
+      provider: "claude-cli",
+      authProfileId: "anthropic:claude-cli",
+      skipLocalCredential: true,
+    });
+
+    expectCliAuthEpoch(beforeFile);
+    expectCliAuthEpoch(afterFile);
+    expect(afterFile).toBe(beforeFile);
   });
 });
