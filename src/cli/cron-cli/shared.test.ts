@@ -4,6 +4,7 @@ import type { RuntimeEnv } from "../../runtime.js";
 import {
   coerceCronDeliveryPreviews,
   getCronChannelOptions,
+  looksLikeShellCommand,
   parseCronToolsAllow,
   printCronList,
 } from "./shared.js";
@@ -278,5 +279,16 @@ describe("coerceCronDeliveryPreviews", () => {
         },
       }).size,
     ).toBe(0);
+  });
+});
+
+describe("looksLikeShellCommand", () => {
+  it("matches relative script invocations", () => {
+    expect(looksLikeShellCommand("./run.sh")).toBe(true);
+    expect(looksLikeShellCommand("please run ./deploy.sh now")).toBe(true);
+  });
+
+  it("does not match plain prose", () => {
+    expect(looksLikeShellCommand("summarize the daily runbook")).toBe(false);
   });
 });
