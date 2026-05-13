@@ -194,6 +194,8 @@ type ToolHandlerParams = Pick<
   | "agentId"
   | "toolResultFormat"
   | "toolProgressDetail"
+  | "config"
+  | "strictToolMode"
 >;
 
 type ToolHandlerState = Pick<

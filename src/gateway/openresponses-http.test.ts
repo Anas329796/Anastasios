@@ -304,6 +304,15 @@ describe("OpenResponses HTTP API (e2e)", () => {
       );
       await ensureResponseConsumed(resModel);
 
+      agentCommand.mockClear();
+      agentCommand.mockResolvedValueOnce({
+        payloads: [{ text: "strictness" }],
+      } as never);
+      const resStrictnessReport = await postResponses(port, { model: "openclaw", input: "hi" });
+      expect(resStrictnessReport.status).toBe(200);
+      const strictnessJson = (await resStrictnessReport.json()) as Record<string, unknown>;
+      expect(strictnessJson.tool_strictness_report).toBeUndefined();
+
       mockAgentOnce([{ text: "hello" }]);
       const resDefaultAlias = await postResponses(port, { model: "openclaw/default", input: "hi" });
       expect(resDefaultAlias.status).toBe(200);
@@ -701,13 +710,14 @@ describe("OpenResponses HTTP API (e2e)", () => {
     const port = enabledPort;
     try {
       agentCommand.mockClear();
-      agentCommand.mockImplementationOnce((async (opts: unknown) =>
-        buildAssistantDeltaResult({
+      agentCommand.mockImplementationOnce((async (opts: unknown) => ({
+        ...buildAssistantDeltaResult({
           opts,
           emit: emitAgentEvent,
           deltas: ["he", "llo"],
           text: "hello",
-        })) as never);
+        }),
+      })) as never);
 
       const resDelta = await postResponses(port, {
         stream: true,
@@ -728,6 +738,7 @@ describe("OpenResponses HTTP API (e2e)", () => {
       expect(eventTypes).toContain("response.output_text.delta");
       expect(eventTypes).toContain("response.output_text.done");
       expect(eventTypes).toContain("response.content_part.done");
+      expect(eventTypes).not.toContain("response.tool_strictness_report");
       expect(eventTypes).toContain("response.completed");
       expect(deltaEvents.map((event) => event.data)).toContain("[DONE]");
 

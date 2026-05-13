@@ -72,6 +72,7 @@ export type OpenClawConfig = {
     lastRunMode?: "local" | "remote";
   };
   diagnostics?: DiagnosticsConfig;
+  strictToolMode?: boolean;
   logging?: LoggingConfig;
   cli?: CliConfig;
   crestodian?: CrestodianConfig;

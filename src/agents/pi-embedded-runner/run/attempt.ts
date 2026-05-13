@@ -269,6 +269,7 @@ import {
   shouldCreateBundleMcpRuntimeForAttempt,
 } from "./attempt-tool-construction-plan.js";
 export { buildContextEnginePromptCacheInfo } from "./attempt.context-engine-helpers.js";
+import { resolveStrictToolMode } from "../../tool-strictness.js";
 import {
   rotateTranscriptAfterCompaction,
   shouldRotateCompactionTranscript,
@@ -331,6 +332,8 @@ import {
   wrapStreamFnRepairMalformedToolCallArguments,
 } from "./attempt.tool-call-argument-repair.js";
 import {
+  type ToolCallCompatibilityObservation,
+  type ToolUseReplayDiagnosticEvent,
   sanitizeReplayToolCallIdsForStream,
   wrapStreamFnSanitizeMalformedToolCalls,
   wrapStreamFnTrimToolCallNames,
@@ -2091,6 +2094,28 @@ export async function runEmbeddedAttempt(
         }),
       );
 
+      // Resolve strict tool mode early so transport stream factories can capture it in closure.
+      // Priority: per-run override > config > env variable > default false.
+      const strictToolMode = resolveStrictToolMode({
+        env: process.env,
+        strict: params.strictToolMode ?? params.config?.strictToolMode,
+      });
+      const collectToolStrictnessObservation = (event: ToolCallCompatibilityObservation) => {
+        if (!log.isEnabled("debug")) {
+          return;
+        }
+        log.debug(
+          `tool strictness observation: kind=${event.kind} from=${event.from} to=${event.to} phase=${event.phase} strict=${event.strictToolMode}`,
+        );
+      };
+      const collectToolUseReplayDiagnostic = (event: ToolUseReplayDiagnosticEvent) => {
+        if (!log.isEnabled("debug")) {
+          return;
+        }
+        log.debug(
+          `tool strictness diagnostic: kind=${event.kind} reason=${event.reason} provider=${event.provider} embedded=${event.hasEmbeddedToolResult} toolUses=${event.toolUseCount} phase=${event.phase} strict=${event.strictToolMode}`,
+        );
+      };
       // Rebuild each turn from the session's original stream base so prior-turn
       // wrappers do not pin us to stale provider/API transport behavior.
       const defaultSessionStreamFn = resolveEmbeddedAgentBaseStreamFn({
@@ -2326,19 +2351,22 @@ export async function runEmbeddedAttempt(
         return innerStreamFn(model, context, options);
       };
 
-      // Some models emit tool names with surrounding whitespace (e.g. " read ").
-      // pi-agent-core dispatches tool calls with exact string matching, so normalize
-      // names on the live response stream before tool execution.
       activeSession.agent.streamFn = wrapStreamFnSanitizeMalformedToolCalls(
         activeSession.agent.streamFn,
         allowedToolNames,
         transcriptPolicy,
+        {
+          strictToolMode,
+          onCompatibilityEvent: collectToolStrictnessObservation,
+          onToolUseReplayDiagnostic: collectToolUseReplayDiagnostic,
+        },
       );
       activeSession.agent.streamFn = wrapStreamFnTrimToolCallNames(
         activeSession.agent.streamFn,
         allowedToolNames,
         {
           unknownToolThreshold: resolveUnknownToolGuardThreshold(clientToolLoopDetection),
+          strictToolMode,
         },
       );
 
@@ -2672,6 +2700,7 @@ export async function runEmbeddedAttempt(
           enforceFinalTag: params.enforceFinalTag,
           silentExpected: params.silentExpected,
           config: params.config,
+          strictToolMode,
           sessionKey: sandboxSessionKey,
           sessionId: params.sessionId,
           agentId: sessionAgentId,

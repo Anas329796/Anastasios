@@ -57,6 +57,7 @@ export type SubscribeEmbeddedPiSessionParams = {
   enforceFinalTag?: boolean;
   silentExpected?: boolean;
   config?: OpenClawConfig;
+  strictToolMode?: boolean;
   sessionKey?: string;
   /** Ephemeral session UUID — regenerated on /new and /reset. */
   sessionId?: string;

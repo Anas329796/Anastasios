@@ -849,6 +849,15 @@ describe("OpenAI-compatible HTTP API (e2e)", () => {
 
       {
         agentCommand.mockClear();
+        agentCommand.mockResolvedValueOnce({
+          payloads: [{ text: "strictness" }],
+        } as never);
+        const json = await postSyncUserMessage("strictness");
+        expect(json.tool_strictness_report).toBeUndefined();
+      }
+
+      {
+        agentCommand.mockClear();
         agentCommand.mockResolvedValueOnce({ payloads: [{ text: "" }] } as never);
         const json = await postSyncUserMessage("hi");
         const choice0 = (json.choices as Array<Record<string, unknown>>)[0] ?? {};
@@ -919,13 +928,14 @@ describe("OpenAI-compatible HTTP API (e2e)", () => {
     try {
       {
         agentCommand.mockClear();
-        agentCommand.mockImplementationOnce((async (opts: unknown) =>
-          buildAssistantDeltaResult({
+        agentCommand.mockImplementationOnce((async (opts: unknown) => ({
+          ...buildAssistantDeltaResult({
             opts,
             emit: emitAgentEvent,
             deltas: ["he", "llo"],
             text: "hello",
-          })) as never);
+          }),
+        })) as never);
 
         const res = await postChatCompletions(port, {
           stream: true,
@@ -951,6 +961,9 @@ describe("OpenAI-compatible HTTP API (e2e)", () => {
         expect(allContent).toBe("hello");
         const usageChunks = jsonChunks.filter((c) => "usage" in c);
         expect(usageChunks).toHaveLength(0);
+        expect(jsonChunks.map((chunk) => chunk.object)).not.toContain(
+          "chat.completion.tool_strictness_report",
+        );
       }
 
       {

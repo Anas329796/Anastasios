@@ -503,6 +503,14 @@ export async function deliverAgentCommandResult(params: {
     throw strictPreDeliveryError;
   }
 
+  if (!payloads || payloads.length === 0) {
+    runtime.log("No reply from agent.");
+    return {
+      payloads: [],
+      meta: resultMeta,
+    };
+  }
+
   const deliveryPayloads = projectOutboundPayloadPlanForOutbound(outboundPayloadPlan);
   if (deliveryPayloads.length === 0) {
     deliveryStatus = deliver ? (deliveryStatus ?? noVisiblePayloadStatus()) : undefined;
@@ -536,7 +544,10 @@ export async function deliverAgentCommandResult(params: {
       logPayload(payload);
     }
     emitJsonEnvelope();
-    return { payloads: normalizedPayloads, meta: resultMeta };
+    return {
+      payloads: normalizedPayloads,
+      meta: resultMeta,
+    };
   }
   if (deliver && deliveryChannel && !isInternalMessageChannel(deliveryChannel)) {
     if (deliveryTarget && !deliveryStatus) {
@@ -579,5 +590,10 @@ export async function deliverAgentCommandResult(params: {
   }
 
   emitJsonEnvelope(deliveryStatus);
-  return { payloads: normalizedPayloads, meta: resultMeta, deliverySucceeded, deliveryStatus };
+  return {
+    payloads: normalizedPayloads,
+    meta: resultMeta,
+    deliverySucceeded,
+    deliveryStatus,
+  };
 }

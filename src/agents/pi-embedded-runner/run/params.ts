@@ -123,6 +123,8 @@ export type RunEmbeddedPiAgentParams = {
   modelFallbacksOverride?: string[];
   /** Session-pinned embedded harness id. Prevents runtime hot-switching. */
   agentHarnessId?: string;
+  /** Per-run strict tool mode override. Takes precedence over config/env. */
+  strictToolMode?: boolean;
   authProfileId?: string;
   authProfileIdSource?: "auto" | "user";
   thinkLevel?: ThinkLevel;
