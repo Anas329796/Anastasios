@@ -174,6 +174,10 @@ function buildParams(
   } as unknown as HandleCommandsParams;
 }
 
+function firstAuthCheckerParams() {
+  return modelProviderAuthMocks.createProviderAuthChecker.mock.calls[0]?.[0];
+}
+
 describe("handleModelsCommand", () => {
   it("shows a simple providers menu on text surfaces", async () => {
     const result = await handleModelsCommand(buildParams("/models"), true);
@@ -186,9 +190,8 @@ describe("handleModelsCommand", () => {
     expect(result?.reply?.text).toContain("Use: /models <provider>");
     expect(result?.reply?.text).toContain("Switch: /model <provider/model>");
     expect(result?.reply?.text).not.toContain("Add: /models add");
-    expect(modelProviderAuthMocks.createProviderAuthChecker).toHaveBeenCalledWith(
-      expect.objectContaining({ workspaceDir: "/tmp" }),
-    );
+    const authCheckerParams = firstAuthCheckerParams();
+    expect(authCheckerParams?.workspaceDir).toBe("/tmp");
   });
 
   it("hides unauthenticated providers by default and keeps all as explicit browse", async () => {
@@ -391,12 +394,10 @@ describe("handleModelsCommand", () => {
     const result = await handleModelsCommand(params, true);
 
     expect(result?.reply?.text).toContain("Models (anthropic · 🔑 target-auth) — showing 1-2 of 2");
-    expect(modelAuthLabelMocks.resolveModelAuthLabel).toHaveBeenCalledWith(
-      expect.objectContaining({
-        provider: "anthropic",
-        workspaceDir: "/tmp",
-      }),
-    );
+    const [[authLabelParams]] = modelAuthLabelMocks.resolveModelAuthLabel.mock
+      .calls as unknown as Array<[{ provider?: string; workspaceDir?: string }]>;
+    expect(authLabelParams.provider).toBe("anthropic");
+    expect(authLabelParams.workspaceDir).toBe("/tmp");
   });
 
   it("uses spawned workspace for direct /models provider visibility", async () => {
@@ -414,9 +415,8 @@ describe("handleModelsCommand", () => {
     const result = await handleModelsCommand(params, true);
 
     expect(result?.reply?.text).toContain("- anthropic (2)");
-    expect(modelProviderAuthMocks.createProviderAuthChecker).toHaveBeenCalledWith(
-      expect.objectContaining({ workspaceDir: "/tmp/spawned-workspace" }),
-    );
+    const authCheckerParams = firstAuthCheckerParams();
+    expect(authCheckerParams?.workspaceDir).toBe("/tmp/spawned-workspace");
   });
 
   it("returns a deprecation message for /models add when no provider is given", async () => {

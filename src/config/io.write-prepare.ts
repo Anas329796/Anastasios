@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
+import { normalizeConfiguredProviderCatalogModelId } from "../agents/model-ref-shared.js";
 import { isRecord } from "../utils.js";
 import { applyMergePatch } from "./merge-patch.js";
 import { normalizeAgentModelMapForConfig, normalizeAgentModelRefForConfig } from "./model-input.js";
@@ -354,6 +355,84 @@ function normalizeAgentDefaultModelRefsForWrite(config: unknown): unknown {
   return next;
 }
 
+function normalizeAgentListModelRefsForWrite(config: unknown): unknown {
+  const list = getPathValue(config, ["agents", "list"]);
+  if (!Array.isArray(list)) {
+    return config;
+  }
+
+  let mutated = false;
+  const nextList = list.map((agent) => {
+    if (!isRecord(agent)) {
+      return agent;
+    }
+
+    let nextAgent = agent;
+    if (Object.prototype.hasOwnProperty.call(agent, "model")) {
+      const normalizedModel = normalizeAgentModelConfigForWrite(agent.model);
+      if (normalizedModel !== agent.model) {
+        nextAgent = { ...nextAgent, model: normalizedModel };
+        mutated = true;
+      }
+    }
+    if (isRecord(agent.models)) {
+      const normalizedModels = normalizeAgentModelMapForConfig(agent.models);
+      if (normalizedModels !== agent.models) {
+        nextAgent = { ...nextAgent, models: normalizedModels };
+        mutated = true;
+      }
+    }
+    return nextAgent;
+  });
+
+  return mutated ? setPathValue(config, ["agents", "list"], nextList) : config;
+}
+
+function normalizeModelProviderCatalogRefsForWrite(config: unknown): unknown {
+  const providers = getPathValue(config, ["models", "providers"]);
+  if (!isRecord(providers)) {
+    return config;
+  }
+
+  let mutated = false;
+  const nextProviders: Record<string, unknown> = { ...providers };
+  for (const [provider, providerConfig] of Object.entries(providers)) {
+    if (!isRecord(providerConfig) || !Array.isArray(providerConfig.models)) {
+      continue;
+    }
+
+    let providerMutated = false;
+    const models = providerConfig.models.map((model) => {
+      if (!isRecord(model) || typeof model.id !== "string") {
+        return model;
+      }
+      const trimmed = model.id.trim();
+      if (!trimmed) {
+        return model;
+      }
+      const id = normalizeConfiguredProviderCatalogModelId(provider, trimmed);
+      if (id === model.id) {
+        return model;
+      }
+      providerMutated = true;
+      return { ...model, id };
+    });
+
+    if (providerMutated) {
+      nextProviders[provider] = { ...providerConfig, models };
+      mutated = true;
+    }
+  }
+
+  return mutated ? setPathValue(config, ["models", "providers"], nextProviders) : config;
+}
+
+function normalizeModelRefsForWrite(config: unknown): unknown {
+  return normalizeModelProviderCatalogRefsForWrite(
+    normalizeAgentListModelRefsForWrite(normalizeAgentDefaultModelRefsForWrite(config)),
+  );
+}
+
 function preserveUntouchedIncludes(params: {
   patch: unknown;
   rootAuthoredConfig: unknown;
@@ -524,7 +603,7 @@ export function resolvePersistCandidateForWrite(params: {
     persistedCandidate: withSchema,
     unsetPaths: params.unsetPaths,
   });
-  return normalizeAgentDefaultModelRefsForWrite(withAuthoredParams);
+  return normalizeModelRefsForWrite(withAuthoredParams);
 }
 
 function readRootSchemaUri(value: unknown): string | undefined {

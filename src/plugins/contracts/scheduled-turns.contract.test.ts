@@ -101,6 +101,7 @@ function createMockCronService(): CronServiceContract {
     run: vi.fn(async () => ({ ok: true, ran: false, reason: "not-due" })),
     enqueueRun: vi.fn(async () => ({ ok: true, ran: false, reason: "not-due" })),
     getJob: vi.fn(() => undefined),
+    readJob: vi.fn(async () => undefined),
     getDefaultAgentId: vi.fn(() => undefined),
     wake: vi.fn(() => ({ ok: true })),
   } as CronServiceContract;
@@ -129,9 +130,11 @@ function mockCronAdd(response: CronJob) {
 }
 
 function getCronAddBody() {
-  const addCall = workflowMocks.cronAdd.mock.calls[0];
-  expect(addCall).toBeDefined();
-  return addCall?.[0] as CronJobCreate;
+  const addCall = workflowMocks.cronAdd.mock.calls.at(0);
+  if (!addCall) {
+    throw new Error("Expected cron add call");
+  }
+  return addCall[0] as CronJobCreate;
 }
 
 function expectSessionTurnHandle(
@@ -538,7 +541,9 @@ describe("plugin scheduled turns", () => {
     const { name, schedule, ...stableCronAddBody } = getCronAddBody();
     expect(typeof name).toBe("string");
     expect(name.startsWith("plugin:loader-scheduler:agent:main:main:")).toBe(true);
-    expect(schedule.kind).toBe("at");
+    if (schedule.kind !== "at") {
+      throw new Error(`Expected one-shot scheduled turn, got ${schedule.kind}`);
+    }
     expect(typeof schedule.at).toBe("string");
     expect(stableCronAddBody).toEqual({
       enabled: true,
