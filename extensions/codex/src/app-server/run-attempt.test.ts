@@ -740,6 +740,56 @@ describe("runCodexAppServerAttempt", () => {
     ).toEqual(["exec", "apply_patch", "read"]);
   });
 
+  it("treats an explicit empty tools allowlist as disabling Codex dynamic tools", async () => {
+    const workspaceDir = path.join(tempDir, "workspace");
+    const params = createParams(path.join(tempDir, "session.jsonl"), workspaceDir);
+    params.disableTools = false;
+    params.runtimePlan = createCodexRuntimePlanFixture();
+    params.toolsAllow = [];
+    __testing.setOpenClawCodingToolsFactoryForTests(
+      () => ["web_search", "message", "sessions_spawn"].map(createNamedDynamicTool) as never,
+    );
+
+    const dynamicTools = await __testing.buildDynamicTools({
+      params,
+      resolvedWorkspace: workspaceDir,
+      effectiveWorkspace: workspaceDir,
+      sandboxSessionKey: params.sessionKey!,
+      sandbox: {} as never,
+      runAbortController: new AbortController(),
+      sessionAgentId: "main",
+      pluginConfig: {},
+      onYieldDetected: vi.fn(),
+    });
+
+    expect(dynamicTools).toEqual([]);
+  });
+
+  it("filters Codex dynamic tools with a non-empty tools allowlist", async () => {
+    const workspaceDir = path.join(tempDir, "workspace");
+    const params = createParams(path.join(tempDir, "session.jsonl"), workspaceDir);
+    params.disableTools = false;
+    params.runtimePlan = createCodexRuntimePlanFixture();
+    params.toolsAllow = ["message"];
+    __testing.setOpenClawCodingToolsFactoryForTests(
+      () => ["web_search", "message", "sessions_spawn"].map(createNamedDynamicTool) as never,
+    );
+
+    const dynamicTools = await __testing.buildDynamicTools({
+      params,
+      resolvedWorkspace: workspaceDir,
+      effectiveWorkspace: workspaceDir,
+      sandboxSessionKey: params.sessionKey!,
+      sandbox: {} as never,
+      runAbortController: new AbortController(),
+      sessionAgentId: "main",
+      pluginConfig: {},
+      onYieldDetected: vi.fn(),
+    });
+
+    expect(dynamicTools.map((tool) => tool.name)).toEqual(["message"]);
+  });
+
   it("forces the message dynamic tool for message-tool-only source replies", () => {
     const workspaceDir = path.join(tempDir, "workspace");
     const params = createParams(path.join(tempDir, "session.jsonl"), workspaceDir);

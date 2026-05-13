@@ -1013,6 +1013,14 @@
         "timeoutSeconds": {
           "minimum": 0,
           "type": "number"
+        },
+        "toolsAllow": {
+          "description": "Allowed tool ids for one-shot embedded runtime=\"subagent\" runs. Omit to use the default tool set; pass [] to disable all tools. Persistent thread/session spawns, ACP, and CLI-backed native runs reject this field.",
+          "items": {
+            "description": "Allowed tool id for the spawned native subagent run.",
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "required": ["task"],

@@ -7,6 +7,7 @@ import {
 import { getRuntimeConfig } from "../../config/config.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { callGateway } from "../../gateway/call.js";
+import { readSnakeCaseParamRaw } from "../../param-key.js";
 import { createLazyImportLoader } from "../../shared/lazy-promise.js";
 import { normalizeDeliveryContext } from "../../utils/delivery-context.shared.js";
 import type { GatewayMessageChannel } from "../../utils/message-channel.js";
@@ -96,6 +97,24 @@ function resolveTrackedSpawnMode(params: {
     return params.requestedMode;
   }
   return params.threadRequested ? "session" : "run";
+}
+
+function readToolsAllowParam(params: Record<string, unknown>): string[] | undefined {
+  const raw = readSnakeCaseParamRaw(params, "toolsAllow");
+  if (raw === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(raw)) {
+    throw new ToolInputError("toolsAllow must be an array of strings.");
+  }
+  return raw
+    .map((entry, index) => {
+      if (typeof entry !== "string") {
+        throw new ToolInputError(`toolsAllow[${index}] must be a string.`);
+      }
+      return entry.trim();
+    })
+    .filter(Boolean);
 }
 
 async function cleanupUntrackedAcpSession(sessionKey: string): Promise<void> {
@@ -198,6 +217,17 @@ function createSessionsSpawnToolSchema(params: {
         description:
           "When true, spawned subagent runs use lightweight bootstrap context. Only applies to runtime='subagent'.",
       }),
+    ),
+    toolsAllow: Type.Optional(
+      Type.Array(
+        Type.String({
+          description: "Allowed tool id for the spawned native subagent run.",
+        }),
+        {
+          description:
+            'Allowed tool ids for one-shot embedded runtime="subagent" runs. Omit to use the default tool set; pass [] to disable all tools. Persistent thread/session spawns, ACP, and CLI-backed native runs reject this field.',
+        },
+      ),
     ),
 
     // Inline attachments (snapshot-by-value).
@@ -310,6 +340,7 @@ export function createSessionsSpawnTool(
         params.context === "fork" || params.context === "isolated" ? params.context : undefined;
       const streamTo = runtime === "acp" && params.streamTo === "parent" ? "parent" : undefined;
       const lightContext = params.lightContext === true;
+      const toolsAllow = readToolsAllowParam(params);
       const roleContext = requestedAgentId ? { role: requestedAgentId } : {};
       if (runtime === "acp" && !acpAvailable) {
         return jsonResult({
@@ -343,6 +374,9 @@ export function createSessionsSpawnTool(
       if (runtime === "acp" && lightContext) {
         throw new Error("lightContext is only supported for runtime='subagent'.");
       }
+      if (runtime === "acp" && toolsAllow !== undefined) {
+        throw new ToolInputError("toolsAllow is only supported for runtime='subagent'.");
+      }
       if (runtime === "acp" && context === "fork") {
         throw new Error('context="fork" is only supported for runtime="subagent".');
       }
@@ -358,6 +392,11 @@ export function createSessionsSpawnTool(
           ? Math.max(0, Math.floor(timeoutSecondsCandidate))
           : undefined;
       const thread = params.thread === true;
+      if (runtime === "subagent" && toolsAllow !== undefined && (thread || mode === "session")) {
+        throw new ToolInputError(
+          'toolsAllow is only supported for one-shot runtime="subagent" runs; persistent thread/session spawns cannot enforce it on follow-up turns.',
+        );
+      }
       const attachments = Array.isArray(params.attachments)
         ? (params.attachments as Array<{
             name: string;
@@ -488,6 +527,7 @@ export function createSessionsSpawnTool(
           sandbox,
           context,
           lightContext,
+          toolsAllow,
           expectsCompletionMessage,
           attachments,
           attachMountPath:
