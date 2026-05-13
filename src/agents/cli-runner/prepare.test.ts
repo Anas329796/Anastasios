@@ -911,7 +911,10 @@ describe("shouldSkipLocalCliCredentialEpoch", () => {
         config: createCliBackendConfig({ systemPromptOverride: null }),
       });
 
-      expect(transcriptCheck).toHaveBeenCalledWith({ sessionId: "stale-claude-sid" });
+      expect(transcriptCheck).toHaveBeenCalledWith({
+        sessionId: "stale-claude-sid",
+        workspaceDir: dir,
+      });
       expect(context.reusableCliSession).toEqual({ invalidatedReason: "missing-transcript" });
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -959,7 +962,10 @@ describe("shouldSkipLocalCliCredentialEpoch", () => {
         config: createCliBackendConfig({ systemPromptOverride: null }),
       });
 
-      expect(transcriptCheck).toHaveBeenCalledWith({ sessionId: "live-claude-sid" });
+      expect(transcriptCheck).toHaveBeenCalledWith({
+        sessionId: "live-claude-sid",
+        workspaceDir: dir,
+      });
       expect(context.reusableCliSession).toEqual({ sessionId: "live-claude-sid" });
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });

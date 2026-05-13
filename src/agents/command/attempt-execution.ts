@@ -465,7 +465,10 @@ export function runAgentAttempt(params: {
       if (
         !isClaudeCliProvider(cliExecutionProvider) ||
         !cliSessionBinding?.sessionId ||
-        (await claudeCliSessionTranscriptHasContent({ sessionId: cliSessionBinding.sessionId }))
+        (await claudeCliSessionTranscriptHasContent({
+          sessionId: cliSessionBinding.sessionId,
+          workspaceDir: params.workspaceDir,
+        }))
       ) {
         return cliSessionBinding;
       }
