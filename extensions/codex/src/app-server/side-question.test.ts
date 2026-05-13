@@ -344,6 +344,29 @@ describe("runCodexAppServerSideQuestion", () => {
     expect(toolOptions).toHaveProperty("requireExplicitMessageTarget", true);
   });
 
+  it("passes the sandbox session key as the shared client isolation key when configured", async () => {
+    const client = createFakeClient();
+    getSharedCodexAppServerClientMock.mockResolvedValue(client);
+
+    await runCodexAppServerSideQuestion(
+      sideParams({
+        sessionKey: "agent:main:main",
+        sandboxSessionKey: "agent:main:telegram:default:direct:12345",
+      }),
+      {
+        pluginConfig: { appServer: { clientIsolation: "session" } },
+      },
+    );
+
+    expect(getSharedCodexAppServerClientMock).toHaveBeenCalledWith(
+      expect.objectContaining({ isolationKey: "agent:main:telegram:default:direct:12345" }),
+    );
+    expect(readCodexAppServerBindingMock).toHaveBeenCalledWith(
+      "/tmp/session-1.jsonl",
+      expect.objectContaining({ isolationKey: "agent:main:telegram:default:direct:12345" }),
+    );
+  });
+
   it("bridges side-thread dynamic tool requests to OpenClaw tools", async () => {
     const client = createFakeClient();
     let toolResponse: unknown;

@@ -36,6 +36,12 @@ export default definePluginEntry({
         pluginConfig: resolveCurrentPluginConfig(),
       }),
     );
+    api.on("after_compaction", async (event) => {
+      const { handleCodexAppServerAfterCompaction } = await import("./src/app-server/compact.js");
+      return await handleCodexAppServerAfterCompaction(event, {
+        pluginConfig: resolveCurrentPluginConfig(),
+      });
+    });
     api.onConversationBindingResolved?.(handleCodexConversationBindingResolved);
   },
 });

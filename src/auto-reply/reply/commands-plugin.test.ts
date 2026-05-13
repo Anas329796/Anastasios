@@ -34,6 +34,7 @@ function buildPluginParams(
       to: "test-bot",
     },
     sessionKey: "agent:main:whatsapp:direct:test-user",
+    runtimePolicySessionKey: "agent:main:whatsapp:default:direct:test-user",
     sessionEntry: {
       sessionId: "session-plugin-command",
       updatedAt: Date.now(),
@@ -67,6 +68,7 @@ describe("handlePluginCommand", () => {
       expect.objectContaining({
         gatewayClientScopes: ["operator.write", "operator.pairing"],
         sessionKey: "agent:main:whatsapp:direct:test-user",
+        runtimePolicySessionKey: "agent:main:whatsapp:default:direct:test-user",
         sessionId: "session-plugin-command",
         commandBody: "/card",
       }),

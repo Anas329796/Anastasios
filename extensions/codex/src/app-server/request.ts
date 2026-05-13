@@ -20,6 +20,7 @@ export async function requestCodexAppServerJson<M extends CodexAppServerRequestM
   authProfileId?: string;
   config?: Parameters<typeof resolveCodexAppServerAuthProfileIdForAgent>[0]["config"];
   isolated?: boolean;
+  isolationKey?: string;
 }): Promise<CodexAppServerRequestResult<M>>;
 export async function requestCodexAppServerJson<T = JsonValue | undefined>(params: {
   method: string;
@@ -29,6 +30,7 @@ export async function requestCodexAppServerJson<T = JsonValue | undefined>(param
   authProfileId?: string;
   config?: Parameters<typeof resolveCodexAppServerAuthProfileIdForAgent>[0]["config"];
   isolated?: boolean;
+  isolationKey?: string;
 }): Promise<T>;
 export async function requestCodexAppServerJson<T = JsonValue | undefined>(params: {
   method: string;
@@ -38,18 +40,25 @@ export async function requestCodexAppServerJson<T = JsonValue | undefined>(param
   authProfileId?: string;
   config?: Parameters<typeof resolveCodexAppServerAuthProfileIdForAgent>[0]["config"];
   isolated?: boolean;
+  isolationKey?: string;
 }): Promise<T> {
   const timeoutMs = params.timeoutMs ?? 60_000;
   return await withTimeout(
     (async () => {
-      const client = await (
-        params.isolated ? createIsolatedCodexAppServerClient : getSharedCodexAppServerClient
-      )({
-        startOptions: params.startOptions,
-        timeoutMs,
-        authProfileId: params.authProfileId,
-        config: params.config,
-      });
+      const client = await (params.isolated
+        ? createIsolatedCodexAppServerClient({
+            startOptions: params.startOptions,
+            timeoutMs,
+            authProfileId: params.authProfileId,
+            config: params.config,
+          })
+        : getSharedCodexAppServerClient({
+            startOptions: params.startOptions,
+            timeoutMs,
+            authProfileId: params.authProfileId,
+            config: params.config,
+            isolationKey: params.isolationKey,
+          }));
       try {
         return await client.request<T>(params.method, params.requestParams, { timeoutMs });
       } finally {

@@ -44,6 +44,7 @@ import { finalizeInboundContext } from "./inbound-context.js";
 import { hasInboundMedia } from "./inbound-media.js";
 import { emitPreAgentMessageHooks } from "./message-preprocess-hooks.js";
 import { createFastTestModelSelectionState } from "./model-selection.js";
+import { resolveRuntimePolicySessionKey } from "./runtime-policy-session-key.js";
 import { initSessionState } from "./session.js";
 import {
   isStaleHeartbeatAutoFallbackOverride,
@@ -723,6 +724,7 @@ export async function getReplyFromConfig(
       previousSessionEntry,
       sessionStore,
       sessionKey,
+      runtimePolicySessionKey: resolveRuntimePolicySessionKey({ cfg, ctx: sessionCtx, sessionKey }),
       storePath,
       sessionScope,
       workspaceDir,

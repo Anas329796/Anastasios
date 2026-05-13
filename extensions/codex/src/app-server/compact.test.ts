@@ -4,19 +4,31 @@ import path from "node:path";
 import type { HarnessContextEngine as ContextEngine } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CodexAppServerClient } from "./client.js";
-import { maybeCompactCodexAppServerSession, __testing } from "./compact.js";
+import {
+  handleCodexAppServerAfterCompaction,
+  maybeCompactCodexAppServerSession,
+  __testing,
+} from "./compact.js";
 import type { CodexServerNotification } from "./protocol.js";
-import { writeCodexAppServerBinding } from "./session-binding.js";
+import { readCodexAppServerBinding, writeCodexAppServerBinding } from "./session-binding.js";
 
 let tempDir: string;
 
-async function writeTestBinding(options: { authProfileId?: string } = {}): Promise<string> {
+async function writeTestBinding(
+  options: { authProfileId?: string; isolationKey?: string } = {},
+): Promise<string> {
   const sessionFile = path.join(tempDir, "session.jsonl");
-  await writeCodexAppServerBinding(sessionFile, {
-    threadId: "thread-1",
-    cwd: tempDir,
-    ...options,
-  });
+  await writeCodexAppServerBinding(
+    sessionFile,
+    {
+      threadId: "thread-1",
+      cwd: tempDir,
+      authProfileId: options.authProfileId,
+    },
+    {
+      isolationKey: options.isolationKey,
+    },
+  );
   return sessionFile;
 }
 
@@ -132,6 +144,206 @@ describe("maybeCompactCodexAppServerSession", () => {
     await pendingResult;
 
     expect(seenAuthProfileId).toBe("openai-codex:work");
+  });
+
+  it("uses the sandbox session key as the native compaction client isolation key", async () => {
+    const fake = createFakeCodexClient();
+    let seenIsolationKey: string | undefined;
+    __testing.setCodexAppServerClientFactoryForTests(
+      async (_startOptions, _authProfileId, _agentDir, _config, isolationKey) => {
+        seenIsolationKey = isolationKey;
+        return fake.client;
+      },
+    );
+    const sessionFile = await writeTestBinding({
+      isolationKey: "agent:main:telegram:topic-42",
+    });
+
+    const pendingResult = maybeCompactCodexAppServerSession(
+      {
+        sessionId: "session-1",
+        sessionKey: "agent:main:session-1",
+        sandboxSessionKey: "agent:main:telegram:topic-42",
+        sessionFile,
+        workspaceDir: tempDir,
+      },
+      { pluginConfig: { appServer: { clientIsolation: "session" } } },
+    );
+    await vi.waitFor(() => {
+      expect(fake.request).toHaveBeenCalledWith("thread/compact/start", { threadId: "thread-1" });
+    });
+    fake.emit({
+      method: "thread/compacted",
+      params: { threadId: "thread-1", turnId: "turn-1" },
+    });
+    await pendingResult;
+
+    expect(seenIsolationKey).toBe("agent:main:telegram:topic-42");
+  });
+
+  it("falls back to generic compaction without clearing bindings before fallback succeeds", async () => {
+    const fake = createFakeCodexClient();
+    const factory = vi.fn(async () => fake.client);
+    __testing.setCodexAppServerClientFactoryForTests(factory);
+    const sessionFile = await writeTestBinding();
+    await writeCodexAppServerBinding(
+      sessionFile,
+      {
+        threadId: "thread-2",
+        cwd: tempDir,
+      },
+      { isolationKey: "agent:main:topic-2" },
+    );
+
+    const result = await maybeCompactCodexAppServerSession(
+      {
+        sessionId: "session-1",
+        sessionKey: "agent:main:session-1",
+        sessionFile,
+        workspaceDir: tempDir,
+      },
+      { pluginConfig: { appServer: { nativeCompaction: false } } },
+    );
+
+    expect(result).toBeUndefined();
+    expect(await readCodexAppServerBinding(sessionFile)).toMatchObject({ threadId: "thread-1" });
+    expect(
+      await readCodexAppServerBinding(sessionFile, { isolationKey: "agent:main:topic-2" }),
+    ).toMatchObject({ threadId: "thread-2" });
+    expect(factory).not.toHaveBeenCalled();
+    expect(fake.request).not.toHaveBeenCalled();
+  });
+
+  it("clears bindings after generic compaction succeeds when native compaction is disabled", async () => {
+    const sessionFile = await writeTestBinding();
+    await writeCodexAppServerBinding(
+      sessionFile,
+      {
+        threadId: "thread-2",
+        cwd: tempDir,
+      },
+      { isolationKey: "agent:main:topic-2" },
+    );
+
+    await handleCodexAppServerAfterCompaction(
+      {
+        messageCount: 3,
+        compactedCount: 1,
+        sessionFile,
+      },
+      { pluginConfig: { appServer: { nativeCompaction: false } } },
+    );
+
+    expect(await readCodexAppServerBinding(sessionFile)).toBeUndefined();
+    expect(
+      await readCodexAppServerBinding(sessionFile, { isolationKey: "agent:main:topic-2" }),
+    ).toBeUndefined();
+  });
+
+  it("keeps bindings after a no-op compaction hook when native compaction is disabled", async () => {
+    const sessionFile = await writeTestBinding();
+    await writeCodexAppServerBinding(
+      sessionFile,
+      {
+        threadId: "thread-2",
+        cwd: tempDir,
+      },
+      { isolationKey: "agent:main:topic-2" },
+    );
+
+    await handleCodexAppServerAfterCompaction(
+      {
+        messageCount: 3,
+        compactedCount: 0,
+        sessionFile,
+      },
+      { pluginConfig: { appServer: { nativeCompaction: false } } },
+    );
+
+    expect(await readCodexAppServerBinding(sessionFile)).toMatchObject({ threadId: "thread-1" });
+    expect(
+      await readCodexAppServerBinding(sessionFile, { isolationKey: "agent:main:topic-2" }),
+    ).toMatchObject({ threadId: "thread-2" });
+  });
+
+  it("records disabled native compaction beside owning context-engine compaction", async () => {
+    const factory = vi.fn(async () => createFakeCodexClient().client);
+    __testing.setCodexAppServerClientFactoryForTests(factory);
+    const sessionFile = await writeTestBinding();
+    const contextEngine: ContextEngine = {
+      info: { id: "lossless-claw", name: "Lossless Claw", ownsCompaction: true },
+      assemble: vi.fn() as never,
+      ingest: vi.fn() as never,
+      compact: vi.fn(async () => ({
+        ok: true,
+        compacted: true,
+        result: {
+          summary: "engine summary",
+          firstKeptEntryId: "entry-1",
+          tokensBefore: 55,
+          details: { engine: "lossless-claw" },
+        },
+      })),
+      maintain: vi.fn(async () => ({
+        changed: false,
+        bytesFreed: 0,
+        rewrittenEntries: 0,
+      })),
+    };
+
+    const result = requireCompactResult(
+      await maybeCompactCodexAppServerSession(
+        {
+          sessionId: "session-1",
+          sessionKey: "agent:main:session-1",
+          sessionFile,
+          workspaceDir: tempDir,
+          contextEngine,
+        },
+        { pluginConfig: { appServer: { nativeCompaction: false } } },
+      ),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.compacted).toBe(true);
+    expect(compactDetails(result).codexNativeCompaction).toEqual({
+      ok: false,
+      compacted: false,
+      reason: "codex native compaction disabled",
+    });
+    expect(await readCodexAppServerBinding(sessionFile)).toBeUndefined();
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it("keeps bindings when disabled native compaction has no successful replacement", async () => {
+    const sessionFile = await writeTestBinding();
+    const contextEngine: ContextEngine = {
+      info: { id: "lossless-claw", name: "Lossless Claw", ownsCompaction: true },
+      assemble: vi.fn() as never,
+      ingest: vi.fn() as never,
+      compact: vi.fn(async () => ({
+        ok: true,
+        compacted: false,
+        reason: "below threshold",
+      })),
+    };
+
+    const result = requireCompactResult(
+      await maybeCompactCodexAppServerSession(
+        {
+          sessionId: "session-1",
+          sessionKey: "agent:main:session-1",
+          sessionFile,
+          workspaceDir: tempDir,
+          contextEngine,
+        },
+        { pluginConfig: { appServer: { nativeCompaction: false } } },
+      ),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.compacted).toBe(false);
+    expect(await readCodexAppServerBinding(sessionFile)).toMatchObject({ threadId: "thread-1" });
   });
 
   it("fails closed when the persisted binding auth profile disagrees with the runtime request", async () => {

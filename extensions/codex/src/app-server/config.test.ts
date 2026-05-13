@@ -68,6 +68,9 @@ describe("Codex app-server config", () => {
           approvalsReviewer: "guardian_subagent",
           serviceTier: "flex",
           turnCompletionIdleTimeoutMs: 120_000,
+          turnTerminalIdleTimeoutMs: 180_000,
+          clientIsolation: "session",
+          nativeCompaction: false,
         },
       },
       env: {
@@ -82,6 +85,9 @@ describe("Codex app-server config", () => {
       approvalsReviewer: "guardian_subagent",
       serviceTier: "flex",
       turnCompletionIdleTimeoutMs: 120_000,
+      turnTerminalIdleTimeoutMs: 180_000,
+      clientIsolation: "session",
+      nativeCompaction: false,
     });
     expectFields(runtime.start, "runtime start", {
       transport: "websocket",
@@ -118,6 +124,12 @@ describe("Codex app-server config", () => {
     expectFields(runtime.start, "runtime start", {
       clearEnv: ["OPENAI_API_KEY"],
     });
+  });
+
+  it("keeps the terminal idle watchdog default aligned with the existing 30 minute runtime timeout", () => {
+    const runtime = resolveRuntimeForTest();
+
+    expect(runtime.turnTerminalIdleTimeoutMs).toBe(30 * 60_000);
   });
 
   it("normalizes legacy service tiers without discarding the rest of the config", () => {

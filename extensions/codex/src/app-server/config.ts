@@ -31,6 +31,7 @@ export type CodexAppServerEffectiveApprovalPolicy =
 export type CodexAppServerSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 type CodexAppServerApprovalsReviewer = "user" | "auto_review" | "guardian_subagent";
 type CodexAppServerCommandSource = "managed" | "resolved-managed" | "config" | "env";
+export type CodexAppServerClientIsolation = "agent" | "session";
 export type CodexDynamicToolsLoading = "searchable" | "direct";
 export type CodexPluginDestructivePolicy = boolean;
 
@@ -102,6 +103,9 @@ export type CodexAppServerRuntimeOptions = {
   start: CodexAppServerStartOptions;
   requestTimeoutMs: number;
   turnCompletionIdleTimeoutMs: number;
+  turnTerminalIdleTimeoutMs: number;
+  clientIsolation: CodexAppServerClientIsolation;
+  nativeCompaction: boolean;
   approvalPolicy: CodexAppServerEffectiveApprovalPolicy;
   sandbox: CodexAppServerSandboxMode;
   approvalsReviewer: CodexAppServerApprovalsReviewer;
@@ -128,6 +132,9 @@ export type CodexPluginConfig = {
     clearEnv?: string[];
     requestTimeoutMs?: number;
     turnCompletionIdleTimeoutMs?: number;
+    turnTerminalIdleTimeoutMs?: number;
+    clientIsolation?: CodexAppServerClientIsolation;
+    nativeCompaction?: boolean;
     approvalPolicy?: CodexAppServerApprovalPolicy;
     sandbox?: CodexAppServerSandboxMode;
     approvalsReviewer?: CodexAppServerApprovalsReviewer;
@@ -147,6 +154,9 @@ export const CODEX_APP_SERVER_CONFIG_KEYS = [
   "clearEnv",
   "requestTimeoutMs",
   "turnCompletionIdleTimeoutMs",
+  "turnTerminalIdleTimeoutMs",
+  "clientIsolation",
+  "nativeCompaction",
   "approvalPolicy",
   "sandbox",
   "approvalsReviewer",
@@ -192,6 +202,7 @@ const codexAppServerApprovalPolicySchema = z.enum([
 ]);
 const codexAppServerSandboxSchema = z.enum(["read-only", "workspace-write", "danger-full-access"]);
 const codexAppServerApprovalsReviewerSchema = z.enum(["user", "auto_review", "guardian_subagent"]);
+const codexAppServerClientIsolationSchema = z.enum(["agent", "session"]);
 const codexDynamicToolsLoadingSchema = z.enum(["searchable", "direct"]);
 const codexAppServerServiceTierSchema = z
   .preprocess(
@@ -254,6 +265,9 @@ const codexPluginConfigSchema = z
         clearEnv: z.array(z.string()).optional(),
         requestTimeoutMs: z.number().positive().optional(),
         turnCompletionIdleTimeoutMs: z.number().positive().optional(),
+        turnTerminalIdleTimeoutMs: z.number().positive().optional(),
+        clientIsolation: codexAppServerClientIsolationSchema.optional(),
+        nativeCompaction: z.boolean().optional(),
         approvalPolicy: codexAppServerApprovalPolicySchema.optional(),
         sandbox: codexAppServerSandboxSchema.optional(),
         approvalsReviewer: codexAppServerApprovalsReviewerSchema.optional(),
@@ -371,6 +385,12 @@ export function resolveCodexAppServerRuntimeOptions(
       config.turnCompletionIdleTimeoutMs,
       60_000,
     ),
+    turnTerminalIdleTimeoutMs: normalizePositiveNumber(
+      config.turnTerminalIdleTimeoutMs,
+      30 * 60_000,
+    ),
+    clientIsolation: config.clientIsolation ?? "agent",
+    nativeCompaction: config.nativeCompaction ?? true,
     approvalPolicy:
       resolveApprovalPolicy(config.approvalPolicy) ??
       resolveApprovalPolicy(env.OPENCLAW_CODEX_APP_SERVER_APPROVAL_POLICY) ??

@@ -13,7 +13,7 @@ import {
 import type { CodexAppServerClient, CodexServerNotificationHandler } from "./client.js";
 import { resolveCodexAppServerRuntimeOptions } from "./config.js";
 import { isJsonObject, type CodexServerNotification, type JsonObject } from "./protocol.js";
-import { readCodexAppServerBinding } from "./session-binding.js";
+import { clearAllCodexAppServerBindings, readCodexAppServerBinding } from "./session-binding.js";
 type CodexNativeCompactionCompletion = {
   signal: "thread/compacted" | "item/completed";
   turnId?: string;
@@ -87,7 +87,13 @@ export async function maybeCompactCodexAppServerSession(
         );
       }
     }
-    const nativeResult = await compactCodexNativeThread(params, options);
+    const nativeResult = await compactCodexNativeThread(params, {
+      ...options,
+      reportDisabledNativeCompaction: true,
+    });
+    if (primary?.ok && primary.compacted) {
+      await clearCodexAppServerBindingsAfterDisabledNativeCompaction(params.sessionFile, options);
+    }
     if (!primary) {
       return buildContextEngineCompactionFailureResult({
         primaryError,
@@ -107,10 +113,22 @@ export async function maybeCompactCodexAppServerSession(
 
 async function compactCodexNativeThread(
   params: CompactEmbeddedPiSessionParams,
-  options: { pluginConfig?: unknown } = {},
+  options: { pluginConfig?: unknown; reportDisabledNativeCompaction?: boolean } = {},
 ): Promise<EmbeddedPiCompactResult | undefined> {
   const appServer = resolveCodexAppServerRuntimeOptions({ pluginConfig: options.pluginConfig });
-  const binding = await readCodexAppServerBinding(params.sessionFile, { config: params.config });
+  const appServerClientIsolationKey =
+    appServer.clientIsolation === "session"
+      ? params.sandboxSessionKey?.trim() || params.sessionKey?.trim() || params.sessionId
+      : undefined;
+  if (!appServer.nativeCompaction) {
+    return options.reportDisabledNativeCompaction
+      ? { ok: false, compacted: false, reason: "codex native compaction disabled" }
+      : undefined;
+  }
+  const binding = await readCodexAppServerBinding(params.sessionFile, {
+    config: params.config,
+    isolationKey: appServerClientIsolationKey,
+  });
   if (!binding?.threadId) {
     return { ok: false, compacted: false, reason: "no codex app-server thread binding" };
   }
@@ -122,12 +140,12 @@ async function compactCodexNativeThread(
   ) {
     return { ok: false, compacted: false, reason: "auth profile mismatch for session binding" };
   }
-
   const client = await clientFactory(
     appServer.start,
     requestedAuthProfileId ?? binding.authProfileId,
     params.agentDir,
     params.config,
+    appServerClientIsolationKey,
   );
   const waiter = createCodexNativeCompactionWaiter(client, binding.threadId);
   let completion: CodexNativeCompactionCompletion;
@@ -173,6 +191,40 @@ async function compactCodexNativeThread(
       },
     },
   };
+}
+
+export async function handleCodexAppServerAfterCompaction(
+  event: {
+    sessionFile?: string;
+    compactedCount?: number;
+    messageCount?: number;
+    tokenCount?: number;
+  },
+  options: { pluginConfig?: unknown } = {},
+): Promise<void> {
+  const sessionFile = event.sessionFile?.trim();
+  if (!sessionFile || !isSuccessfulCompactionHookEvent(event)) {
+    return;
+  }
+  await clearCodexAppServerBindingsAfterDisabledNativeCompaction(sessionFile, options);
+}
+
+function isSuccessfulCompactionHookEvent(event: { compactedCount?: number }): boolean {
+  if (event.compactedCount === undefined) {
+    return true;
+  }
+  return event.compactedCount !== 0;
+}
+
+async function clearCodexAppServerBindingsAfterDisabledNativeCompaction(
+  sessionFile: string,
+  options: { pluginConfig?: unknown } = {},
+): Promise<void> {
+  const appServer = resolveCodexAppServerRuntimeOptions({ pluginConfig: options.pluginConfig });
+  if (appServer.nativeCompaction) {
+    return;
+  }
+  await clearAllCodexAppServerBindings(sessionFile);
 }
 
 function mergeCompactionDetails(

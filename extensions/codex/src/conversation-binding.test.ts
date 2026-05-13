@@ -22,6 +22,10 @@ vi.mock("./app-server/shared-client.js", () => sharedClientMocks);
 vi.mock("openclaw/plugin-sdk/agent-runtime", () => agentRuntimeMocks);
 
 import {
+  readCodexAppServerBinding,
+  writeCodexAppServerBinding,
+} from "./app-server/session-binding.js";
+import {
   handleCodexConversationBindingResolved,
   handleCodexConversationInboundClaim,
   startCodexConversationThread,
@@ -217,6 +221,119 @@ describe("codex conversation binding", () => {
     );
 
     expect(result).toEqual({ handled: true });
+  });
+
+  it("runs bound turns through the persisted isolation key", async () => {
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    await writeCodexAppServerBinding(
+      sessionFile,
+      {
+        threadId: "thread-isolated",
+        cwd: tempDir,
+        authProfileId: "openai-codex:work",
+      },
+      { isolationKey: "agent:main:telegram:topic-42" },
+    );
+    let notificationHandler: ((notification: unknown) => void) | undefined;
+    const requests: Array<{ method: string; params: Record<string, unknown> }> = [];
+    sharedClientMocks.getSharedCodexAppServerClient.mockResolvedValue({
+      request: vi.fn(async (method: string, requestParams: Record<string, unknown>) => {
+        requests.push({ method, params: requestParams });
+        if (method === "turn/start") {
+          setImmediate(() =>
+            notificationHandler?.({
+              method: "turn/completed",
+              params: {
+                threadId: "thread-isolated",
+                turn: {
+                  id: "turn-1",
+                  status: "completed",
+                  items: [{ type: "agentMessage", id: "item-1", text: "isolated done" }],
+                },
+              },
+            }),
+          );
+          return { turn: { id: "turn-1" } };
+        }
+        throw new Error(`unexpected method: ${method}`);
+      }),
+      addNotificationHandler: vi.fn((handler: (notification: unknown) => void) => {
+        notificationHandler = handler;
+        return () => undefined;
+      }),
+      addRequestHandler: vi.fn(() => () => undefined),
+    });
+
+    const result = await handleCodexConversationInboundClaim(
+      {
+        content: "run this",
+        bodyForAgent: "run this",
+        channel: "telegram",
+        isGroup: false,
+        commandAuthorized: true,
+      },
+      {
+        channelId: "telegram",
+        pluginBinding: {
+          bindingId: "binding-1",
+          pluginId: "codex",
+          pluginRoot: tempDir,
+          channel: "telegram",
+          accountId: "default",
+          conversationId: "5185575566",
+          boundAt: Date.now(),
+          data: {
+            kind: "codex-app-server-session",
+            version: 1,
+            sessionFile,
+            workspaceDir: tempDir,
+            isolationKey: "agent:main:telegram:topic-42",
+          },
+        },
+      },
+      { timeoutMs: 500 },
+    );
+
+    expect(result).toEqual({ handled: true, reply: { text: "isolated done" } });
+    expect(sharedClientMocks.getSharedCodexAppServerClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authProfileId: "openai-codex:work",
+        isolationKey: "agent:main:telegram:topic-42",
+      }),
+    );
+    expect(requests[0]?.params.threadId).toBe("thread-isolated");
+  });
+
+  it("clears the isolated sidecar when an isolated pending bind is denied", async () => {
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    await writeCodexAppServerBinding(
+      sessionFile,
+      { threadId: "thread-isolated", cwd: tempDir },
+      { isolationKey: "agent:main:telegram:topic-42" },
+    );
+
+    await handleCodexConversationBindingResolved({
+      status: "denied",
+      decision: "deny",
+      request: {
+        data: {
+          kind: "codex-app-server-session",
+          version: 1,
+          sessionFile,
+          workspaceDir: tempDir,
+          isolationKey: "agent:main:telegram:topic-42",
+        },
+        conversation: {
+          channel: "discord",
+          accountId: "default",
+          conversationId: "channel:1",
+        },
+      },
+    });
+
+    await expect(
+      readCodexAppServerBinding(sessionFile, { isolationKey: "agent:main:telegram:topic-42" }),
+    ).resolves.toBeUndefined();
   });
 
   it("recreates a missing bound thread and preserves auth plus turn overrides", async () => {

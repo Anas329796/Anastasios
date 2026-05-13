@@ -38,7 +38,9 @@ vi.mock("openclaw/plugin-sdk/agent-runtime", () => ({
 let listCodexAppServerModels: typeof import("./models.js").listCodexAppServerModels;
 let clearSharedCodexAppServerClient: typeof import("./shared-client.js").clearSharedCodexAppServerClient;
 let clearSharedCodexAppServerClientIfCurrent: typeof import("./shared-client.js").clearSharedCodexAppServerClientIfCurrent;
+let clearSharedCodexAppServerClientForIsolationKey: typeof import("./shared-client.js").clearSharedCodexAppServerClientForIsolationKey;
 let createIsolatedCodexAppServerClient: typeof import("./shared-client.js").createIsolatedCodexAppServerClient;
+let getSharedCodexAppServerClient: typeof import("./shared-client.js").getSharedCodexAppServerClient;
 let resetSharedCodexAppServerClientForTests: typeof import("./shared-client.js").resetSharedCodexAppServerClientForTests;
 
 async function sendInitializeResult(
@@ -62,7 +64,9 @@ describe("shared Codex app-server client", () => {
     ({
       clearSharedCodexAppServerClient,
       clearSharedCodexAppServerClientIfCurrent,
+      clearSharedCodexAppServerClientForIsolationKey,
       createIsolatedCodexAppServerClient,
+      getSharedCodexAppServerClient,
       resetSharedCodexAppServerClientForTests,
     } = await import("./shared-client.js"));
   });
@@ -334,6 +338,64 @@ describe("shared Codex app-server client", () => {
     expect(second.process.kill).not.toHaveBeenCalled();
     expect(clearSharedCodexAppServerClientIfCurrent(second.client)).toBe(true);
     expect(second.process.stdin.destroyed).toBe(true);
+  });
+
+  it("keeps distinct shared clients alive for distinct isolation keys", async () => {
+    const first = createClientHarness();
+    const second = createClientHarness();
+    const startSpy = vi
+      .spyOn(CodexAppServerClient, "start")
+      .mockReturnValueOnce(first.client)
+      .mockReturnValueOnce(second.client);
+    const getShared = getSharedCodexAppServerClient as (
+      options?: Parameters<typeof getSharedCodexAppServerClient>[0] & { isolationKey?: string },
+    ) => ReturnType<typeof getSharedCodexAppServerClient>;
+
+    const firstClientPromise = getShared({ timeoutMs: 1000, isolationKey: "topic-a" });
+    await sendInitializeResult(first, "openclaw/0.125.0 (macOS; test)");
+    const firstClient = await firstClientPromise;
+
+    const secondClientPromise = getShared({ timeoutMs: 1000, isolationKey: "topic-b" });
+    await sendInitializeResult(second, "openclaw/0.125.0 (macOS; test)");
+    const secondClient = await secondClientPromise;
+
+    expect(firstClient).toBe(first.client);
+    expect(secondClient).toBe(second.client);
+    expect(startSpy).toHaveBeenCalledTimes(2);
+    expect(first.process.stdin.destroyed).toBe(false);
+    expect(second.process.stdin.destroyed).toBe(false);
+
+    await expect(getShared({ timeoutMs: 1000, isolationKey: "topic-a" })).resolves.toBe(
+      first.client,
+    );
+    expect(startSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("clears only the matching shared client isolation key", async () => {
+    const first = createClientHarness();
+    const second = createClientHarness();
+    vi.spyOn(CodexAppServerClient, "start")
+      .mockReturnValueOnce(first.client)
+      .mockReturnValueOnce(second.client);
+
+    const firstClientPromise = getSharedCodexAppServerClient({
+      timeoutMs: 1000,
+      isolationKey: "topic-a",
+    });
+    await sendInitializeResult(first, "openclaw/0.125.0 (macOS; test)");
+    await firstClientPromise;
+
+    const secondClientPromise = getSharedCodexAppServerClient({
+      timeoutMs: 1000,
+      isolationKey: "topic-b",
+    });
+    await sendInitializeResult(second, "openclaw/0.125.0 (macOS; test)");
+    await secondClientPromise;
+
+    expect(clearSharedCodexAppServerClientForIsolationKey("topic-a")).toBe(true);
+    expect(first.process.stdin.destroyed).toBe(true);
+    expect(second.process.stdin.destroyed).toBe(false);
+    expect(clearSharedCodexAppServerClientForIsolationKey("topic-a")).toBe(false);
   });
 
   it("uses a fresh websocket Authorization header after shared-client token rotation", async () => {

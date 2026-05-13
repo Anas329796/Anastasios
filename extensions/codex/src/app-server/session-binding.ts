@@ -1,4 +1,6 @@
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
+import path from "node:path";
 import { embeddedAgentLog } from "openclaw/plugin-sdk/agent-harness-runtime";
 import {
   ensureAuthProfileStore,
@@ -26,12 +28,14 @@ export type CodexAppServerAuthProfileLookup = {
   authProfileStore?: AuthProfileStore;
   agentDir?: string;
   config?: ProviderAuthAliasConfig;
+  isolationKey?: string;
 };
 
 export type CodexAppServerThreadBinding = {
   schemaVersion: 1;
   threadId: string;
   sessionFile: string;
+  isolationKey?: string;
   cwd: string;
   authProfileId?: string;
   model?: string;
@@ -47,15 +51,24 @@ export type CodexAppServerThreadBinding = {
   updatedAt: string;
 };
 
-export function resolveCodexAppServerBindingPath(sessionFile: string): string {
-  return `${sessionFile}.codex-app-server.json`;
+export function resolveCodexAppServerBindingPath(
+  sessionFile: string,
+  options: { isolationKey?: string } = {},
+): string {
+  const isolationKey = normalizeCodexAppServerBindingIsolationKey(options.isolationKey);
+  if (!isolationKey) {
+    return `${sessionFile}.codex-app-server.json`;
+  }
+  const digest = crypto.createHash("sha256").update(isolationKey).digest("hex").slice(0, 16);
+  return `${sessionFile}.codex-app-server.${digest}.json`;
 }
 
 export async function readCodexAppServerBinding(
   sessionFile: string,
   lookup: Omit<CodexAppServerAuthProfileLookup, "authProfileId"> = {},
 ): Promise<CodexAppServerThreadBinding | undefined> {
-  const path = resolveCodexAppServerBindingPath(sessionFile);
+  const isolationKey = normalizeCodexAppServerBindingIsolationKey(lookup.isolationKey);
+  const path = resolveCodexAppServerBindingPath(sessionFile, { isolationKey });
   let raw: string;
   try {
     raw = await fs.readFile(path, "utf8");
@@ -71,12 +84,20 @@ export async function readCodexAppServerBinding(
     if (parsed.schemaVersion !== 1 || typeof parsed.threadId !== "string") {
       return undefined;
     }
+    const parsedIsolationKey =
+      typeof parsed.isolationKey === "string" && parsed.isolationKey.trim()
+        ? parsed.isolationKey.trim()
+        : undefined;
+    if (parsedIsolationKey !== isolationKey) {
+      return undefined;
+    }
     const authProfileId =
       typeof parsed.authProfileId === "string" ? parsed.authProfileId : undefined;
     return {
       schemaVersion: 1,
       threadId: parsed.threadId,
       sessionFile,
+      isolationKey: parsedIsolationKey,
       cwd: typeof parsed.cwd === "string" ? parsed.cwd : "",
       authProfileId,
       model: typeof parsed.model === "string" ? parsed.model : undefined,
@@ -119,9 +140,13 @@ export async function writeCodexAppServerBinding(
   lookup: Omit<CodexAppServerAuthProfileLookup, "authProfileId"> = {},
 ): Promise<void> {
   const now = new Date().toISOString();
+  const isolationKey = normalizeCodexAppServerBindingIsolationKey(
+    lookup.isolationKey ?? binding.isolationKey,
+  );
   const payload: CodexAppServerThreadBinding = {
     schemaVersion: 1,
     sessionFile,
+    isolationKey,
     threadId: binding.threadId,
     cwd: binding.cwd,
     authProfileId: binding.authProfileId,
@@ -142,7 +167,7 @@ export async function writeCodexAppServerBinding(
     updatedAt: now,
   };
   await fs.writeFile(
-    resolveCodexAppServerBindingPath(sessionFile),
+    resolveCodexAppServerBindingPath(sessionFile, { isolationKey }),
     `${JSON.stringify(payload, null, 2)}\n`,
   );
 }
@@ -204,14 +229,62 @@ function readPluginAppPolicyContext(value: unknown): PluginAppPolicyContext | un
   };
 }
 
-export async function clearCodexAppServerBinding(sessionFile: string): Promise<void> {
+export async function clearCodexAppServerBinding(
+  sessionFile: string,
+  options: { isolationKey?: string } = {},
+): Promise<void> {
+  const isolationKey = normalizeCodexAppServerBindingIsolationKey(options.isolationKey);
   try {
-    await fs.unlink(resolveCodexAppServerBindingPath(sessionFile));
+    await fs.unlink(resolveCodexAppServerBindingPath(sessionFile, { isolationKey }));
   } catch (error) {
     if (!isNotFound(error)) {
       embeddedAgentLog.warn("failed to clear codex app-server binding", { sessionFile, error });
     }
   }
+}
+
+export async function clearAllCodexAppServerBindings(sessionFile: string): Promise<void> {
+  const dir = path.dirname(sessionFile);
+  const base = path.basename(sessionFile);
+  const prefix = `${base}.codex-app-server`;
+  let entries: string[];
+  try {
+    entries = await fs.readdir(dir);
+  } catch (error) {
+    if (isNotFound(error)) {
+      return;
+    }
+    embeddedAgentLog.warn("failed to list codex app-server binding directory", {
+      sessionFile,
+      error,
+    });
+    return;
+  }
+  await Promise.all(
+    entries
+      .filter(
+        (entry) =>
+          entry === `${prefix}.json` || (entry.startsWith(`${prefix}.`) && entry.endsWith(".json")),
+      )
+      .map((entry) => unlinkCodexAppServerBindingPath(path.join(dir, entry), sessionFile)),
+  );
+}
+
+async function unlinkCodexAppServerBindingPath(
+  bindingPath: string,
+  sessionFile: string,
+): Promise<void> {
+  try {
+    await fs.unlink(bindingPath);
+  } catch (error) {
+    if (!isNotFound(error)) {
+      embeddedAgentLog.warn("failed to clear codex app-server binding", { sessionFile, error });
+    }
+  }
+}
+
+function normalizeCodexAppServerBindingIsolationKey(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function isNotFound(error: unknown): boolean {

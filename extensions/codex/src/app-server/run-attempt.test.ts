@@ -189,7 +189,11 @@ function userMessage(text: string, timestamp: number) {
 function createAppServerHarness(
   requestImpl: (method: string, params: unknown) => Promise<unknown>,
   options: {
-    onStart?: (authProfileId: string | undefined, agentDir: string | undefined) => void;
+    onStart?: (
+      authProfileId: string | undefined,
+      agentDir: string | undefined,
+      isolationKey: string | undefined,
+    ) => void;
   } = {},
 ) {
   const requests: Array<{ method: string; params: unknown }> = [];
@@ -201,8 +205,8 @@ function createAppServerHarness(
   });
 
   __testing.setCodexAppServerClientFactoryForTests(
-    async (_startOptions, authProfileId, agentDir) => {
-      options.onStart?.(authProfileId, agentDir);
+    async (_startOptions, authProfileId, agentDir, _config, isolationKey) => {
+      options.onStart?.(authProfileId, agentDir, isolationKey);
       return {
         request,
         addNotificationHandler: (handler: typeof notify) => {
@@ -267,7 +271,11 @@ function createAppServerHarness(
 function createStartedThreadHarness(
   requestImpl: (method: string, params: unknown) => Promise<unknown> = async () => undefined,
   options: {
-    onStart?: (authProfileId: string | undefined, agentDir: string | undefined) => void;
+    onStart?: (
+      authProfileId: string | undefined,
+      agentDir: string | undefined,
+      isolationKey: string | undefined,
+    ) => void;
   } = {},
 ) {
   return createAppServerHarness(async (method, params) => {
@@ -334,6 +342,9 @@ function createThreadLifecycleAppServerOptions(): Parameters<
     },
     requestTimeoutMs: 60_000,
     turnCompletionIdleTimeoutMs: 60_000,
+    turnTerminalIdleTimeoutMs: 180_000,
+    clientIsolation: "agent",
+    nativeCompaction: true,
     approvalPolicy: "never",
     approvalsReviewer: "user",
     sandbox: "workspace-write",
@@ -1601,6 +1612,93 @@ describe("runCodexAppServerAttempt", () => {
       { interval: 1 },
     );
     expect(queueActiveRunMessageForTest("session-1", "after silent turn")).toBe(false);
+  });
+
+  it("uses the configured terminal idle timeout for silent accepted turns", async () => {
+    const harness = createStartedThreadHarness();
+    const params = createParams(
+      path.join(tempDir, "session.jsonl"),
+      path.join(tempDir, "workspace"),
+    );
+    params.timeoutMs = 50;
+
+    const run = runCodexAppServerAttempt(params, {
+      pluginConfig: { appServer: { turnTerminalIdleTimeoutMs: 5 } },
+    });
+    await harness.waitForMethod("turn/start");
+
+    const result = await run;
+    expect(result.aborted).toBe(true);
+    expect(result.timedOut).toBe(true);
+    expect(result.promptError).toBe(
+      "codex app-server turn idle timed out waiting for turn/completed",
+    );
+  });
+
+  it("passes the session key as the app-server client isolation key when configured", async () => {
+    let seenIsolationKey: string | undefined;
+    const harness = createStartedThreadHarness(undefined, {
+      onStart: (_authProfileId, _agentDir, isolationKey) => {
+        seenIsolationKey = isolationKey;
+      },
+    });
+    const params = createParams(
+      path.join(tempDir, "session.jsonl"),
+      path.join(tempDir, "workspace"),
+    );
+    params.sessionKey = "agent:main:topic-42";
+
+    const run = runCodexAppServerAttempt(params, {
+      pluginConfig: { appServer: { clientIsolation: "session" } },
+    });
+    await harness.waitForMethod("turn/start");
+    await harness.completeTurn({ threadId: "thread-1", turnId: "turn-1" });
+    await run;
+
+    expect(seenIsolationKey).toBe("agent:main:topic-42");
+    await expect(readCodexAppServerBinding(params.sessionFile)).resolves.toBeUndefined();
+    await expect(
+      readCodexAppServerBinding(params.sessionFile, { isolationKey: "agent:main:topic-42" }),
+    ).resolves.toMatchObject({
+      threadId: "thread-1",
+      isolationKey: "agent:main:topic-42",
+    });
+  });
+
+  it("does not reuse a native thread binding from another session isolation key", async () => {
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    const workspaceDir = path.join(tempDir, "workspace");
+    await writeCodexAppServerBinding(
+      sessionFile,
+      {
+        threadId: "thread-topic-a",
+        cwd: workspaceDir,
+      },
+      { isolationKey: "agent:main:topic-a" },
+    );
+    const harness = createStartedThreadHarness(async (method) => {
+      if (method === "thread/start") {
+        return threadStartResult("thread-topic-b");
+      }
+      return undefined;
+    });
+    const params = createParams(sessionFile, workspaceDir);
+    params.sessionKey = "agent:main:topic-b";
+
+    const run = runCodexAppServerAttempt(params, {
+      pluginConfig: { appServer: { clientIsolation: "session" } },
+    });
+    await harness.waitForMethod("turn/start");
+    await harness.completeTurn({ threadId: "thread-topic-b", turnId: "turn-1" });
+    await run;
+
+    expect(harness.requests.some((entry) => entry.method === "thread/resume")).toBe(false);
+    await expect(
+      readCodexAppServerBinding(sessionFile, { isolationKey: "agent:main:topic-a" }),
+    ).resolves.toMatchObject({ threadId: "thread-topic-a" });
+    await expect(
+      readCodexAppServerBinding(sessionFile, { isolationKey: "agent:main:topic-b" }),
+    ).resolves.toMatchObject({ threadId: "thread-topic-b" });
   });
 
   it("applies before_prompt_build to Codex developer instructions and turn input", async () => {
@@ -4699,6 +4797,9 @@ describe("runCodexAppServerAttempt", () => {
       },
       requestTimeoutMs: 60_000,
       turnCompletionIdleTimeoutMs: 5,
+      turnTerminalIdleTimeoutMs: 180_000,
+      clientIsolation: "agent",
+      nativeCompaction: true,
       approvalPolicy: "never",
       approvalsReviewer: "user",
       sandbox: "workspace-write",
@@ -4714,6 +4815,9 @@ describe("runCodexAppServerAttempt", () => {
       },
       requestTimeoutMs: 60_000,
       turnCompletionIdleTimeoutMs: 5,
+      turnTerminalIdleTimeoutMs: 180_000,
+      clientIsolation: "agent",
+      nativeCompaction: true,
       approvalPolicy: "never",
       approvalsReviewer: "user",
       sandbox: "workspace-write",
@@ -4737,6 +4841,9 @@ describe("runCodexAppServerAttempt", () => {
       },
       requestTimeoutMs: 60_000,
       turnCompletionIdleTimeoutMs: 60_000,
+      turnTerminalIdleTimeoutMs: 180_000,
+      clientIsolation: "agent" as const,
+      nativeCompaction: true,
       approvalPolicy: "on-request" as const,
       approvalsReviewer: "guardian_subagent" as const,
       sandbox: "danger-full-access" as const,
@@ -4834,6 +4941,9 @@ describe("runCodexAppServerAttempt", () => {
         },
         requestTimeoutMs: 60_000,
         turnCompletionIdleTimeoutMs: 60_000,
+        turnTerminalIdleTimeoutMs: 180_000,
+        clientIsolation: "agent",
+        nativeCompaction: true,
         approvalPolicy: "never",
         approvalsReviewer: "user",
         sandbox: "workspace-write",

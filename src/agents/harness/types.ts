@@ -22,6 +22,7 @@ export type AgentHarnessSideQuestionParams = {
   sessionEntry: import("../../config/sessions.js").SessionEntry;
   sessionStore?: Record<string, import("../../config/sessions.js").SessionEntry>;
   sessionKey?: string;
+  sandboxSessionKey?: string;
   storePath?: string;
   resolvedThinkLevel?: import("../../auto-reply/thinking.js").ThinkLevel;
   resolvedReasoningLevel: import("../../auto-reply/thinking.js").ReasoningLevel;
@@ -46,6 +47,7 @@ export type AgentHarnessCompactResult =
 export type AgentHarnessResetParams = {
   sessionId?: string;
   sessionKey?: string;
+  sandboxSessionKey?: string;
   sessionFile?: string;
   reason?: "new" | "reset" | "idle" | "daily" | "compaction" | "deleted" | "unknown";
 };

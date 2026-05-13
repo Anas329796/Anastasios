@@ -16,6 +16,7 @@ import { resolveReplyDirectives } from "./get-reply-directives.js";
 import { initFastReplySessionState } from "./get-reply-fast-path.js";
 import { handleInlineActions } from "./get-reply-inline-actions.js";
 import { stripStructuralPrefixes } from "./mentions.js";
+import { resolveRuntimePolicySessionKey } from "./runtime-policy-session-key.js";
 import type { createTypingController } from "./typing.js";
 
 type AgentDefaults = NonNullable<NonNullable<OpenClawConfig["agents"]>["defaults"]> | undefined;
@@ -99,6 +100,11 @@ export async function maybeResolveNativeSlashCommandFastReply(params: {
     triggerBodyNormalized: sessionState.triggerBodyNormalized,
     commandAuthorized: params.commandAuthorized,
   });
+  const runtimePolicySessionKey = resolveRuntimePolicySessionKey({
+    cfg: params.cfg,
+    ctx: sessionState.sessionCtx,
+    sessionKey: sessionState.sessionKey,
+  });
   if (command.commandBodyNormalized === "/status") {
     const targetSessionEntry =
       sessionState.sessionStore[sessionState.sessionKey] ?? sessionState.sessionEntry;
@@ -157,6 +163,7 @@ export async function maybeResolveNativeSlashCommandFastReply(params: {
     previousSessionEntry: sessionState.previousSessionEntry,
     sessionStore: sessionState.sessionStore,
     sessionKey: sessionState.sessionKey,
+    runtimePolicySessionKey,
     storePath: sessionState.storePath,
     sessionScope: sessionState.sessionScope,
     workspaceDir: params.workspaceDir,
@@ -222,6 +229,7 @@ export async function maybeResolveNativeSlashCommandFastReply(params: {
     previousSessionEntry: sessionState.previousSessionEntry,
     sessionStore: sessionState.sessionStore,
     sessionKey: sessionState.sessionKey,
+    runtimePolicySessionKey,
     storePath: sessionState.storePath,
     sessionScope: sessionState.sessionScope,
     workspaceDir: params.workspaceDir,

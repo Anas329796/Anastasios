@@ -8,17 +8,21 @@ export type CodexConversationBindingData = {
   version: 1;
   sessionFile: string;
   workspaceDir: string;
+  isolationKey?: string;
 };
 
 export function createCodexConversationBindingData(params: {
   sessionFile: string;
   workspaceDir: string;
+  isolationKey?: string;
 }): CodexConversationBindingData {
+  const isolationKey = params.isolationKey?.trim() || undefined;
   return {
     kind: "codex-app-server-session",
     version: BINDING_DATA_VERSION,
     sessionFile: params.sessionFile,
     workspaceDir: params.workspaceDir,
+    ...(isolationKey ? { isolationKey } : {}),
   };
 }
 
@@ -51,6 +55,9 @@ export function readCodexConversationBindingDataRecord(
       typeof data.workspaceDir === "string" && data.workspaceDir.trim()
         ? data.workspaceDir
         : process.cwd(),
+    ...(typeof data.isolationKey === "string" && data.isolationKey.trim()
+      ? { isolationKey: data.isolationKey.trim() }
+      : {}),
   };
 }
 

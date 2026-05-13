@@ -11,6 +11,7 @@ export type CodexAppServerClientFactory = (
   authProfileId?: string,
   agentDir?: string,
   config?: AuthProfileOrderConfig,
+  isolationKey?: string,
 ) => Promise<CodexAppServerClient>;
 
 export const defaultCodexAppServerClientFactory: CodexAppServerClientFactory = (
@@ -18,9 +19,10 @@ export const defaultCodexAppServerClientFactory: CodexAppServerClientFactory = (
   authProfileId,
   agentDir,
   config,
+  isolationKey,
 ) =>
   import("./shared-client.js").then(({ getSharedCodexAppServerClient }) =>
-    getSharedCodexAppServerClient({ startOptions, authProfileId, agentDir, config }),
+    getSharedCodexAppServerClient({ startOptions, authProfileId, agentDir, config, isolationKey }),
   );
 
 export function createCodexAppServerClientFactoryTestHooks(

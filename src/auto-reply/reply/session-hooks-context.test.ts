@@ -213,6 +213,36 @@ describe("session hook context wiring", () => {
     expectFields(startContext, { sessionId: startEvent?.sessionId });
   });
 
+  it("passes the runtime-policy session key to agent harness reset hooks", async () => {
+    const sessionKey = "agent:main:main";
+    const { storePath } = await createStoredSession({
+      prefix: "openclaw-session-hook-runtime-policy-reset",
+      sessionKey,
+      sessionId: "old-session",
+    });
+    const cfg = { session: { store: storePath } } as OpenClawConfig;
+
+    await initSessionState({
+      ctx: {
+        Body: "/new",
+        SessionKey: sessionKey,
+        ChatType: "direct",
+        Provider: "telegram",
+        AccountId: "default",
+        SenderId: "12345",
+      },
+      cfg,
+      commandAuthorized: true,
+    });
+
+    expect(sessionCleanupMocks.resetRegisteredAgentHarnessSessions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionKey,
+        sandboxSessionKey: "agent:main:telegram:default:direct:12345",
+      }),
+    );
+  });
+
   it("marks explicit /reset rollovers with reason reset", async () => {
     const sessionKey = "agent:main:telegram:direct:456";
     const { storePath } = await createStoredSession({

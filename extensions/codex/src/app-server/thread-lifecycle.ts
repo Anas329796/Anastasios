@@ -60,10 +60,15 @@ export async function startOrResumeThread(params: {
   pluginThreadConfig?: CodexPluginThreadConfigProvider;
 }): Promise<CodexAppServerThreadBinding> {
   const dynamicToolsFingerprint = fingerprintDynamicTools(params.dynamicTools);
+  const bindingIsolationKey = resolveCodexAppServerThreadBindingIsolationKey(
+    params.appServer,
+    params.params,
+  );
   let binding = await readCodexAppServerBinding(params.params.sessionFile, {
     authProfileStore: params.params.authProfileStore,
     agentDir: params.params.agentDir,
     config: params.params.config,
+    isolationKey: bindingIsolationKey,
   });
   let preserveExistingBinding = false;
   let prebuiltPluginThreadConfig: CodexPluginThreadConfig | undefined;
@@ -97,7 +102,9 @@ export async function startOrResumeThread(params: {
       embeddedAgentLog.debug("codex app-server plugin app config changed; starting a new thread", {
         threadId: binding.threadId,
       });
-      await clearCodexAppServerBinding(params.params.sessionFile);
+      await clearCodexAppServerBinding(params.params.sessionFile, {
+        isolationKey: bindingIsolationKey,
+      });
       binding = undefined;
     }
   }
@@ -129,7 +136,9 @@ export async function startOrResumeThread(params: {
             threadId: binding.threadId,
           },
         );
-        await clearCodexAppServerBinding(params.params.sessionFile);
+        await clearCodexAppServerBinding(params.params.sessionFile, {
+          isolationKey: bindingIsolationKey,
+        });
       }
     } else {
       try {
@@ -158,6 +167,7 @@ export async function startOrResumeThread(params: {
           params.params.sessionFile,
           {
             threadId: response.thread.id,
+            isolationKey: bindingIsolationKey,
             cwd: params.cwd,
             authProfileId: boundAuthProfileId,
             model: params.params.modelId,
@@ -172,11 +182,13 @@ export async function startOrResumeThread(params: {
             authProfileStore: params.params.authProfileStore,
             agentDir: params.params.agentDir,
             config: params.params.config,
+            isolationKey: bindingIsolationKey,
           },
         );
         return {
           ...binding,
           threadId: response.thread.id,
+          isolationKey: bindingIsolationKey,
           cwd: params.cwd,
           authProfileId: boundAuthProfileId,
           model: params.params.modelId,
@@ -193,7 +205,9 @@ export async function startOrResumeThread(params: {
         embeddedAgentLog.warn("codex app-server thread resume failed; starting a new thread", {
           error,
         });
-        await clearCodexAppServerBinding(params.params.sessionFile);
+        await clearCodexAppServerBinding(params.params.sessionFile, {
+          isolationKey: bindingIsolationKey,
+        });
       }
     }
   }
@@ -227,6 +241,7 @@ export async function startOrResumeThread(params: {
       params.params.sessionFile,
       {
         threadId: response.thread.id,
+        isolationKey: bindingIsolationKey,
         cwd: params.cwd,
         authProfileId: params.params.authProfileId,
         model: response.model ?? params.params.modelId,
@@ -241,6 +256,7 @@ export async function startOrResumeThread(params: {
         authProfileStore: params.params.authProfileStore,
         agentDir: params.params.agentDir,
         config: params.params.config,
+        isolationKey: bindingIsolationKey,
       },
     );
   }
@@ -248,6 +264,7 @@ export async function startOrResumeThread(params: {
     schemaVersion: 1,
     threadId: response.thread.id,
     sessionFile: params.params.sessionFile,
+    isolationKey: bindingIsolationKey,
     cwd: params.cwd,
     authProfileId: params.params.authProfileId,
     model: response.model ?? params.params.modelId,
@@ -259,6 +276,16 @@ export async function startOrResumeThread(params: {
     createdAt,
     updatedAt: createdAt,
   };
+}
+
+function resolveCodexAppServerThreadBindingIsolationKey(
+  appServer: CodexAppServerRuntimeOptions,
+  params: EmbeddedRunAttemptParams,
+): string | undefined {
+  if (appServer.clientIsolation !== "session") {
+    return undefined;
+  }
+  return params.sessionKey?.trim() || params.sessionId;
 }
 
 function shouldRecheckRecoverablePluginBinding(params: {

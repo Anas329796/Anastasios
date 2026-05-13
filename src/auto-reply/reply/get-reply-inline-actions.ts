@@ -34,6 +34,7 @@ import { extractExplicitGroupId } from "./group-id.js";
 import { stripMentions, stripStructuralPrefixes } from "./mentions.js";
 import type { createModelSelectionState } from "./model-selection.js";
 import { extractInlineSimpleCommand } from "./reply-inline.js";
+import { resolveRuntimePolicySessionKey } from "./runtime-policy-session-key.js";
 import type { TypingController } from "./typing.js";
 
 type SkillCommandsRuntime = typeof import("../skill-commands.runtime.js");
@@ -170,6 +171,7 @@ export async function handleInlineActions(params: {
   previousSessionEntry?: SessionEntry;
   sessionStore?: Record<string, SessionEntry>;
   sessionKey: string;
+  runtimePolicySessionKey?: string;
   storePath?: string;
   sessionScope: Parameters<typeof buildStatusReply>[0]["sessionScope"];
   workspaceDir: string;
@@ -212,6 +214,7 @@ export async function handleInlineActions(params: {
     previousSessionEntry,
     sessionStore,
     sessionKey,
+    runtimePolicySessionKey,
     storePath,
     sessionScope,
     workspaceDir,
@@ -466,6 +469,9 @@ export async function handleInlineActions(params: {
       previousSessionEntry,
       sessionStore,
       sessionKey,
+      runtimePolicySessionKey:
+        runtimePolicySessionKey ??
+        resolveRuntimePolicySessionKey({ cfg, ctx: sessionCtx, sessionKey }),
       storePath,
       sessionScope,
       workspaceDir,

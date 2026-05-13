@@ -84,6 +84,7 @@ import {
   getSessionCompactionCheckpoint,
   listSessionCompactionCheckpoints,
 } from "../session-compaction-checkpoints.js";
+import { resolveGatewaySessionRuntimePolicySessionKey } from "../session-runtime-policy-session-key.js";
 import { reactivateCompletedSubagentSession } from "../session-subagent-reactivation.js";
 import {
   archiveFileOnDisk,
@@ -2052,6 +2053,11 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       const result = await compactEmbeddedPiSession({
         sessionId,
         sessionKey: target.canonicalKey,
+        sandboxSessionKey: resolveGatewaySessionRuntimePolicySessionKey({
+          cfg,
+          sessionKey: target.canonicalKey,
+          entry,
+        }),
         allowGatewaySubagentBinding: true,
         sessionFile: filePath,
         workspaceDir,

@@ -459,6 +459,8 @@ export async function runCodexAppServerAttempt(
   await fs.mkdir(resolvedWorkspace, { recursive: true });
   const sandboxSessionKey =
     params.sandboxSessionKey?.trim() || params.sessionKey?.trim() || params.sessionId;
+  const appServerClientIsolationKey =
+    appServer.clientIsolation === "session" ? sandboxSessionKey : undefined;
   const sandbox = await resolveSandboxContext({
     config: params.config,
     sessionKey: sandboxSessionKey,
@@ -487,7 +489,9 @@ export async function runCodexAppServerAttempt(
     agentId: params.agentId,
   });
   const agentDir = params.agentDir ?? resolveAgentDir(params.config ?? {}, sessionAgentId);
-  const startupBinding = await readCodexAppServerBinding(params.sessionFile);
+  const startupBinding = await readCodexAppServerBinding(params.sessionFile, {
+    isolationKey: appServerClientIsolationKey,
+  });
   const startupAuthProfileCandidate =
     params.runtimePlan?.auth.forwardedAuthProfileId ??
     params.authProfileId ??
@@ -748,6 +752,7 @@ export async function runCodexAppServerAttempt(
             startupAuthProfileId,
             agentDir,
             params.config,
+            appServerClientIsolationKey,
           );
           attemptedClient = startupClient;
           startupClientForCleanup = startupClient;
@@ -879,7 +884,7 @@ export async function runCodexAppServerAttempt(
     options.turnCompletionIdleTimeoutMs ?? appServer.turnCompletionIdleTimeoutMs,
   );
   const turnTerminalIdleTimeoutMs = resolveCodexTurnTerminalIdleTimeoutMs(
-    options.turnTerminalIdleTimeoutMs,
+    options.turnTerminalIdleTimeoutMs ?? appServer.turnTerminalIdleTimeoutMs,
   );
   let turnCompletionIdleTimer: ReturnType<typeof setTimeout> | undefined;
   let turnCompletionIdleWatchArmed = false;

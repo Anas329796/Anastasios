@@ -1,10 +1,36 @@
 import fs from "node:fs";
+import fsp from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { createTestPluginApi } from "openclaw/plugin-sdk/plugin-test-api";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCodexAppServerAgentHarness } from "./harness.js";
 import plugin from "./index.js";
+import { CodexAppServerClient } from "./src/app-server/client.js";
+import {
+  readCodexAppServerBinding,
+  writeCodexAppServerBinding,
+} from "./src/app-server/session-binding.js";
+import {
+  clearSharedCodexAppServerClient,
+  getSharedCodexAppServerClient,
+  resetSharedCodexAppServerClientForTests,
+} from "./src/app-server/shared-client.js";
+import { createClientHarness } from "./src/app-server/test-support.js";
+
+async function sendInitializeResult(harness: ReturnType<typeof createClientHarness>) {
+  await vi.waitFor(() => expect(harness.writes.length).toBeGreaterThanOrEqual(1));
+  const initialize = JSON.parse(harness.writes[0] ?? "{}") as { id?: number };
+  harness.send({ id: initialize.id, result: { userAgent: "openclaw/0.125.0 (test)" } });
+}
 
 describe("codex plugin", () => {
+  afterEach(() => {
+    clearSharedCodexAppServerClient();
+    resetSharedCodexAppServerClientForTests();
+    vi.restoreAllMocks();
+  });
+
   it("is opt-in by default", () => {
     const manifest = JSON.parse(
       fs.readFileSync(new URL("./openclaw.plugin.json", import.meta.url), "utf8"),
@@ -101,6 +127,13 @@ describe("codex plugin", () => {
     expect(registerProvider.mock.calls[0]?.[0].id).toBe("codex");
   });
 
+  it("keeps compaction runtime code behind the lazy harness boundary", () => {
+    const source = fs.readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+
+    expect(source).not.toContain('from "./src/app-server/compact.js"');
+    expect(source).toContain('import("./src/app-server/compact.js")');
+  });
+
   it("only claims the codex provider by default", () => {
     const harness = createCodexAppServerAgentHarness();
 
@@ -115,5 +148,84 @@ describe("codex plugin", () => {
       requestedRuntime: "auto",
     });
     expect(unsupported.supported).toBe(false);
+  });
+
+  it("clears session-isolated app-server clients when the harness resets a session", async () => {
+    const first = createClientHarness();
+    const second = createClientHarness();
+    vi.spyOn(CodexAppServerClient, "start")
+      .mockReturnValueOnce(first.client)
+      .mockReturnValueOnce(second.client);
+    const startOptions = {
+      transport: "stdio" as const,
+      command: "codex",
+      commandSource: "config" as const,
+      args: ["app-server", "--listen", "stdio://"],
+      headers: {},
+    };
+
+    const firstClientPromise = getSharedCodexAppServerClient({
+      startOptions,
+      timeoutMs: 1000,
+      isolationKey: "agent:main:telegram:default:direct:12345",
+    });
+    await sendInitializeResult(first);
+    await firstClientPromise;
+
+    const secondClientPromise = getSharedCodexAppServerClient({
+      startOptions,
+      timeoutMs: 1000,
+      isolationKey: "agent:main:topic-b",
+    });
+    await sendInitializeResult(second);
+    await secondClientPromise;
+
+    const harness = createCodexAppServerAgentHarness({
+      pluginConfig: { appServer: { clientIsolation: "session" } },
+    });
+    await harness.reset?.({
+      sessionKey: "agent:main:main",
+      sandboxSessionKey: "agent:main:telegram:default:direct:12345",
+      sessionId: "session-a",
+    });
+
+    expect(first.process.stdin.destroyed).toBe(true);
+    expect(second.process.stdin.destroyed).toBe(false);
+  });
+
+  it("clears every app-server binding beside the reset session file", async () => {
+    const tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), "openclaw-codex-harness-"));
+    try {
+      const sessionFile = path.join(tempDir, "session.jsonl");
+      await writeCodexAppServerBinding(sessionFile, {
+        threadId: "thread-default",
+        cwd: tempDir,
+      });
+      await writeCodexAppServerBinding(
+        sessionFile,
+        {
+          threadId: "thread-topic-a",
+          cwd: tempDir,
+        },
+        { isolationKey: "agent:main:topic-a" },
+      );
+
+      const harness = createCodexAppServerAgentHarness({
+        pluginConfig: { appServer: { clientIsolation: "session" } },
+      });
+      await harness.reset?.({
+        sessionKey: "agent:main:main",
+        sandboxSessionKey: "agent:main:topic-a",
+        sessionId: "session-a",
+        sessionFile,
+      });
+
+      await expect(readCodexAppServerBinding(sessionFile)).resolves.toBeUndefined();
+      await expect(
+        readCodexAppServerBinding(sessionFile, { isolationKey: "agent:main:topic-a" }),
+      ).resolves.toBeUndefined();
+    } finally {
+      await fsp.rm(tempDir, { recursive: true, force: true });
+    }
   });
 });
