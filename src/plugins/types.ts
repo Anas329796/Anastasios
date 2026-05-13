@@ -2425,6 +2425,7 @@ export type MigrationProviderContext = {
   source?: string;
   includeSecrets?: boolean;
   overwrite?: boolean;
+  providerOptions?: Record<string, unknown>;
   backupPath?: string;
   reportDir?: string;
   signal?: AbortSignal;
