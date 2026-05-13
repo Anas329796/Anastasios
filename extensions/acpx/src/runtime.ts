@@ -1,5 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { resolve as resolvePath } from "node:path";
+import fs from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname, join, relative, resolve as resolvePath } from "node:path";
 import {
   ACPX_BACKEND_ID,
   AcpxRuntime as BaseAcpxRuntime,
@@ -37,6 +39,9 @@ type OpenClawAcpxRuntimeOptions = AcpRuntimeOptions & {
   openclawWrapperRoot?: string;
   openclawGatewayInstanceId?: string;
   openclawProcessLeaseStore?: AcpxProcessLeaseStore;
+  // Override the trusted base directory for event_log.active_path validation.
+  // Defaults to ~/.acpx/sessions. Override in tests to scope to a tmp dir.
+  openclawEventLogTrustedBase?: string;
 };
 type AcpxRuntimeTestOptions = Record<string, unknown> & {
   openclawProcessCleanup?: AcpxProcessCleanupDeps;
@@ -110,6 +115,18 @@ function readOpenClawLeaseIdFromRecord(record: AcpLoadedSessionRecord): string |
   }
   const { openclawLeaseId } = record as { openclawLeaseId?: unknown };
   return typeof openclawLeaseId === "string" ? openclawLeaseId.trim() || undefined : undefined;
+}
+
+function readEventLogActivePathFromRecord(record: AcpLoadedSessionRecord): string | undefined {
+  if (typeof record !== "object" || record === null) {
+    return undefined;
+  }
+  const { eventLog } = record as { eventLog?: unknown };
+  if (typeof eventLog !== "object" || eventLog === null) {
+    return undefined;
+  }
+  const { active_path } = eventLog as { active_path?: unknown };
+  return typeof active_path === "string" ? active_path.trim() || undefined : undefined;
 }
 
 function extractGeneratedWrapperPath(command: string | undefined): string {
@@ -604,6 +621,7 @@ export class AcpxRuntime implements AcpRuntime {
   private readonly processLeaseStore: AcpxProcessLeaseStore | undefined;
   private readonly launchLeaseScope = new AsyncLocalStorage<AcpxLaunchLeaseContext | undefined>();
   private readonly cwd: string;
+  private readonly eventLogTrustedBase: string;
 
   constructor(options: OpenClawAcpxRuntimeOptions, testOptions?: AcpxRuntimeTestOptions) {
     const { openclawProcessCleanup, ...delegateTestOptions } = testOptions ?? {};
@@ -612,6 +630,8 @@ export class AcpxRuntime implements AcpRuntime {
     this.gatewayInstanceId = options.openclawGatewayInstanceId;
     this.processLeaseStore = options.openclawProcessLeaseStore;
     this.cwd = options.cwd;
+    this.eventLogTrustedBase =
+      options.openclawEventLogTrustedBase ?? join(homedir(), ".acpx", "sessions");
     this.sessionStore = createResetAwareSessionStore(options.sessionStore, {
       gatewayInstanceId: this.gatewayInstanceId,
       leaseStore: this.processLeaseStore,
@@ -892,7 +912,71 @@ export class AcpxRuntime implements AcpRuntime {
   }
 
   async *runTurn(input: Parameters<AcpRuntime["runTurn"]>[0]): AsyncIterable<AcpRuntimeEvent> {
-    yield* (await this.resolveDelegateForHandle(input.handle)).runTurn(input);
+    const record = await this.sessionStore.load(
+      input.handle.acpxRecordId ?? input.handle.sessionKey,
+    );
+    const rawEventLogActivePath = readEventLogActivePathFromRecord(record);
+    const delegate = this.resolveDelegateForLoadedRecord(input.handle, record);
+
+    // F2 — Path-traversal guard: resolve the advertised active_path to an
+    // absolute path and confirm it stays within the trusted base directory
+    // (~/.acpx/sessions by default). A corrupted or manipulated session record
+    // could otherwise direct writes to an arbitrary location on disk.
+    let safeEventLogActivePath: string | undefined;
+    if (rawEventLogActivePath) {
+      const resolved = resolvePath(rawEventLogActivePath);
+      const trustedBase = resolvePath(this.eventLogTrustedBase);
+      const rel = relative(trustedBase, resolved);
+      if (rel.startsWith("..") || rel.startsWith("/")) {
+        console.warn(
+          `[acpx] event_log.active_path "${resolved}" is outside trusted base "${trustedBase}"; skipping write for this turn.`,
+        );
+      } else {
+        safeEventLogActivePath = resolved;
+      }
+    }
+
+    // F1 — Hoist fs.mkdir outside the per-event loop: directory creation only
+    // needs to happen once per turn, not once per yielded event. If mkdir fails,
+    // skip all writes for this turn and log the error.
+    const logPath = safeEventLogActivePath;
+    let mkdirReady: Promise<boolean> | undefined;
+    if (logPath) {
+      mkdirReady = fs
+        .mkdir(dirname(logPath), { recursive: true })
+        .then(() => true)
+        .catch((err: unknown) => {
+          console.error(`[acpx] event_log mkdir failed (${dirname(logPath)}):`, err);
+          return false;
+        });
+    }
+
+    for await (const event of delegate.runTurn(input)) {
+      yield event;
+      if (logPath && mkdirReady) {
+        // LOSSY CAPTURE: appends projector-translated AcpRuntimeEvent envelopes,
+        // NOT raw JSON-RPC session/update frames from the wire. A faithful
+        // raw-byte writer would require upstream acpx to expose onAcpMessage
+        // through AcpRuntimeOptions. Tracked separately; see catalog finding #4.
+        //
+        // F3 — _format discriminator: `"projected"` signals that this frame was
+        // produced by openclaw's projector-translation layer (AcpRuntimeEvent),
+        // NOT a verbatim JSON-RPC wire frame. Consumers MUST check this field
+        // before assuming standard JSON-RPC session/update framing.
+        const frame = JSON.stringify({
+          _format: "projected",
+          params: { update: { sessionUpdate: event.type, ...event } },
+        });
+        void mkdirReady.then((ok) => {
+          if (!ok) {
+            return;
+          }
+          fs.appendFile(logPath, frame + "\n").catch((err: unknown) => {
+            console.error(`[acpx] event_log.active_path write failed (${logPath}):`, err);
+          });
+        });
+      }
+    }
   }
 
   getCapabilities(): ReturnType<BaseAcpxRuntime["getCapabilities"]> {
