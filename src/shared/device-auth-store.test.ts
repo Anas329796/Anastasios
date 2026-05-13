@@ -175,7 +175,7 @@ describe("device-auth-store", () => {
         operator: {
           token: "old-token",
           role: "operator",
-          scopes: ["operator.read"],
+          scopes: ["operator.audit"],
           updatedAtMs: 10,
         },
       },
