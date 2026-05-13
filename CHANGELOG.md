@@ -447,6 +447,7 @@ Docs: https://docs.openclaw.ai
 - Discord/streaming: default Discord replies to progress draft previews so tool/work activity appears in one edited Discord message unless `channels.discord.streaming.mode` is set to `off`.
 - OpenAI/realtime: default realtime voice to `gpt-realtime-2`, use the GA Realtime WebSocket session shape for backend OpenAI bridges, and cover backend, WebRTC, Google Live, and Gateway relay paths in the live Talk smoke. (#79130)
 - Update/Windows: spawn the post-core-update child process with `stdio:"pipe"` on Windows so PowerShell/CMD console handles are not inherited, preventing the terminal from hanging after `openclaw update` completes. Fixes #78445. (#78483) Thanks @Beandon13.
+- Plugins/hooks: expose optional PI embedded-run prep stage timings on `agent_end.prepStages`, so telemetry plugins can attribute turn startup latency without parsing runner logs. Thanks @guanbear.
 - Plugins/install: add `npm-pack:<path.tgz>` installs so local npm pack artifacts run through the same managed npm-root install, lockfile verification, dependency scan, and install-record path as registry npm plugins.
 - Channels/plugins: show configured official external channels as missing-plugin status rows and send errors with exact install/doctor repair commands after raw package-manager upgrades leave Feishu or WhatsApp uninstalled. Fixes #78702 and #78593. Thanks @MarkMa84 and @mkupiainen.
 - Matrix: move the Matrix channel back to an official external ClawHub/npm plugin so core installs no longer need Matrix SDK runtime dependencies.
