@@ -177,6 +177,14 @@ function buildRealtimeRejectedTwiML(): WebhookResponsePayload {
   };
 }
 
+function isRealtimeStreamPath(pathname: string, pattern: string): boolean {
+  const normalizedPattern = pattern.replace(/\/+$/u, "") || "/";
+  if (normalizedPattern === "/") {
+    return pathname.startsWith("/");
+  }
+  return pathname === normalizedPattern || pathname.startsWith(`${normalizedPattern}/`);
+}
+
 /**
  * HTTP server for receiving voice call webhooks from providers.
  * Supports WebSocket upgrades for media streams when streaming is enabled.
@@ -802,7 +810,7 @@ export class VoiceCallWebhookServer {
     try {
       const pathname = buildRequestUrl(req.url, req.headers.host).pathname;
       const pattern = this.realtimeHandler?.getStreamPathPattern();
-      return Boolean(pattern && pathname.startsWith(pattern));
+      return Boolean(pattern && isRealtimeStreamPath(pathname, pattern));
     } catch {
       return false;
     }
