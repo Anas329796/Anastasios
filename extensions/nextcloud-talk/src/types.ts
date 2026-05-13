@@ -5,8 +5,8 @@ import type {
   DmPolicy,
   GroupPolicy,
   MentionPatternsPolicyConfig,
-  SecretInput,
-} from "openclaw/plugin-sdk/config-types";
+} from "openclaw/plugin-sdk/config-contracts";
+import type { SecretInput } from "openclaw/plugin-sdk/secret-input";
 
 export type NextcloudTalkRoomConfig = {
   requireMention?: boolean;

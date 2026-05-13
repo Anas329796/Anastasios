@@ -1,4 +1,4 @@
-import type { MentionPatternsPolicyConfig } from "openclaw/plugin-sdk/config-types";
+import type { MentionPatternsPolicyConfig } from "openclaw/plugin-sdk/config-contracts";
 import type { SecretInput } from "openclaw/plugin-sdk/secret-input";
 import type { QQBotDmPolicy, QQBotGroupPolicy } from "./engine/access/index.js";
 

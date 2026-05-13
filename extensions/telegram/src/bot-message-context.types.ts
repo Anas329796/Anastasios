@@ -1,6 +1,6 @@
 import type { Bot } from "grammy";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
-import type { MentionPatternsPolicyConfig } from "openclaw/plugin-sdk/config-runtime";
+import type { MentionPatternsPolicyConfig } from "openclaw/plugin-sdk/config-contracts";
 import type {
   DmPolicy,
   TelegramDirectConfig,

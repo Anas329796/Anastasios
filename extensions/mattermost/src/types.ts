@@ -2,7 +2,7 @@ import type {
   ChannelPreviewStreamingConfig,
   StreamingMode,
 } from "openclaw/plugin-sdk/channel-streaming";
-import type { MentionPatternsPolicyConfig } from "openclaw/plugin-sdk/config-types";
+import type { MentionPatternsPolicyConfig } from "openclaw/plugin-sdk/config-contracts";
 import type { BlockStreamingCoalesceConfig, DmPolicy, GroupPolicy } from "./runtime-api.js";
 import type { SecretInput } from "./secret-input.js";
 

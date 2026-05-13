@@ -1,4 +1,4 @@
-import type { MentionPatternsPolicyConfig } from "openclaw/plugin-sdk/config-types";
+import type { MentionPatternsPolicyConfig } from "openclaw/plugin-sdk/config-contracts";
 import type {
   BlockStreamingCoalesceConfig,
   DmConfig,

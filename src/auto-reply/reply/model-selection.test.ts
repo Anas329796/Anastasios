@@ -396,7 +396,7 @@ describe("resolveContextTokens", () => {
       model: "gemini-3.1-pro-preview",
     });
 
-    expect(result).toBe(1_048_576);
+    expect(result).toBe(1_000_000);
   });
 
   it("treats agent contextTokens as a cap, not an expansion beyond the model window", () => {

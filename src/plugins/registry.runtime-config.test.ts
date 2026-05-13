@@ -27,13 +27,13 @@ describe("plugin registry runtime config scope", () => {
       previousHash: null,
       nextHash: "next",
     } as unknown as Awaited<ReturnType<PluginRuntime["config"]["replaceConfigFile"]>>;
-    const mutateConfigFile: PluginRuntime["config"]["mutateConfigFile"] = async () => ({
-      ...replaceResult,
-      result: undefined,
-    });
     const configRuntime = {
       current: vi.fn(() => config),
-      mutateConfigFile,
+      // oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- mirrors the runtime API generic result contract.
+      mutateConfigFile: async <T = void>() => ({
+        ...replaceResult,
+        result: undefined as T | undefined,
+      }),
       replaceConfigFile: async () => replaceResult,
       loadConfig: vi.fn(() => {
         loadScope = getPluginRuntimeGatewayRequestScope();
@@ -56,8 +56,8 @@ describe("plugin registry runtime config scope", () => {
     });
     const api = pluginRegistry.createApi(record, { config });
 
-    expect(api.runtime.config.loadConfig()).toBe(config);
-    await api.runtime.config.writeConfigFile(config);
+    expect(api.runtime.config["loadConfig"]()).toBe(config);
+    await api.runtime.config["writeConfigFile"](config);
 
     expect(loadScope).toMatchObject({
       pluginId: "legacy-plugin",

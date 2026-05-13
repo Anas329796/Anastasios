@@ -1,5 +1,5 @@
 import type { MessageReceipt } from "openclaw/plugin-sdk/channel-message";
-import type { MentionPatternsPolicyConfig } from "openclaw/plugin-sdk/config-types";
+import type { MentionPatternsPolicyConfig } from "openclaw/plugin-sdk/config-contracts";
 import type { Style } from "./zca-constants.js";
 
 export type ZcaFriend = {

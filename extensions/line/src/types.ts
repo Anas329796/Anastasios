@@ -1,6 +1,6 @@
 import type { BaseProbeResult } from "openclaw/plugin-sdk/channel-contract";
 import type { MessageReceipt } from "openclaw/plugin-sdk/channel-message";
-import type { MentionPatternsPolicyConfig } from "openclaw/plugin-sdk/config-types";
+import type { MentionPatternsPolicyConfig } from "openclaw/plugin-sdk/config-contracts";
 
 export type LineTokenSource = "config" | "env" | "file" | "none";
 

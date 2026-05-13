@@ -2399,9 +2399,9 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
           const config = Reflect.get(target, prop, receiver);
           return {
             ...config,
-            loadConfig: () => runWithPluginScope(() => config.loadConfig()),
+            loadConfig: () => runWithPluginScope(() => config["loadConfig"]()),
             writeConfigFile: (cfg, options) =>
-              runWithPluginScope(() => config.writeConfigFile(cfg, options)),
+              runWithPluginScope(() => config["writeConfigFile"](cfg, options)),
           } satisfies PluginRuntime["config"];
         }
         if (prop === "llm") {
