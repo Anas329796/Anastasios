@@ -23,6 +23,7 @@ import {
 } from "../../infra/diagnostics-timeline.js";
 import { formatErrorMessage, formatUncaughtError } from "../../infra/errors.js";
 import { jsonUtf8Bytes } from "../../infra/json-utf8-bytes.js";
+import { trySafeFileURLToPath } from "../../infra/local-file-access.js";
 import { normalizeReplyPayloadsForDelivery } from "../../infra/outbound/payloads.js";
 import { getSessionBindingService } from "../../infra/outbound/session-binding-service.js";
 import { logLargePayload } from "../../logging/diagnostic-payload.js";
@@ -31,6 +32,7 @@ import {
   getAgentScopedMediaLocalRoots,
 } from "../../media/local-roots.js";
 import { isAudioFileName } from "../../media/mime.js";
+import { splitMediaFromOutput } from "../../media/parse.js";
 import type { PromptImageOrderEntry } from "../../media/prompt-image-order.js";
 import {
   deleteMediaBuffer,
@@ -165,16 +167,8 @@ function isMediaBearingPayload(payload: ReplyPayload): boolean {
   return false;
 }
 
-function isTtsSupplementPayload(payload: ReplyPayload): boolean {
-  return (
-    typeof payload.spokenText === "string" &&
-    payload.spokenText.trim().length > 0 &&
-    isMediaBearingPayload(payload)
-  );
-}
-
-function stripVisibleTextFromTtsSupplement(payload: ReplyPayload): ReplyPayload {
-  return isTtsSupplementPayload(payload) ? { ...payload, text: undefined } : payload;
+function stripVisibleTextFromMediaSupplement(payload: ReplyPayload): ReplyPayload {
+  return isMediaBearingPayload(payload) ? { ...payload, text: undefined } : payload;
 }
 
 async function buildWebchatAssistantMediaMessage(
@@ -201,6 +195,7 @@ export {
 export const CHAT_HISTORY_MAX_SINGLE_MESSAGE_BYTES = 128 * 1024;
 const CHAT_HISTORY_OVERSIZED_PLACEHOLDER = "[chat.history omitted: message too large]";
 const MANAGED_OUTGOING_IMAGE_PATH_PREFIX = "/api/chat/media/outgoing/";
+const WINDOWS_DRIVE_PATH_RE = /^[A-Za-z]:[\\/]/;
 let chatHistoryPlaceholderEmitCount = 0;
 const chatHistoryManagedImageCleanupState = new Map<string, Promise<void>>();
 const CHANNEL_AGNOSTIC_SESSION_SCOPES = new Set([
@@ -538,6 +533,26 @@ function hasAssistantDisplayMediaContent(
   content: readonly AssistantDisplayContentBlock[] | undefined,
 ): boolean {
   return Boolean(content?.some((block) => block?.type !== "text"));
+}
+
+function hasReplaySafeManagedImageReplacementContent(
+  content: readonly AssistantDisplayContentBlock[] | undefined,
+): boolean {
+  let hasManagedImage = false;
+  for (const block of content ?? []) {
+    if (block?.type === "text") {
+      continue;
+    }
+    if (
+      block?.type === "image" &&
+      (isManagedOutgoingImageUrl(block.url) || isManagedOutgoingImageUrl(block.openUrl))
+    ) {
+      hasManagedImage = true;
+      continue;
+    }
+    return false;
+  }
+  return hasManagedImage;
 }
 
 function scheduleChatHistoryManagedImageCleanup(params: {
@@ -1370,6 +1385,161 @@ async function transcriptHasIdempotencyKey(
     return false;
   } catch {
     return false;
+  }
+}
+
+function extractAssistantMessageTextForMediaDirective(message: unknown): string | undefined {
+  if (!message || typeof message !== "object") {
+    return undefined;
+  }
+  const record = message as Record<string, unknown>;
+  if (typeof record.content === "string") {
+    return record.content;
+  }
+  if (typeof record.text === "string") {
+    return record.text;
+  }
+  if (!Array.isArray(record.content)) {
+    return undefined;
+  }
+  const parts = record.content
+    .map((block) => {
+      if (!block || typeof block !== "object") {
+        return undefined;
+      }
+      const text = (block as { text?: unknown }).text;
+      return typeof text === "string" ? text : undefined;
+    })
+    .filter((text): text is string => typeof text === "string");
+  return parts.length > 0 ? parts.join("\n") : undefined;
+}
+
+function payloadMediaUrlSet(payload: ReplyPayload): Set<string> {
+  return new Set(
+    [
+      ...(Array.isArray(payload.mediaUrls) ? payload.mediaUrls : []),
+      ...(typeof payload.mediaUrl === "string" ? [payload.mediaUrl] : []),
+    ]
+      .map((url) => url.trim())
+      .filter(Boolean),
+  );
+}
+
+function normalizeMediaSourceForEquivalence(source: string): string | undefined {
+  const trimmed = source.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  if (trimmed.startsWith("file://")) {
+    const filePath = trySafeFileURLToPath(trimmed);
+    return filePath ? `local:${path.resolve(filePath)}` : `literal:${trimmed}`;
+  }
+  if (path.isAbsolute(trimmed) || WINDOWS_DRIVE_PATH_RE.test(trimmed)) {
+    return `local:${path.resolve(trimmed)}`;
+  }
+  return `literal:${trimmed}`;
+}
+
+function areMediaSourcesEquivalent(left: string, right: string): boolean {
+  if (left === right) {
+    return true;
+  }
+  const normalizedLeft = normalizeMediaSourceForEquivalence(left);
+  const normalizedRight = normalizeMediaSourceForEquivalence(right);
+  return Boolean(normalizedLeft && normalizedRight && normalizedLeft === normalizedRight);
+}
+
+function isAssistantMediaDirectiveMessage(message: unknown, payload: ReplyPayload): boolean {
+  if (!message || typeof message !== "object") {
+    return false;
+  }
+  if ((message as { role?: unknown }).role !== "assistant") {
+    return false;
+  }
+  const text = extractAssistantMessageTextForMediaDirective(message);
+  if (!text) {
+    return false;
+  }
+  const parsed = splitMediaFromOutput(text);
+  const parsedMediaUrls = (parsed.mediaUrls ?? []).map((url) => url.trim()).filter(Boolean);
+  if (parsedMediaUrls.length === 0) {
+    return false;
+  }
+  const payloadMediaUrls = payloadMediaUrlSet(payload);
+  if (
+    parsedMediaUrls.some((parsedUrl) =>
+      [...payloadMediaUrls].some((payloadUrl) => areMediaSourcesEquivalent(parsedUrl, payloadUrl)),
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
+async function replaceLatestAssistantMediaDirectiveTranscriptMessage(params: {
+  transcriptPath: string;
+  sessionKey: string;
+  payload: ReplyPayload;
+  matchPayload?: ReplyPayload;
+  message: string;
+  content?: Array<Record<string, unknown>>;
+  idempotencyKey?: string;
+  cfg?: OpenClawConfig;
+}): Promise<{
+  replaced: boolean;
+  messageId?: string;
+  message?: Record<string, unknown>;
+  error?: string;
+}> {
+  try {
+    const index = await readSessionTranscriptIndex(params.transcriptPath);
+    const matchPayload = params.matchPayload ?? params.payload;
+    const latest = [...(index?.entries ?? [])]
+      .toReversed()
+      .find((entry) => isAssistantMediaDirectiveMessage(entry.record.message, matchPayload));
+    const latestMessage = latest?.record.message as Record<string, unknown> | undefined;
+    if (!latest?.id || !latestMessage) {
+      return { replaced: false };
+    }
+    const replacement: Record<string, unknown> = {
+      ...latestMessage,
+      content:
+        params.content && params.content.length > 0
+          ? params.content
+          : [{ type: "text", text: params.message }],
+      ...(params.idempotencyKey ? { idempotencyKey: params.idempotencyKey } : {}),
+    };
+    delete replacement.text;
+
+    const result = await rewriteTranscriptEntriesInSessionFile({
+      sessionFile: params.transcriptPath,
+      sessionKey: params.sessionKey,
+      config: params.cfg,
+      request: {
+        replacements: [
+          {
+            entryId: latest.id,
+            message: replacement as unknown as AgentMessage,
+          },
+        ],
+      },
+    });
+    if (!result.changed) {
+      return { replaced: false, error: result.reason };
+    }
+    const updatedIndex = await readSessionTranscriptIndex(params.transcriptPath);
+    const messageId = [...(updatedIndex?.entries ?? [])].toReversed().find((entry) => {
+      const message = entry.record.message as Record<string, unknown> | undefined;
+      return (
+        message?.role === "assistant" &&
+        (params.idempotencyKey
+          ? message.idempotencyKey === params.idempotencyKey
+          : entry.id === latest.id)
+      );
+    })?.id;
+    return { replaced: true, ...(messageId ? { messageId } : {}), message: replacement };
+  } catch (err) {
+    return { replaced: false, error: formatErrorMessage(err) };
   }
 }
 
@@ -2390,7 +2560,7 @@ export const chatHandlers: GatewayRequestHandlers = {
           sessionKey,
           agentId,
           accountId,
-          payloads: [stripVisibleTextFromTtsSupplement(payload)],
+          payloads: [stripVisibleTextFromMediaSupplement(payload)],
         });
         if (!transcriptPayload) {
           return;
@@ -2432,14 +2602,59 @@ export const chatHandlers: GatewayRequestHandlers = {
         const persistedContentForAppend = hasAssistantDisplayMediaContent(persistedAssistantContent)
           ? persistedAssistantContent
           : undefined;
-        if (!persistedContentForAppend?.length) {
-          return;
-        }
         const transcriptReply =
           mediaMessage?.transcriptText ??
           extractAssistantDisplayTextFromContent(assistantContent) ??
           buildTranscriptReplyText([transcriptPayload]);
         if (!transcriptReply && !persistedAssistantContent?.length && !assistantContent?.length) {
+          return;
+        }
+        const textOnlyReplacementContent = transcriptReply
+          ? [{ type: "text", text: transcriptReply }]
+          : undefined;
+        const replacementContentForReplay = hasReplaySafeManagedImageReplacementContent(
+          persistedContentForAppend,
+        )
+          ? persistedContentForAppend
+          : !persistedContentForAppend?.length
+            ? textOnlyReplacementContent
+            : undefined;
+        if (resolvedTranscriptPath && replacementContentForReplay) {
+          const replaced = await replaceLatestAssistantMediaDirectiveTranscriptMessage({
+            transcriptPath: resolvedTranscriptPath,
+            sessionKey,
+            payload: transcriptPayload,
+            matchPayload: payload,
+            message: transcriptReply,
+            content: replacementContentForReplay,
+            idempotencyKey: `${clientRunId}:assistant-media`,
+            cfg,
+          });
+          if (replaced.error) {
+            context.logGateway.warn(
+              `webchat media reply transcript replacement failed: ${replaced.error}`,
+            );
+          }
+          if (replaced.replaced) {
+            if (replaced.messageId && assistantContent?.length) {
+              await attachManagedOutgoingImagesToMessage({
+                messageId: replaced.messageId,
+                blocks: assistantContent,
+              });
+            }
+            if (replaced.message && resolvedTranscriptPath) {
+              emitSessionTranscriptUpdate({
+                sessionFile: resolvedTranscriptPath,
+                sessionKey,
+                message: replaced.message,
+                messageId: replaced.messageId,
+              });
+            }
+            appendedWebchatAgentMedia = true;
+            return;
+          }
+        }
+        if (!persistedContentForAppend?.length) {
           return;
         }
         const appended = await appendAssistantTranscriptMessage({
