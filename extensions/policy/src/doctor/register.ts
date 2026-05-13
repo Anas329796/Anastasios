@@ -17,6 +17,7 @@ import {
 const CHECK_IDS = {
   policyAttestationMismatch: "policy/attestation-hash-mismatch",
   policyDeniedChannelProvider: "policy/channels-denied-provider",
+  policyDeniedChannelRuntime: "policy/channels-denied-provider-running",
   policyHashMismatch: "policy/policy-hash-mismatch",
   policyInvalidFile: "policy/policy-jsonc-invalid",
   policyMissingFile: "policy/policy-jsonc-missing",
@@ -37,6 +38,7 @@ export const POLICY_CHECK_IDS = [
   CHECK_IDS.policyHashMismatch,
   CHECK_IDS.policyAttestationMismatch,
   CHECK_IDS.policyDeniedChannelProvider,
+  CHECK_IDS.policyDeniedChannelRuntime,
   CHECK_IDS.policyDeniedMcpServer,
   CHECK_IDS.policyUnapprovedMcpServer,
   CHECK_IDS.policyDeniedModelProvider,
@@ -79,6 +81,7 @@ export function registerPolicyDoctorChecks(host?: PolicyDoctorRegistrationHost):
   registerHealthCheck(policyHashMismatchCheck);
   registerHealthCheck(policyAttestationMismatchCheck);
   registerHealthCheck(policyChannelsDeniedProviderCheck);
+  registerHealthCheck(policyChannelsDeniedRuntimeCheck);
   registerHealthCheck(policyMcpDeniedServerCheck);
   registerHealthCheck(policyMcpUnapprovedServerCheck);
   registerHealthCheck(policyModelsDeniedProviderCheck);
@@ -180,6 +183,16 @@ const policyChannelsDeniedProviderCheck: HealthCheck = {
   },
 };
 
+const policyChannelsDeniedRuntimeCheck: HealthCheck = {
+  id: CHECK_IDS.policyDeniedChannelRuntime,
+  kind: "plugin",
+  description: "Running channel accounts satisfy policy deny rules.",
+  source: "policy",
+  async detect(ctx) {
+    return findingsForCheck(await evaluatePolicy(ctx), CHECK_IDS.policyDeniedChannelRuntime);
+  },
+};
+
 const policyMcpDeniedServerCheck: HealthCheck = {
   id: CHECK_IDS.policyDeniedMcpServer,
   kind: "plugin",
@@ -274,10 +287,10 @@ async function evaluatePolicyUncached(ctx: HealthCheckContext): Promise<PolicyEv
   const settings = policySettings(ctx);
   const policyPath = policyDisplayName(ctx);
   const toolsFile = await readWorkspaceFile(ctx, "TOOLS.md");
-  const evidence = collectPolicyEvidence(
-    ctx.cfg as Record<string, unknown>,
-    toolsFile === null ? {} : { toolsRaw: toolsFile.raw },
-  );
+  const evidence = collectPolicyEvidence(ctx.cfg as Record<string, unknown>, {
+    ...(toolsFile === null ? {} : { toolsRaw: toolsFile.raw }),
+    ...policyRuntimeEvidenceOptions(ctx),
+  });
   const findings: HealthFinding[] = [];
 
   if (settings.enabled === false) {
@@ -353,6 +366,7 @@ async function evaluatePolicyUncached(ctx: HealthCheckContext): Promise<PolicyEv
 
   const policyFindings: HealthFinding[] = [
     ...channelFindings(policy, policyFile.ocDocName, evidence),
+    ...channelRuntimeFindings(policy, policyFile.ocDocName, evidence),
     ...mcpServerFindings(policy, policyFile.ocDocName, evidence),
     ...modelProviderFindings(policy, policyFile.ocDocName, evidence),
     ...networkFindings(policy, policyFile.ocDocName, evidence),
@@ -384,6 +398,17 @@ async function evaluatePolicyUncached(ctx: HealthCheckContext): Promise<PolicyEv
     expectedAttestationHash: settings.expectedAttestationHash,
     findings,
   };
+}
+
+function policyRuntimeEvidenceOptions(ctx: HealthCheckContext): {
+  readonly channelRuntime?: unknown;
+} {
+  const runtimeEvidence = ctx.runtimeEvidence;
+  if (!isRecord(runtimeEvidence)) {
+    return {};
+  }
+  const channelRuntime = runtimeEvidence.channels ?? runtimeEvidence.channelRuntime;
+  return channelRuntime === undefined ? {} : { channelRuntime };
 }
 
 function policyParseFindings(
@@ -449,6 +474,40 @@ function channelFindings(
         fixHint:
           rule.reason ??
           "Disable this channel, remove it from config, or update the policy deny rule.",
+      },
+    ];
+  });
+}
+
+function channelRuntimeFindings(
+  policy: unknown,
+  policyDocName: string,
+  evidence: PolicyEvidence,
+): readonly HealthFinding[] {
+  const denyRules = readChannelDenyRules(policy, policyDocName);
+  if (denyRules.length === 0 || evidence.channelRuntime.length === 0) {
+    return [];
+  }
+  return evidence.channelRuntime.flatMap((channel): HealthFinding[] => {
+    if (!channel.running) {
+      return [];
+    }
+    const rule = denyRules.find((candidate) => candidate.when?.provider === channel.id);
+    if (rule === undefined) {
+      return [];
+    }
+    return [
+      {
+        checkId: CHECK_IDS.policyDeniedChannelRuntime,
+        severity: "error",
+        message: `Channel '${channel.id}' account '${channel.accountId}' is denied by policy but is still running.`,
+        source: "policy",
+        path: "gateway runtime",
+        target: channel.source,
+        requirement: rule.requirement,
+        fixHint:
+          rule.reason ??
+          "Stop this running channel account, restart or refresh the gateway, and rerun policy check.",
       },
     ];
   });

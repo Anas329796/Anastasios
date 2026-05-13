@@ -17,6 +17,7 @@ export type PolicyAttestation = {
 
 export type PolicyEvidence = {
   readonly channels: readonly PolicyChannelEvidence[];
+  readonly channelRuntime: readonly PolicyChannelRuntimeEvidence[];
   readonly mcpServers: readonly PolicyMcpServerEvidence[];
   readonly modelProviders: readonly PolicyModelProviderEvidence[];
   readonly modelRefs: readonly PolicyModelRefEvidence[];
@@ -29,6 +30,15 @@ export type PolicyChannelEvidence = {
   readonly provider: string;
   readonly source: string;
   readonly enabled?: boolean;
+};
+
+export type PolicyChannelRuntimeEvidence = {
+  readonly id: string;
+  readonly accountId: string;
+  readonly source: string;
+  readonly running: boolean;
+  readonly enabled?: boolean;
+  readonly configured?: boolean;
 };
 
 export type PolicyMcpServerEvidence = {
@@ -123,16 +133,59 @@ export function createPolicyAttestation(input: {
 
 export function collectPolicyEvidence(
   cfg: Record<string, unknown>,
-  options: { readonly toolsRaw?: string } = {},
+  options: { readonly toolsRaw?: string; readonly channelRuntime?: unknown } = {},
 ): PolicyEvidence {
   return {
     channels: scanPolicyChannels(cfg),
+    channelRuntime: scanPolicyChannelRuntime(options.channelRuntime),
     mcpServers: scanPolicyMcpServers(cfg),
     modelProviders: scanPolicyModelProviders(cfg),
     modelRefs: scanPolicyModelRefs(cfg),
     network: scanPolicyNetwork(cfg),
     tools: options.toolsRaw === undefined ? [] : scanPolicyTools(options.toolsRaw),
   };
+}
+
+export function scanPolicyChannelRuntime(
+  runtime: unknown,
+): readonly PolicyChannelRuntimeEvidence[] {
+  if (!isRecord(runtime) || !isRecord(runtime.channelAccounts)) {
+    return [];
+  }
+  const entries: PolicyChannelRuntimeEvidence[] = [];
+  for (const [channelId, accounts] of Object.entries(runtime.channelAccounts)) {
+    if (!isRecord(accounts)) {
+      continue;
+    }
+    for (const [accountId, snapshot] of Object.entries(accounts)) {
+      if (!isRecord(snapshot)) {
+        continue;
+      }
+      const entry: {
+        id: string;
+        accountId: string;
+        source: string;
+        running: boolean;
+        enabled?: boolean;
+        configured?: boolean;
+      } = {
+        id: channelId,
+        accountId,
+        source: `runtime:channels/${channelId}/accounts/${accountId}`,
+        running: snapshot.running === true,
+      };
+      if (typeof snapshot.enabled === "boolean") {
+        entry.enabled = snapshot.enabled;
+      }
+      if (typeof snapshot.configured === "boolean") {
+        entry.configured = snapshot.configured;
+      }
+      entries.push(entry);
+    }
+  }
+  return entries.toSorted(
+    (a, b) => a.id.localeCompare(b.id) || a.accountId.localeCompare(b.accountId),
+  );
 }
 
 export function scanPolicyChannels(cfg: Record<string, unknown>): readonly PolicyChannelEvidence[] {

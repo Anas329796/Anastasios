@@ -90,6 +90,12 @@ shared health registry. Doctor then runs registered checks; doctor does not
 load plugins itself. Runtime tool policy uses OpenClaw's existing trusted tool
 policy hook, not a separate gateway or supervisor path.
 
+Policy findings do not have to be backed by oc-path. Config and workspace
+findings use `oc://` targets where the system can point to a resolvable
+document address. Runtime audit findings can use evidence refs such as
+`runtime:channels/...` when the finding points to live observed state instead
+of an editable document.
+
 ## Config
 
 Policy config lives under `plugins.entries.policy.config`:
@@ -140,20 +146,21 @@ include the current and expected attestation hashes in the block reason.
 
 The plugin registers these doctor health checks:
 
-| Check id                                 | Purpose                                                          |
-| ---------------------------------------- | ---------------------------------------------------------------- |
-| `policy/policy-jsonc-missing`            | Report missing policy artifact when enabled.                     |
-| `policy/policy-hash-mismatch`            | Reject policy files that do not match hash.                      |
-| `policy/attestation-hash-mismatch`       | Reject policy state that no longer matches accepted attestation. |
-| `policy/channels-denied-provider`        | Reject enabled channels matching deny rules.                     |
-| `policy/mcp-denied-server`               | Reject denied MCP server entries.                                |
-| `policy/mcp-unapproved-server`           | Reject MCP servers outside the allowlist.                        |
-| `policy/models-denied-provider`          | Reject denied model providers and refs.                          |
-| `policy/models-unapproved-provider`      | Reject model providers outside the allowlist.                    |
-| `policy/network-private-access-enabled`  | Reject private-network SSRF escape hatches.                      |
-| `policy/tools-missing-risk-level`        | Require governed tools to declare risk.                          |
-| `policy/tools-missing-sensitivity-token` | Require governed tools to declare sensitivity.                   |
-| `policy/tools-unknown-sensitivity-token` | Reject unknown governed tool sensitivity.                        |
+| Check id                                  | Purpose                                                           |
+| ----------------------------------------- | ----------------------------------------------------------------- |
+| `policy/policy-jsonc-missing`             | Report missing policy artifact when enabled.                      |
+| `policy/policy-hash-mismatch`             | Reject policy files that do not match hash.                       |
+| `policy/attestation-hash-mismatch`        | Reject policy state that no longer matches accepted attestation.  |
+| `policy/channels-denied-provider`         | Reject enabled channels matching deny rules.                      |
+| `policy/channels-denied-provider-running` | Report denied channel accounts still present in runtime evidence. |
+| `policy/mcp-denied-server`                | Reject denied MCP server entries.                                 |
+| `policy/mcp-unapproved-server`            | Reject MCP servers outside the allowlist.                         |
+| `policy/models-denied-provider`           | Reject denied model providers and refs.                           |
+| `policy/models-unapproved-provider`       | Reject model providers outside the allowlist.                     |
+| `policy/network-private-access-enabled`   | Reject private-network SSRF escape hatches.                       |
+| `policy/tools-missing-risk-level`         | Require governed tools to declare risk.                           |
+| `policy/tools-missing-sensitivity-token`  | Require governed tools to declare sensitivity.                    |
+| `policy/tools-unknown-sensitivity-token`  | Reject unknown governed tool sensitivity.                         |
 
 Run them through either surface:
 
