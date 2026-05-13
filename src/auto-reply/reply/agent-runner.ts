@@ -240,6 +240,17 @@ function matchesAutoFallbackSelectionSnapshot(
   );
 }
 
+function hasUserAuthProfileOverride(entry: SessionEntry): boolean {
+  if (!entry.authProfileOverride?.trim()) {
+    return false;
+  }
+  return (
+    entry.authProfileOverrideSource === "user" ||
+    (entry.authProfileOverrideSource === undefined &&
+      typeof entry.authProfileOverrideCompactionCount !== "number")
+  );
+}
+
 function clearAutoFallbackSelectionAfterAccounting(
   entry: SessionEntry,
   expected: AutoFallbackSelectionSnapshot,
@@ -259,7 +270,7 @@ function clearAutoFallbackSelectionAfterAccounting(
   clear("modelOverrideSource");
   clear("modelOverrideFallbackOriginProvider");
   clear("modelOverrideFallbackOriginModel");
-  if (entry.authProfileOverrideSource !== "user") {
+  if (!hasUserAuthProfileOverride(entry)) {
     clear("authProfileOverride");
     clear("authProfileOverrideSource");
     clear("authProfileOverrideCompactionCount");
@@ -1707,7 +1718,7 @@ export async function runReplyAgent(params: {
             if (!matchesAutoFallbackSelectionSnapshot(entry, autoFallbackSelectionToClear)) {
               return null;
             }
-            const preserveUserAuthProfile = entry.authProfileOverrideSource === "user";
+            const preserveUserAuthProfile = hasUserAuthProfileOverride(entry);
             return {
               providerOverride: undefined,
               modelOverride: undefined,
@@ -1715,7 +1726,9 @@ export async function runReplyAgent(params: {
               modelOverrideFallbackOriginProvider: undefined,
               modelOverrideFallbackOriginModel: undefined,
               authProfileOverride: preserveUserAuthProfile ? entry.authProfileOverride : undefined,
-              authProfileOverrideSource: preserveUserAuthProfile ? "user" : undefined,
+              authProfileOverrideSource: preserveUserAuthProfile
+                ? entry.authProfileOverrideSource
+                : undefined,
               authProfileOverrideCompactionCount: preserveUserAuthProfile
                 ? entry.authProfileOverrideCompactionCount
                 : undefined,
