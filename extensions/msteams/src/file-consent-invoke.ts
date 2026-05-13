@@ -130,12 +130,16 @@ async function handleMSTeamsFileConsentInvoke(
   return true;
 }
 
-export async function respondToMSTeamsFileConsentInvoke(
+/**
+ * Run the file-consent invoke handler. The HTTP 200 InvokeResponse is sent by
+ * the SDK once this returns — a void/undefined return from a typed
+ * `app.on("file.consent.accept|decline")` handler is wrapped to
+ * `{ status: 200 }`, so this function intentionally does not ack itself.
+ */
+export async function runMSTeamsFileConsentInvokeHandler(
   context: MSTeamsTurnContext,
   log: MSTeamsMonitorLogger,
 ): Promise<void> {
-  await context.sendActivity({ type: "invokeResponse", value: { status: 200 } });
-
   try {
     await withRevokedProxyFallback({
       run: async () => await handleMSTeamsFileConsentInvoke(context, log),

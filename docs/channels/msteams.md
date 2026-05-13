@@ -666,6 +666,14 @@ Teams delivers messages via HTTP webhook. If processing takes too long (e.g., sl
 
 OpenClaw handles this by returning quickly and sending replies proactively, but very slow responses may still cause issues.
 
+### Teams cloud and service URL support
+
+This SDK-backed Teams path is live-validated for Microsoft Teams public cloud.
+
+Inbound replies use the incoming Teams SDK turn context. Out-of-context proactive operations - sends, edits, deletes, cards, polls, file-consent messages, and queued long-running replies - use the SDK app-level Bot Connector service URL. For public cloud, that is the documented global Teams endpoint: `https://smba.trafficmanager.net/teams/`.
+
+Non-public clouds such as GCC, GCC High, and DoD need an explicit `msteams` cloud/service URL setting before they are supported on this SDK path. Until that follow-up lands, consider proactive send/edit/delete support public-cloud only.
+
 ### Formatting
 
 Teams markdown is more limited than Slack or Discord:
