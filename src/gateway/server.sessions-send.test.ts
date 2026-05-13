@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, type Mock } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, type Mock } from "vitest";
 import { resolveSessionTranscriptPath } from "../config/sessions.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { emitAgentEvent } from "../infra/agent-events.js";
@@ -122,6 +122,7 @@ beforeEach(() => {
   testState.agentsConfig = undefined;
   testState.sessionStorePath = undefined;
   cachedSessionsSendTool = null;
+  (agentCommand as unknown as Mock).mockClear();
   process.env.OPENCLAW_GATEWAY_PORT = String(gatewayPort);
   process.env.OPENCLAW_GATEWAY_TOKEN = gatewayToken;
 });
@@ -177,6 +178,20 @@ describe("sessions_send gateway loopback", () => {
 });
 
 describe("sessions_send label lookup", () => {
+  afterEach(async () => {
+    // Clean up the labeled session so it does not leak into later tests.
+    try {
+      const { callGateway } = await import("./call.js");
+      await callGateway({
+        method: "sessions.delete",
+        params: { key: "agent:main:test-labeled-session" },
+        timeoutMs: 5000,
+      });
+    } catch {
+      // Ignore cleanup errors
+    }
+  });
+
   it(
     "finds session by label and sends message",
     { timeout: SESSION_SEND_E2E_TIMEOUT_MS },
