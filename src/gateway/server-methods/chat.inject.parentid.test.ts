@@ -1,7 +1,10 @@
 import fs from "node:fs";
 import { describe, expect, it } from "vitest";
 import { onSessionTranscriptUpdate } from "../../sessions/transcript-events.js";
-import { appendInjectedAssistantMessageToTranscript } from "./chat-transcript-inject.js";
+import {
+  appendInjectedAssistantMessageToTranscript,
+  appendInjectedUserMessageToTranscript,
+} from "./chat-transcript-inject.js";
 import { createTranscriptFixtureSync } from "./chat.test-helpers.js";
 
 function readTranscriptLines(transcriptPath: string): string[] {
@@ -125,4 +128,32 @@ describe("gateway chat.inject transcript writes", () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("appends an injected user message", async () => {
+    const { dir, transcriptPath } = createTranscriptFixtureSync({
+      prefix: "openclaw-chat-inject-user-",
+      sessionId: "sess-user",
+    });
+
+    try {
+      const appended = await appendInjectedUserMessageToTranscript({
+        transcriptPath,
+        message: "hello from user",
+      });
+
+      expect(appended.ok).toBe(true);
+      expect(appended.messageId).toBeTypeOf("string");
+
+      const lines = readTranscriptLines(transcriptPath);
+      const last = JSON.parse(lines.at(-1) as string) as {
+        message?: { role?: string; content?: Array<{ type?: string; text?: string }> };
+      };
+      expect(last.message?.role).toBe("user");
+      expect(last.message?.content?.[0]?.type).toBe("text");
+      expect(last.message?.content?.[0]?.text).toBe("hello from user");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
 });

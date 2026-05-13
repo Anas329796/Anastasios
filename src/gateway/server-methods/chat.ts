@@ -118,7 +118,10 @@ import { injectTimestamp, timestampOptsFromConfig } from "./agent-timestamp.js";
 import { setGatewayDedupeEntry } from "./agent-wait-dedupe.js";
 import { normalizeRpcAttachmentsToChatAttachments } from "./attachment-normalize.js";
 import { normalizeWebchatReplyMediaPathsForDisplay } from "./chat-reply-media.js";
-import { appendInjectedAssistantMessageToTranscript } from "./chat-transcript-inject.js";
+import {
+  appendInjectedAssistantMessageToTranscript,
+  appendInjectedUserMessageToTranscript,
+} from "./chat-transcript-inject.js";
 import {
   buildWebchatAssistantMessageFromReplyPayloads,
   buildWebchatAudioContentBlocksFromReplyPayloads,
@@ -1427,6 +1430,56 @@ async function appendAssistantTranscriptMessage(params: {
     content: params.content,
     idempotencyKey: params.idempotencyKey,
     abortMeta: params.abortMeta,
+    config: params.cfg,
+  });
+}
+
+async function appendUserTranscriptMessage(params: {
+  message: string;
+  content?: Array<Record<string, unknown>>;
+  sessionId: string;
+  storePath: string | undefined;
+  sessionFile?: string;
+  agentId?: string;
+  createIfMissing?: boolean;
+  idempotencyKey?: string;
+  cfg?: OpenClawConfig;
+}): Promise<TranscriptAppendResult> {
+  const transcriptPath = resolveTranscriptPath({
+    sessionId: params.sessionId,
+    storePath: params.storePath,
+    sessionFile: params.sessionFile,
+    agentId: params.agentId,
+  });
+  if (!transcriptPath) {
+    return { ok: false, error: "transcript path not resolved" };
+  }
+
+  if (!fs.existsSync(transcriptPath)) {
+    if (!params.createIfMissing) {
+      return { ok: false, error: "transcript file not found" };
+    }
+    const ensured = ensureTranscriptFile({
+      transcriptPath,
+      sessionId: params.sessionId,
+    });
+    if (!ensured.ok) {
+      return { ok: false, error: ensured.error ?? "failed to create transcript file" };
+    }
+  }
+
+  if (
+    params.idempotencyKey &&
+    (await transcriptHasIdempotencyKey(transcriptPath, params.idempotencyKey))
+  ) {
+    return { ok: true };
+  }
+
+  return await appendInjectedUserMessageToTranscript({
+    transcriptPath,
+    message: params.message,
+    content: params.content,
+    idempotencyKey: params.idempotencyKey,
     config: params.cfg,
   });
 }
@@ -2838,7 +2891,10 @@ export const chatHandlers: GatewayRequestHandlers = {
       sessionKey: string;
       message: string;
       label?: string;
+      role?: "assistant" | "user";
+      idempotencyKey?: string;
     };
+    const injectRole = p.role === "user" ? "user" : "assistant";
 
     // Load session to find transcript file
     const rawSessionKey = p.sessionKey;
@@ -2849,17 +2905,21 @@ export const chatHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const appended = await appendAssistantTranscriptMessage({
+    const appendCommon = {
       message: p.message,
-      label: p.label,
       sessionId,
       storePath,
       sessionFile: entry?.sessionFile,
       agentId: resolveSessionAgentId({ sessionKey, config: cfg }),
       createIfMissing: true,
+      idempotencyKey: p.idempotencyKey,
       cfg,
-    });
-    if (!appended.ok || !appended.messageId || !appended.message) {
+    };
+    const appended =
+      injectRole === "user"
+        ? await appendUserTranscriptMessage(appendCommon)
+        : await appendAssistantTranscriptMessage({ ...appendCommon, label: p.label });
+    if (!appended.ok) {
       respond(
         false,
         undefined,
@@ -2868,6 +2928,10 @@ export const chatHandlers: GatewayRequestHandlers = {
           `failed to write transcript: ${appended.error ?? "unknown error"}`,
         ),
       );
+      return;
+    }
+    if (!appended.messageId || !appended.message) {
+      respond(true, { ok: true, deduped: true });
       return;
     }
 
