@@ -48,12 +48,30 @@ export async function handlePortError(
 ): Promise<never> {
   // Uniform messaging for EADDRINUSE with optional owner details.
   if (err instanceof PortInUseError || (isErrno(err) && err.code === "EADDRINUSE")) {
+    const diagnostics = await inspectPortUsage(port).catch(() => null);
     const details =
-      err instanceof PortInUseError
-        ? (err.details ?? (await describePortOwner(port)))
-        : await describePortOwner(port);
+      err instanceof PortInUseError && err.details
+        ? err.details
+        : diagnostics
+          ? formatPortDiagnostics(diagnostics).join("\n")
+          : undefined;
+
     runtime.error(danger(`${context} failed: port ${port} is already in use.`));
-    if (details) {
+
+    // Check for intra-process conflict: embedded runtimes can try to bind a
+    // port that the gateway parent process already owns. Treat this separately
+    // from a second OpenClaw instance in another process.
+    const listenerPids = diagnostics?.listeners.map((l) => l.pid).filter((p) => p != null) ?? [];
+    if (listenerPids.includes(process.pid)) {
+      runtime.error(
+        warn(
+          `Port ${port} is already bound by this gateway process (pid ${process.pid}). ` +
+            "An embedded runtime is attempting to re-bind a port already owned by its parent. " +
+            "Disable the child runtime's built-in port binding or configure it to reuse the " +
+            "parent listener.",
+        ),
+      );
+    } else if (details) {
       runtime.error(info("Port listener details:"));
       runtime.error(details);
       if (/openclaw|src\/index\.ts|dist\/index\.js/.test(details)) {

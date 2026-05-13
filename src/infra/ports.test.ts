@@ -112,6 +112,55 @@ describe("ports helpers", () => {
     const messages = runtime.error.mock.calls.map((call) => stripAnsi(String(call[0] ?? "")));
     expect(messages.join("\n")).toContain("another OpenClaw instance is already running");
   });
+
+  it("prints a generic intra-process conflict hint when the owning PID is current", async () => {
+    // Simulate an embedded runtime trying to bind a port that the gateway
+    // parent process (process.pid) already owns.
+    runCommandWithTimeoutMock.mockImplementation(async (argv: string[]) => {
+      const command = Array.isArray(argv) ? argv[0] : undefined;
+      if (typeof command === "string" && command.includes("lsof")) {
+        // Return lsof output showing the current PID owns the port.
+        return {
+          stdout: `p${process.pid}\ncTCP\nn127.0.0.1:2099\n`,
+          stderr: "",
+          code: 0,
+        };
+      }
+      if (command === "ps") {
+        if (argv.includes("command=")) {
+          return { stdout: "node dist/index.js gateway\n", stderr: "", code: 0 };
+        }
+        if (argv.includes("user=")) {
+          return { stdout: "user\n", stderr: "", code: 0 };
+        }
+        if (argv.includes("ppid=")) {
+          return { stdout: "1\n", stderr: "", code: 0 };
+        }
+      }
+      return { stdout: "", stderr: "", code: 1 };
+    });
+
+    const runtime = {
+      error: vi.fn(),
+      log: vi.fn(),
+      exit: vi.fn() as unknown as (code: number) => never,
+    };
+
+    const eaddrErr = Object.assign(new Error("EADDRINUSE"), { code: "EADDRINUSE" });
+    await handlePortError(eaddrErr, 2099, "manifest plugin start", runtime).catch(() => {});
+
+    const messages = runtime.error.mock.calls.map((call) => stripAnsi(String(call[0] ?? "")));
+    const joined = messages.join("\n");
+    // Should identify this as an intra-process conflict, not a cross-process one.
+    expect(joined).toContain("already bound by this gateway process");
+    expect(joined).toContain(`pid ${process.pid}`);
+    expect(joined).toContain("embedded runtime");
+    expect(joined).toContain("parent listener");
+    expect(joined).not.toContain("MANIFEST_DISABLE_BUILTIN_PORT");
+    // Should NOT say "another OpenClaw instance is running" — that's the wrong diagnosis.
+    expect(joined).not.toContain("another OpenClaw instance is already running");
+    expect(runtime.exit).toHaveBeenCalledWith(1);
+  });
 });
 
 describeUnix("inspectPortUsage", () => {
