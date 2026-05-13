@@ -357,6 +357,71 @@ async function clearPendingFinalDeliveryAfterSuccess(params: {
   });
 }
 
+const DEFAULT_LONG_TURN_PROGRESS_ACK_MS = 120_000;
+const LONG_TURN_PROGRESS_ACK_ENV = "OPENCLAW_LONG_TURN_PROGRESS_ACK_MS";
+
+function parseLongTurnProgressAckOverride(): number | undefined {
+  const raw = process.env[LONG_TURN_PROGRESS_ACK_ENV];
+  if (raw === undefined) {
+    return undefined;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return undefined;
+  }
+  return Math.floor(parsed);
+}
+
+function resolveLongTurnProgressAckMs(params: {
+  ctx: MsgContext;
+  shouldRouteToOriginating: boolean;
+}): number {
+  const override = parseLongTurnProgressAckOverride();
+  if (override !== undefined) {
+    return override;
+  }
+  if (params.shouldRouteToOriginating) {
+    return 0;
+  }
+  const provider = normalizeLowercaseStringOrEmpty(params.ctx.Provider ?? params.ctx.Surface);
+  if (provider !== "telegram") {
+    return 0;
+  }
+  const chatType = normalizeChatType(params.ctx.ChatType);
+  if (chatType === "direct") {
+    return DEFAULT_LONG_TURN_PROGRESS_ACK_MS;
+  }
+  if ((chatType === "group" || chatType === "channel") && params.ctx.IsForum === true) {
+    return DEFAULT_LONG_TURN_PROGRESS_ACK_MS;
+  }
+  return 0;
+}
+
+async function updateReplyTurnState(params: {
+  storePath?: string;
+  sessionKey?: string;
+  state: "running" | "completed" | "failed" | "aborted";
+  runId?: string;
+  error?: string | null;
+}): Promise<void> {
+  if (!params.storePath || !params.sessionKey) {
+    return;
+  }
+  const now = Date.now();
+  await updateSessionStoreEntry({
+    storePath: params.storePath,
+    sessionKey: params.sessionKey,
+    update: async (entry) => ({
+      replyTurnState: params.state,
+      replyTurnStartedAt: params.state === "running" ? now : entry.replyTurnStartedAt,
+      replyTurnUpdatedAt: now,
+      replyTurnRunId: params.runId ?? entry.replyTurnRunId ?? null,
+      replyTurnLastError: params.state === "failed" ? (params.error ?? "unknown error") : null,
+      updatedAt: now,
+    }),
+  });
+}
+
 export type {
   DispatchFromConfigParams,
   DispatchFromConfigResult,
@@ -622,6 +687,7 @@ export async function dispatchReplyFromConfig(
     if (abortSignal?.aborted) {
       return;
     }
+    markVisibleOutboundIfContent(payload);
     const result = await routeReplyToOriginating(payload, {
       abortSignal,
       mirror,
@@ -635,6 +701,7 @@ export async function dispatchReplyFromConfig(
     payload: ReplyPayload,
     mode: "additive" | "terminal",
   ): Promise<boolean> => {
+    markVisibleOutboundIfContent(payload);
     const result = await routeReplyToOriginating(payload);
     if (result) {
       if (!result.ok) {
@@ -801,6 +868,33 @@ export async function dispatchReplyFromConfig(
     sourceReplyDeliveryMode === "message_tool_only"
       ? { ...result, sourceReplyDeliveryMode }
       : result;
+  let visibleOutboundAttempted = false;
+  let longTurnProgressAckSent = false;
+  let longTurnProgressAckTimer: NodeJS.Timeout | undefined;
+  const markVisibleOutboundIfContent = (payload: ReplyPayload) => {
+    if (resolveSendableOutboundReplyParts(payload).hasContent) {
+      visibleOutboundAttempted = true;
+    }
+  };
+  const clearLongTurnProgressAckTimer = () => {
+    if (longTurnProgressAckTimer) {
+      clearTimeout(longTurnProgressAckTimer);
+      longTurnProgressAckTimer = undefined;
+    }
+  };
+  const markReplyTurnClosed = async (
+    state: "completed" | "failed" | "aborted",
+    error?: string | null,
+  ) => {
+    clearLongTurnProgressAckTimer();
+    await updateReplyTurnState({
+      storePath: sessionStoreEntry.storePath,
+      sessionKey: sessionStoreEntry.sessionKey ?? sessionKey,
+      state,
+      runId: params.replyOptions?.runId,
+      error,
+    });
+  };
 
   const inboundDedupeClaim = claimInboundDedupe(ctx);
   if (inboundDedupeClaim.status === "duplicate" || inboundDedupeClaim.status === "inflight") {
@@ -938,6 +1032,41 @@ export async function dispatchReplyFromConfig(
   }
 
   markProcessing();
+  await updateReplyTurnState({
+    storePath: sessionStoreEntry.storePath,
+    sessionKey: sessionStoreEntry.sessionKey ?? sessionKey,
+    state: "running",
+    runId: params.replyOptions?.runId,
+  });
+  const longTurnProgressAckMs = resolveLongTurnProgressAckMs({
+    ctx,
+    shouldRouteToOriginating,
+  });
+  if (!suppressDelivery && longTurnProgressAckMs > 0) {
+    longTurnProgressAckTimer = setTimeout(() => {
+      if (visibleOutboundAttempted || longTurnProgressAckSent) {
+        return;
+      }
+      longTurnProgressAckSent = true;
+      const payload: ReplyPayload = { text: "Still working — I’ll update here." };
+      markVisibleOutboundIfContent(payload);
+      markProgress();
+      const send = async () => {
+        if (shouldRouteToOriginating) {
+          await sendPayloadAsync(payload, undefined, false);
+          return;
+        }
+        markInboundDedupeReplayUnsafe();
+        dispatcher.sendToolResult(payload);
+      };
+      void send().catch((err) => {
+        logVerbose(
+          `dispatch-from-config: long-turn progress ack failed: ${formatErrorMessage(err)}`,
+        );
+      });
+    }, longTurnProgressAckMs);
+    longTurnProgressAckTimer.unref?.();
+  }
 
   try {
     const abortRuntime = params.fastAbortResolver ? null : await loadAbortRuntime();
@@ -955,6 +1084,7 @@ export async function dispatchReplyFromConfig(
         const payload = {
           text: formatAbortReplyTextResolver(fastAbort.stoppedSubagents),
         } satisfies ReplyPayload;
+        markVisibleOutboundIfContent(payload);
         const result = await routeReplyToOriginating(payload);
         if (result) {
           queuedFinal = result.ok;
@@ -979,6 +1109,7 @@ export async function dispatchReplyFromConfig(
       counts.final += routedFinalCount;
       recordProcessed("completed", { reason: "fast_abort" });
       markIdle("message_completed");
+      await markReplyTurnClosed("completed");
       commitInboundDedupeIfClaimed();
       return attachSourceReplyDeliveryMode({ queuedFinal, counts });
     }
@@ -993,6 +1124,7 @@ export async function dispatchReplyFromConfig(
       payload: ReplyPayload,
     ): Promise<{ queuedFinal: boolean; routedFinalCount: number }> => {
       if (resolveSendableOutboundReplyParts(payload).hasContent) {
+        markVisibleOutboundIfContent(payload);
         markInboundDedupeReplayUnsafe();
       }
       const ttsPayload = await maybeApplyTtsToReplyPayload({
@@ -1060,6 +1192,7 @@ export async function dispatchReplyFromConfig(
         counts.final += routedFinalCount;
         recordProcessed("completed", { reason: "before_dispatch_handled" });
         markIdle("message_completed");
+        await markReplyTurnClosed("completed");
         commitInboundDedupeIfClaimed();
         return attachSourceReplyDeliveryMode({ queuedFinal, counts });
       }
@@ -1155,6 +1288,7 @@ export async function dispatchReplyFromConfig(
       const payload: ReplyPayload = {
         text: `Working: ${normalizedLabel}`,
       };
+      markVisibleOutboundIfContent(payload);
       if (shouldRouteToOriginating) {
         await sendPayloadAsync(payload, undefined, false);
         return;
@@ -1172,6 +1306,7 @@ export async function dispatchReplyFromConfig(
       const replyPayload: ReplyPayload = {
         text: formatPlanUpdateText(payload),
       };
+      markVisibleOutboundIfContent(replyPayload);
       if (shouldRouteToOriginating) {
         await sendPayloadAsync(replyPayload, undefined, false);
         return;
@@ -1357,6 +1492,7 @@ export async function dispatchReplyFromConfig(
               if (!deliveryPayload) {
                 return;
               }
+              markVisibleOutboundIfContent(deliveryPayload);
               if (shouldSuppressDefaultToolProgressMessages()) {
                 const hasMedia = resolveSendableOutboundReplyParts(deliveryPayload).hasMedia;
                 const execApproval =
@@ -1367,7 +1503,7 @@ export async function dispatchReplyFromConfig(
                     : undefined;
                 const hasExecApproval =
                   execApproval && typeof execApproval === "object" && !Array.isArray(execApproval);
-                if (!hasMedia && !hasExecApproval && deliveryPayload.isError !== true) {
+                if (!hasMedia && !hasExecApproval) {
                   return;
                 }
               }
@@ -1469,6 +1605,7 @@ export async function dispatchReplyFromConfig(
               if (!resolveSendableOutboundReplyParts(visiblePayload).hasContent) {
                 return;
               }
+              markVisibleOutboundIfContent(visiblePayload);
               // Channels that keep a live draft preview may need to rotate their
               // preview state at the logical block boundary before queued block
               // delivery drains asynchronously through the dispatcher.
@@ -1542,6 +1679,7 @@ export async function dispatchReplyFromConfig(
           },
         );
         if (tailDispatchResult?.handled) {
+          await markReplyTurnClosed("completed");
           return attachSourceReplyDeliveryMode({
             queuedFinal: tailDispatchResult.queuedFinal,
             counts: tailDispatchResult.counts,
@@ -1657,6 +1795,7 @@ export async function dispatchReplyFromConfig(
       pluginFallbackReason ? { reason: pluginFallbackReason } : undefined,
     );
     markIdle("message_completed");
+    await markReplyTurnClosed("completed");
     return attachSourceReplyDeliveryMode({
       queuedFinal,
       counts,
@@ -1672,6 +1811,7 @@ export async function dispatchReplyFromConfig(
     }
     recordProcessed("error", { error: String(err) });
     markIdle("message_error");
+    await markReplyTurnClosed("failed", String(err));
     throw err;
   }
 }
