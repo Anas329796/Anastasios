@@ -547,60 +547,6 @@ async function collectNonOverlappingPackageScanRoots(packageDirs: string[]): Pro
   return selectedRoots.map((selectedRoot) => selectedRoot.packageDir);
 }
 
-function normalizeRelativeScanPath(relativePath: string): string {
-  return relativePath.split(path.sep).join("/");
-}
-
-function isKnownBenignLanceDbFinding(params: {
-  finding: InstallScanFinding;
-  packageDir: string;
-}): boolean {
-  const relativePath = normalizeRelativeScanPath(
-    path.relative(params.packageDir, params.finding.file),
-  );
-  const evidence = params.finding.evidence ?? "";
-  if (params.finding.ruleId === "dangerous-exec" && relativePath === "dist/native.js") {
-    return (
-      evidence.includes("child_process") &&
-      /\bexecSync\(\s*['"](?:ldd --version|which ldd)['"]/.test(evidence)
-    );
-  }
-  if (
-    params.finding.ruleId === "dynamic-code-execution" &&
-    relativePath === "dist/embedding/transformers.js"
-  ) {
-    return /\beval\(\s*['"]import\(["']@huggingface\/transformers["']\)['"]\s*\)/.test(evidence);
-  }
-  return false;
-}
-
-async function suppressKnownBenignInstalledDependencyFindings(params: {
-  builtinScan: BuiltinInstallScan;
-  packageDir: string;
-}): Promise<BuiltinInstallScan> {
-  if (params.builtinScan.status !== "ok" || params.builtinScan.findings.length === 0) {
-    return params.builtinScan;
-  }
-  const manifest = await tryReadJson<PackageManifest>(path.join(params.packageDir, "package.json"));
-  if (manifest?.name !== "@lancedb/lancedb") {
-    return params.builtinScan;
-  }
-  const findings = params.builtinScan.findings.filter(
-    (finding) => !isKnownBenignLanceDbFinding({ finding, packageDir: params.packageDir }),
-  );
-  if (findings.length === params.builtinScan.findings.length) {
-    return params.builtinScan;
-  }
-  return buildBuiltinScanFromSummary({
-    scannedFiles: params.builtinScan.scannedFiles,
-    critical: findings.filter((finding) => finding.severity === "critical").length,
-    warn: findings.filter((finding) => finding.severity === "warn").length,
-    info: findings.filter((finding) => finding.severity === "info").length,
-    truncated: false,
-    findings,
-  });
-}
-
 async function collectPackageManifestPaths(params: {
   allowManagedNpmRootPackagePeerSymlinks?: boolean;
   rootDir: string;

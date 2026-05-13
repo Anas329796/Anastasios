@@ -205,6 +205,20 @@ async function findConnectedNodeByDisplayName(displayName: string) {
   );
 }
 
+async function waitConnectedNodeByDisplayName(displayName: string) {
+  let lastNode: Awaited<ReturnType<typeof findConnectedNodeByDisplayName>>;
+  await expect
+    .poll(
+      async () => {
+        lastNode = await findConnectedNodeByDisplayName(displayName);
+        return lastNode?.nodeId ?? "";
+      },
+      { timeout: 2_000, interval: 10 },
+    )
+    .not.toBe("");
+  return lastNode;
+}
+
 async function expectPendingPairingCommands(nodeId: string, commands: string[]) {
   const pairingList = await rpcReq<{
     pending?: Array<{ nodeId?: string; commands?: string[] }>;
@@ -491,7 +505,7 @@ describe("gateway node command allowlist", () => {
         }, FAST_WAIT_OPTS)
         .toEqual([]);
 
-      const node = await findConnectedNodeByDisplayName(displayName);
+      const node = await waitConnectedNodeByDisplayName(displayName);
       const nodeId = requireNodeId(node?.nodeId, displayName);
 
       await expectPendingPairingCommands(nodeId, ["canvas.snapshot", "system.run"]);
@@ -539,7 +553,7 @@ describe("gateway node command allowlist", () => {
         }, FAST_WAIT_OPTS)
         .toEqual([]);
 
-      const node = await findConnectedNodeByDisplayName(displayName);
+      const node = await waitConnectedNodeByDisplayName(displayName);
       const nodeId = requireNodeId(node?.nodeId, displayName);
       const pairingList = await rpcReq<{
         pending?: Array<{ requestId?: string; nodeId?: string; commands?: string[] }>;
@@ -605,7 +619,7 @@ describe("gateway node command allowlist", () => {
         }, FAST_WAIT_OPTS)
         .toEqual([]);
 
-      const node = await findConnectedNodeByDisplayName(displayName);
+      const node = await waitConnectedNodeByDisplayName(displayName);
       const nodeId = requireNodeId(node?.nodeId, displayName);
       const pending = await getPendingNodePairing(nodeId);
       expect(pending?.commands).toEqual(["canvas.snapshot", "system.run"]);
@@ -759,7 +773,7 @@ describe("gateway node command allowlist", () => {
         )
         .toEqual(["canvas.snapshot"]);
 
-      const node = await findConnectedNodeByDisplayName(displayName);
+      const node = await waitConnectedNodeByDisplayName(displayName);
       const nodeId = requireNodeId(node?.nodeId, displayName);
 
       const systemRunRes = await rpcReq(ws, "node.invoke", {
