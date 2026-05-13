@@ -26,7 +26,7 @@ const OPENROUTER_KIMI_K2_5_COST = {
 };
 
 function normalizeBaseUrl(baseUrl: string | undefined): string {
-  return (baseUrl ?? "").trim().replace(/\/+$/, "");
+  return (baseUrl ?? "").trim().toLowerCase().replace(/\/+$/, "");
 }
 
 export function normalizeOpenRouterBaseUrl(baseUrl: string | undefined): string | undefined {
