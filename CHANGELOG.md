@@ -32,6 +32,7 @@ Docs: https://docs.openclaw.ai
 - Gateway: keep active reply runs visible to stuck-session diagnostics and clear no-active-work recovery state, preventing stale queued lanes after compaction or tool failures. Fixes #80677. (#81302)
 - Gateway/OpenAI HTTP: return OpenAI-compatible 400 errors for invalid sampling params and provider validation failures instead of collapsing them to 500s. (#81275) Thanks @Lellansin.
 - Telegram: publish plugin and skill command description localizations to native command menus while filtering unsupported locale codes and preserving Telegram command limits. (#81351) Thanks @jzakirov.
+- Status JSON: keep secret diagnostics inside the structured `secretDiagnostics` field instead of logging them before the JSON payload. Fixes #81055.
 - Limit hook CLI tool authority [AI]. (#81065) Thanks @pgondhi987.
 - Require admin scope for node device token management [AI]. (#81067) Thanks @pgondhi987.
 - Restrict chat sender allowlist matching [AI]. (#80898) Thanks @pgondhi987.
