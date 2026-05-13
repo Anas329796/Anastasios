@@ -9,6 +9,7 @@ import {
   resolveCliRespawnCommand,
   runCliRespawnPlan,
 } from "./entry.respawn.js";
+import { OPENCLAW_RESPAWN_PARENT_PID } from "./process/child-process-bridge.js";
 
 type CliRespawnPlan = NonNullable<ReturnType<typeof buildCliRespawnPlan>>;
 
@@ -190,7 +191,10 @@ describe("runCliRespawnPlan", () => {
       ["/repo/openclaw/dist/entry.js", "status"],
       {
         stdio: "inherit",
-        env: { OPENCLAW_NODE_OPTIONS_READY: "1" },
+        env: {
+          OPENCLAW_NODE_OPTIONS_READY: "1",
+          [OPENCLAW_RESPAWN_PARENT_PID]: String(process.pid),
+        },
       },
     );
     const [bridgeChild, bridgeOptions] = requireFirstMockCall(
