@@ -52,7 +52,7 @@ type NodeApprovalAnalysis = {
 
 function buildNodeApprovalAnalysisEnv(env: Record<string, string> | undefined): NodeJS.ProcessEnv {
   return {
-    ...(env ?? {}),
+    ...env,
     // The gateway cannot see the node host PATH, so bare-name resolution must
     // not fall back to the gateway process environment during the precheck.
     PATH: "",
