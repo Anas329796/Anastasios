@@ -1,7 +1,7 @@
 import type { ClawdbotConfig } from "../runtime-api.js";
 import { buildFeishuConversationId } from "./conversation-id.js";
 import { normalizeFeishuExternalKey } from "./external-keys.js";
-import { saveMessageResourceFeishu } from "./media.js";
+import { recoverUtf8FileNameFromLatin1Value, saveMessageResourceFeishu } from "./media.js";
 import { isFeishuBroadcastMention } from "./mention.js";
 import { parsePostContent } from "./post.js";
 import { getFeishuRuntime } from "./runtime.js";
@@ -307,16 +307,20 @@ function parseMediaKeys(
     const parsed = JSON.parse(content);
     const imageKey = normalizeFeishuExternalKey(parsed.image_key);
     const fileKey = normalizeFeishuExternalKey(parsed.file_key);
+    const fileName =
+      typeof parsed.file_name === "string"
+        ? recoverUtf8FileNameFromLatin1Value(parsed.file_name)
+        : parsed.file_name;
     switch (messageType) {
       case "image":
-        return { imageKey, fileName: parsed.file_name };
+        return { imageKey, fileName };
       case "file":
       case "audio":
       case "sticker":
-        return { fileKey, fileName: parsed.file_name };
+        return { fileKey, fileName };
       case "video":
       case "media":
-        return { fileKey, imageKey, fileName: parsed.file_name };
+        return { fileKey, imageKey, fileName };
       default:
         return {};
     }
