@@ -5291,6 +5291,7 @@ public struct CronRunLogEntry: Codable, Sendable {
     public let runatms: Int?
     public let durationms: Int?
     public let nextrunatms: Int?
+    public let warnings: [String]?
     public let model: String?
     public let provider: String?
     public let usage: [String: AnyCodable]?
@@ -5313,6 +5314,7 @@ public struct CronRunLogEntry: Codable, Sendable {
         runatms: Int?,
         durationms: Int?,
         nextrunatms: Int?,
+        warnings: [String]?,
         model: String?,
         provider: String?,
         usage: [String: AnyCodable]?,
@@ -5334,6 +5336,7 @@ public struct CronRunLogEntry: Codable, Sendable {
         self.runatms = runatms
         self.durationms = durationms
         self.nextrunatms = nextrunatms
+        self.warnings = warnings
         self.model = model
         self.provider = provider
         self.usage = usage
@@ -5357,6 +5360,7 @@ public struct CronRunLogEntry: Codable, Sendable {
         case runatms = "runAtMs"
         case durationms = "durationMs"
         case nextrunatms = "nextRunAtMs"
+        case warnings
         case model
         case provider
         case usage
