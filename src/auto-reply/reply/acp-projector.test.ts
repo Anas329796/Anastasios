@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { AcpRuntimeEvent } from "../../acp/runtime/types.js";
 import { prefixSystemMessage } from "../../infra/system-message.js";
 import { createAcpReplyProjector } from "./acp-projector.js";
 import { createAcpTestConfig as createCfg } from "./test-fixtures/acp-runtime.js";
@@ -466,13 +467,20 @@ describe("createAcpReplyProjector", () => {
       }),
     );
 
+    // The `AcpRuntimeEvent` "status" variant declares `text: string`, but the
+    // bug being pinned is exactly that production emits status events with
+    // `text` undefined (Telegram session updates with `usage_update` shape).
+    // We pass these fixtures through `as unknown as AcpRuntimeEvent` so the
+    // regression captures the contract the runtime actually receives, not the
+    // contract the type declares.
+
     // Shape 1: no numeric usage fields, no text. The `usage_update` branch
     // falls back to `hashText(event.text)` for the dedup tuple; previously
     // `(undefined).trim()` threw. Now hashText returns "" without crashing.
     await projector.onEvent({
       type: "status",
       tag: "usage_update",
-    });
+    } as unknown as AcpRuntimeEvent);
 
     // Shape 2: numeric textless usage update. The dedup tuple is built from
     // `used`/`size`, but `emitSystemStatus(event.text ?? "")` is still
@@ -483,7 +491,7 @@ describe("createAcpReplyProjector", () => {
       tag: "usage_update",
       used: 10,
       size: 100,
-    });
+    } as unknown as AcpRuntimeEvent);
 
     // Neither shape carried renderable text, so no system-status delivery
     // is expected. The assertion is "no crash" plus "no spurious output".
