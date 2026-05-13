@@ -231,6 +231,7 @@ describe("feishuPlugin actions", () => {
     expect(getDescribedActions(cfg)).toEqual([
       "send",
       "read",
+      "list",
       "edit",
       "thread-reply",
       "pin",
@@ -261,6 +262,7 @@ describe("feishuPlugin actions", () => {
     expect(getDescribedActions(disabledCfg)).toEqual([
       "send",
       "read",
+      "list",
       "edit",
       "thread-reply",
       "pin",
@@ -299,6 +301,7 @@ describe("feishuPlugin actions", () => {
     expect(getDescribedActions(cfg, "default")).toEqual([
       "send",
       "read",
+      "list",
       "edit",
       "thread-reply",
       "pin",
@@ -311,6 +314,7 @@ describe("feishuPlugin actions", () => {
     expect(getDescribedActions(cfg, "work")).toEqual([
       "send",
       "read",
+      "list",
       "edit",
       "thread-reply",
       "pin",
