@@ -1,6 +1,8 @@
 import { z, type ZodType } from "zod";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { requireActivePluginChannelRegistry } from "../../plugins/runtime.js";
 import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from "../../routing/session-key.js";
+import { normalizeOptionalString } from "../../shared/string-coerce.js";
 import type { ChannelSetupAdapter } from "./types.adapters.js";
 import type { ChannelSetupInput } from "./types.core.js";
 
@@ -10,10 +12,20 @@ type ChannelSectionBase = {
   accounts?: Record<string, Record<string, unknown>>;
 };
 
+type ChannelSetupPromotionSurface = {
+  singleAccountKeysToMove?: readonly string[];
+  namedAccountPromotionKeys?: readonly string[];
+  resolveSingleAccountPromotionTarget?: (params: {
+    channel: ChannelSectionBase;
+  }) => string | undefined;
+};
+
 const COMMON_SINGLE_ACCOUNT_KEYS_TO_MOVE = new Set([
   "name",
   "token",
   "tokenFile",
+  "botId",
+  "secret",
   "botToken",
   "appToken",
   "account",
@@ -70,6 +82,7 @@ const COMMON_SINGLE_ACCOUNT_KEYS_TO_MOVE = new Set([
 ]);
 
 const NAMED_ACCOUNT_PROMOTION_KEYS_BY_CHANNEL: Record<string, readonly string[]> = {
+  wecom: ["botId", "secret"],
   matrix: [
     "name",
     "homeserver",
@@ -84,6 +97,18 @@ const NAMED_ACCOUNT_PROMOTION_KEYS_BY_CHANNEL: Record<string, readonly string[]>
   ],
   telegram: ["botToken", "tokenFile"],
 };
+
+function asPromotionSurface(setup: unknown): ChannelSetupPromotionSurface | null {
+  return setup && typeof setup === "object" ? (setup as ChannelSetupPromotionSurface) : null;
+}
+
+function getChannelSetupPromotionSurface(channelKey: string): ChannelSetupPromotionSurface | null {
+  const registry = requireActivePluginChannelRegistry();
+  const plugin = (registry.channelSetups ?? []).find(
+    (entry) => entry.plugin.id === channelKey,
+  )?.plugin;
+  return asPromotionSurface(plugin?.setup);
+}
 
 function channelHasAccounts(cfg: OpenClawConfig, channelKey: string): boolean {
   const channels = cfg.channels as Record<string, unknown> | undefined;
@@ -230,8 +255,15 @@ export function applySetupAccountConfigPatch(params: {
   accountId: string;
   patch: Record<string, unknown>;
 }): OpenClawConfig {
+  const cfg =
+    normalizeAccountId(params.accountId) === DEFAULT_ACCOUNT_ID
+      ? params.cfg
+      : moveSingleAccountChannelSectionToDefaultAccount({
+          cfg: params.cfg,
+          channelKey: params.channelKey,
+        });
   return patchScopedAccountConfig({
-    cfg: params.cfg,
+    cfg,
     channelKey: params.channelKey,
     accountId: params.accountId,
     patch: params.patch,
@@ -258,8 +290,45 @@ export function createPatchedAccountSetupAdapter(params: {
       }),
     validateInput: params.validateInput,
     applyAccountConfig: ({ cfg, accountId, input }) => {
+      const scopedCfg =
+        params.alwaysUseAccounts || normalizeAccountId(accountId) === DEFAULT_ACCOUNT_ID
+          ? cfg
+          : (() => {
+              const channels = cfg.channels as Record<string, unknown> | undefined;
+              const base = channels?.[params.channelKey] as ChannelSectionBase | undefined;
+              const baseName = base?.name;
+              if (!baseName) {
+                return moveSingleAccountChannelSectionToDefaultAccount({
+                  cfg,
+                  channelKey: params.channelKey,
+                });
+              }
+              const { name: _ignored, ...baseWithoutName } = base;
+              const promoted = moveSingleAccountChannelSectionToDefaultAccount({
+                cfg: {
+                  ...cfg,
+                  channels: {
+                    ...cfg.channels,
+                    [params.channelKey]: baseWithoutName,
+                  },
+                } as OpenClawConfig,
+                channelKey: params.channelKey,
+              });
+              return {
+                ...promoted,
+                channels: {
+                  ...promoted.channels,
+                  [params.channelKey]: {
+                    ...((promoted.channels as Record<string, unknown> | undefined)?.[
+                      params.channelKey
+                    ] as ChannelSectionBase | undefined),
+                    name: baseName,
+                  },
+                },
+              } as OpenClawConfig;
+            })();
       const next = prepareScopedSetupConfig({
-        cfg,
+        cfg: scopedCfg,
         channelKey: params.channelKey,
         accountId,
         name: input.name,
@@ -511,28 +580,65 @@ function resolveSingleAccountKeysToMove(params: {
         key !== "accounts" && key !== "defaultAccount" && key !== "enabled" && value !== undefined,
     )
     .map(([key]) => key);
-  const keysToMove = entries.filter((key) => COMMON_SINGLE_ACCOUNT_KEYS_TO_MOVE.has(key));
+  if (entries.length === 0) {
+    return [];
+  }
+
+  let setupSurface: ChannelSetupPromotionSurface | null | undefined;
+  const resolveSetupSurface = () => {
+    setupSurface ??= getChannelSetupPromotionSurface(params.channelKey);
+    return setupSurface;
+  };
+
+  const keysToMove = entries.filter((key) => {
+    if (COMMON_SINGLE_ACCOUNT_KEYS_TO_MOVE.has(key)) {
+      return true;
+    }
+    return Boolean(resolveSetupSurface()?.singleAccountKeysToMove?.includes(key));
+  });
   if (!hasNamedAccounts || keysToMove.length === 0) {
     return keysToMove;
   }
-  const namedAccountPromotionKeys = NAMED_ACCOUNT_PROMOTION_KEYS_BY_CHANNEL[params.channelKey];
-  return namedAccountPromotionKeys
-    ? keysToMove.filter((key) => namedAccountPromotionKeys.includes(key))
-    : keysToMove;
+
+  const namedAccountPromotionKeys =
+    resolveSetupSurface()?.namedAccountPromotionKeys ??
+    NAMED_ACCOUNT_PROMOTION_KEYS_BY_CHANNEL[params.channelKey];
+  if (!namedAccountPromotionKeys) {
+    return keysToMove;
+  }
+  return keysToMove.filter((key) => namedAccountPromotionKeys.includes(key));
 }
 
-function resolveSingleAccountPromotionTarget(params: { channel: ChannelSectionBase }): string {
+function resolveSingleAccountPromotionTarget(params: {
+  channelKey: string;
+  channel: ChannelSectionBase;
+}): string {
   const accounts = params.channel.accounts ?? {};
+  const resolveExistingAccountId = (targetAccountId: string): string => {
+    const normalizedTargetAccountId = normalizeAccountId(targetAccountId);
+    const matchedAccountId = Object.keys(accounts).find(
+      (accountId) => normalizeAccountId(accountId) === normalizedTargetAccountId,
+    );
+    return matchedAccountId ?? normalizedTargetAccountId;
+  };
+
+  const resolvePromotionTarget = getChannelSetupPromotionSurface(
+    params.channelKey,
+  )?.resolveSingleAccountPromotionTarget;
+  const resolved = resolvePromotionTarget?.({
+    channel: params.channel,
+  });
+  const normalizedResolved = normalizeOptionalString(resolved);
+  if (normalizedResolved) {
+    return resolveExistingAccountId(normalizedResolved);
+  }
+
   const normalizedDefaultAccount =
     typeof params.channel.defaultAccount === "string" && params.channel.defaultAccount.trim()
       ? normalizeAccountId(params.channel.defaultAccount)
       : undefined;
   if (normalizedDefaultAccount) {
-    return (
-      Object.keys(accounts).find(
-        (accountId) => normalizeAccountId(accountId) === normalizedDefaultAccount,
-      ) ?? DEFAULT_ACCOUNT_ID
-    );
+    return resolveExistingAccountId(normalizedDefaultAccount);
   }
   const namedAccounts = Object.keys(accounts).filter(Boolean);
   return namedAccounts.length === 1 ? namedAccounts[0] : DEFAULT_ACCOUNT_ID;
@@ -564,6 +670,7 @@ export function moveSingleAccountChannelSectionToDefaultAccount(params: {
     }
 
     const targetAccountId = resolveSingleAccountPromotionTarget({
+      channelKey: params.channelKey,
       channel: base,
     });
     const resolvedTargetAccountKey = resolveExistingAccountKey(accounts, targetAccountId);

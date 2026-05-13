@@ -13,6 +13,7 @@ import {
   moveSingleAccountChannelSectionToDefaultAccount,
   prepareScopedSetupConfig,
 } from "./setup-helpers.js";
+import type { ChannelSetupInput } from "./types.core.js";
 
 function asConfig(value: unknown): OpenClawConfig {
   return value as OpenClawConfig;
@@ -55,6 +56,14 @@ const matrixNamedAccountPromotionKeys = [
   "userId",
 ] as const;
 const telegramSingleAccountKeysToMove = ["streaming"] as const;
+const externalSingleAccountKeysToMove = ["botId", "botSecret"] as const;
+const externalNamedAccountPromotionKeys = ["botId", "botSecret"] as const;
+
+function resolveExternalSingleAccountPromotionTarget(params: {
+  channel: { accounts?: Record<string, unknown> };
+}): string | undefined {
+  return params.channel.accounts?.main ? "main" : undefined;
+}
 
 function collectNamedAccountIds(accounts: Record<string, unknown>): string[] {
   const ids: string[] = [];
@@ -107,6 +116,32 @@ beforeEach(() => {
           ...createChannelTestPluginBase({ id: "telegram", label: "Telegram" }),
           setup: {
             singleAccountKeysToMove: telegramSingleAccountKeysToMove,
+          },
+        },
+      },
+      {
+        pluginId: "external-chat",
+        source: "test",
+        plugin: {
+          ...createChannelTestPluginBase({ id: "external-chat", label: "External Chat" }),
+          setup: {
+            singleAccountKeysToMove: externalSingleAccountKeysToMove,
+            namedAccountPromotionKeys: externalNamedAccountPromotionKeys,
+            resolveSingleAccountPromotionTarget: resolveExternalSingleAccountPromotionTarget,
+          },
+        },
+      },
+      {
+        pluginId: "resolverless-chat",
+        source: "test",
+        plugin: {
+          ...createChannelTestPluginBase({
+            id: "resolverless-chat",
+            label: "Resolverless Chat",
+          }),
+          setup: {
+            singleAccountKeysToMove: externalSingleAccountKeysToMove,
+            namedAccountPromotionKeys: externalNamedAccountPromotionKeys,
           },
         },
       },
@@ -239,6 +274,191 @@ describe("createPatchedAccountSetupAdapter", () => {
     expect(workTeam.name).toBe("Work");
     expect(workTeam.botToken).toBe("new");
     expect(next.channels?.["demo-setup"]).not.toHaveProperty("name");
+  });
+
+  it("promotes external plugin credential keys before patching a new named account", () => {
+    const adapter = createPatchedAccountSetupAdapter({
+      channelKey: "external-chat",
+      buildPatch: (input) => {
+        const record = input as ChannelSetupInput & Record<string, unknown>;
+        return {
+          botId: record.botId,
+          botSecret: record.botSecret,
+        };
+      },
+    });
+
+    const next = adapter.applyAccountConfig({
+      cfg: asConfig({
+        channels: {
+          "external-chat": {
+            enabled: true,
+            botId: "main-bot",
+            botSecret: "main-secret",
+            accounts: {
+              main: { name: "Main" },
+            },
+          },
+        },
+      }),
+      accountId: "alerts",
+      input: {
+        name: "Alerts",
+        botId: "alerts-bot",
+        botSecret: "alerts-secret",
+      } as ChannelSetupInput,
+    });
+
+    expect(next.channels?.["external-chat"]).toMatchObject({
+      enabled: true,
+      accounts: {
+        main: {
+          name: "Main",
+          botId: "main-bot",
+          botSecret: "main-secret",
+        },
+        alerts: {
+          enabled: true,
+          name: "Alerts",
+          botId: "alerts-bot",
+          botSecret: "alerts-secret",
+        },
+      },
+    });
+    expect(next.channels?.["external-chat"]).not.toHaveProperty("botId");
+    expect(next.channels?.["external-chat"]).not.toHaveProperty("botSecret");
+  });
+
+  it("uses setup-only registry promotion contracts before patching a new named account", () => {
+    const setupOnlyPlugin = {
+      ...createChannelTestPluginBase({
+        id: "setup-only-chat",
+        label: "Setup-only Chat",
+      }),
+      setup: {
+        applyAccountConfig: ({ cfg }: { cfg: OpenClawConfig }) => cfg,
+        singleAccountKeysToMove: externalSingleAccountKeysToMove,
+        namedAccountPromotionKeys: externalNamedAccountPromotionKeys,
+        resolveSingleAccountPromotionTarget: resolveExternalSingleAccountPromotionTarget,
+      },
+    };
+    setActivePluginRegistry({
+      ...createTestRegistry([]),
+      channelSetups: [
+        {
+          pluginId: "setup-only-chat",
+          source: "test",
+          enabled: true,
+          plugin: setupOnlyPlugin,
+        },
+      ],
+    });
+    const adapter = createPatchedAccountSetupAdapter({
+      channelKey: "setup-only-chat",
+      buildPatch: (input) => {
+        const record = input as ChannelSetupInput & Record<string, unknown>;
+        return {
+          botId: record.botId,
+          botSecret: record.botSecret,
+        };
+      },
+    });
+
+    const next = adapter.applyAccountConfig({
+      cfg: asConfig({
+        channels: {
+          "setup-only-chat": {
+            enabled: true,
+            botId: "main-bot",
+            botSecret: "main-secret",
+            keepRoot: true,
+            accounts: {
+              main: { name: "Main" },
+            },
+          },
+        },
+      }),
+      accountId: "alerts",
+      input: {
+        name: "Alerts",
+        botId: "alerts-bot",
+        botSecret: "alerts-secret",
+      } as ChannelSetupInput,
+    });
+
+    expect(next.channels?.["setup-only-chat"]).toMatchObject({
+      enabled: true,
+      keepRoot: true,
+      accounts: {
+        main: {
+          name: "Main",
+          botId: "main-bot",
+          botSecret: "main-secret",
+        },
+        alerts: {
+          enabled: true,
+          name: "Alerts",
+          botId: "alerts-bot",
+          botSecret: "alerts-secret",
+        },
+      },
+    });
+    expect(next.channels?.["setup-only-chat"]).not.toHaveProperty("botId");
+    expect(next.channels?.["setup-only-chat"]).not.toHaveProperty("botSecret");
+  });
+
+  it("promotes credentials into the sole existing account before seeding the selected account", () => {
+    const adapter = createPatchedAccountSetupAdapter({
+      channelKey: "resolverless-chat",
+      buildPatch: (input) => {
+        const record = input as ChannelSetupInput & Record<string, unknown>;
+        return {
+          botId: record.botId,
+          botSecret: record.botSecret,
+        };
+      },
+    });
+
+    const next = adapter.applyAccountConfig({
+      cfg: asConfig({
+        channels: {
+          "resolverless-chat": {
+            enabled: true,
+            botId: "main-bot",
+            botSecret: "main-secret",
+            accounts: {
+              main: { name: "Main" },
+            },
+          },
+        },
+      }),
+      accountId: "alerts",
+      input: {
+        name: "Alerts",
+        botId: "alerts-bot",
+        botSecret: "alerts-secret",
+      } as ChannelSetupInput,
+    });
+
+    expect(next.channels?.["resolverless-chat"]).toMatchObject({
+      enabled: true,
+      accounts: {
+        main: {
+          name: "Main",
+          botId: "main-bot",
+          botSecret: "main-secret",
+        },
+        alerts: {
+          enabled: true,
+          name: "Alerts",
+          botId: "alerts-bot",
+          botSecret: "alerts-secret",
+        },
+      },
+    });
+    expect(next.channels?.["resolverless-chat"]).not.toHaveProperty("botId");
+    expect(next.channels?.["resolverless-chat"]).not.toHaveProperty("botSecret");
+    expect(next.channels?.["resolverless-chat"]?.accounts).not.toHaveProperty("default");
   });
 
   it("can store the default account in accounts.default", () => {
