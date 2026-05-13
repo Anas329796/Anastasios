@@ -642,6 +642,7 @@ describe("dispatchCronDelivery — double-announce guard", () => {
 
     const params = makeBaseParams({ synthesizedText: SILENT_REPLY_TOKEN });
     (params.job as { deleteAfterRun?: boolean }).deleteAfterRun = true;
+    params.agentSessionKey = "agent:main:cron:test-job";
 
     const state = await dispatchCronDelivery(params);
 
@@ -653,7 +654,7 @@ describe("dispatchCronDelivery — double-announce guard", () => {
     expect(callGateway).toHaveBeenCalledWith({
       method: "sessions.delete",
       params: {
-        key: "agent:main",
+        key: "agent:main:cron:test-job",
         deleteTranscript: true,
         emitLifecycleHooks: false,
       },
@@ -667,6 +668,7 @@ describe("dispatchCronDelivery — double-announce guard", () => {
 
     const params = makeBaseParams({ synthesizedText: "HEARTBEAT_OK 🦞" });
     (params.job as { deleteAfterRun?: boolean }).deleteAfterRun = true;
+    params.agentSessionKey = "agent:main:cron:test-job";
 
     const state = await dispatchCronDelivery(params);
 
@@ -676,7 +678,7 @@ describe("dispatchCronDelivery — double-announce guard", () => {
     expect(callGateway).toHaveBeenCalledWith({
       method: "sessions.delete",
       params: {
-        key: "agent:main",
+        key: "agent:main:cron:test-job",
         deleteTranscript: true,
         emitLifecycleHooks: false,
       },
@@ -691,6 +693,7 @@ describe("dispatchCronDelivery — double-announce guard", () => {
 
     const params = makeBaseParams({ synthesizedText: SILENT_REPLY_TOKEN });
     (params.job as { deleteAfterRun?: boolean }).deleteAfterRun = true;
+    params.agentSessionKey = "agent:main:cron:test-job";
 
     const state = await dispatchCronDelivery(params);
 
@@ -1086,6 +1089,7 @@ describe("dispatchCronDelivery — double-announce guard", () => {
       threadId: 42,
     };
     (params.job as { deleteAfterRun?: boolean }).deleteAfterRun = true;
+    params.agentSessionKey = "agent:main:cron:test-job";
 
     const state = await dispatchCronDelivery(params);
 
@@ -1095,7 +1099,7 @@ describe("dispatchCronDelivery — double-announce guard", () => {
     expect(callGateway).toHaveBeenCalledWith({
       method: "sessions.delete",
       params: {
-        key: "agent:main",
+        key: "agent:main:cron:test-job",
         deleteTranscript: true,
         emitLifecycleHooks: false,
       },
@@ -1142,6 +1146,7 @@ describe("dispatchCronDelivery — double-announce guard", () => {
       { text: "HEARTBEAT_OK", mediaUrl: "https://example.com/img.png" },
     ] as never;
     (params.job as { deleteAfterRun?: boolean }).deleteAfterRun = true;
+    params.agentSessionKey = "agent:main:cron:test-job";
 
     const state = await dispatchCronDelivery(params);
 
@@ -1151,7 +1156,7 @@ describe("dispatchCronDelivery — double-announce guard", () => {
     expect(callGateway).toHaveBeenCalledWith({
       method: "sessions.delete",
       params: {
-        key: "agent:main",
+        key: "agent:main:cron:test-job",
         deleteTranscript: true,
         emitLifecycleHooks: false,
       },
@@ -1218,6 +1223,7 @@ describe("dispatchCronDelivery — double-announce guard", () => {
     const params = makeBaseParams({ synthesizedText: SILENT_REPLY_TOKEN });
     (params as Record<string, unknown>).deliveryPayloadHasStructuredContent = true;
     (params.job as { deleteAfterRun?: boolean }).deleteAfterRun = true;
+    params.agentSessionKey = "agent:main:cron:test-job";
 
     const state = await dispatchCronDelivery(params);
 
@@ -1229,13 +1235,37 @@ describe("dispatchCronDelivery — double-announce guard", () => {
     expect(callGateway).toHaveBeenCalledWith({
       method: "sessions.delete",
       params: {
-        key: "agent:main",
+        key: "agent:main:cron:test-job",
         deleteTranscript: true,
         emitLifecycleHooks: false,
       },
       timeoutMs: 10_000,
     });
     expect(callGateway).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips deleteAfterRun cleanup for non-cron sessions", async () => {
+    vi.mocked(countActiveDescendantRuns).mockReturnValue(0);
+    vi.mocked(isLikelyInterimCronMessage).mockReturnValue(false);
+
+    const params = makeBaseParams({ synthesizedText: SILENT_REPLY_TOKEN });
+    params.agentSessionKey = "agent:main:meeting";
+    (params.job as { deleteAfterRun?: boolean }).deleteAfterRun = true;
+
+    const state = await dispatchCronDelivery(params);
+
+    expect(state.result).toEqual(
+      expect.objectContaining({
+        status: "ok",
+        delivered: false,
+      }),
+    );
+    expect(callGateway).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "sessions.delete",
+      }),
+    );
+    expect(retireSessionMcpRuntime).not.toHaveBeenCalled();
   });
 
   it("suppresses trailing NO_REPLY after summary text in direct delivery (#64976)", async () => {

@@ -26,6 +26,7 @@ import {
   normalizeOptionalLowercaseString,
   normalizeOptionalString,
 } from "../../shared/string-coerce.js";
+import { isCronSessionKey } from "../../sessions/session-key-utils.js";
 import { shouldAttemptTtsPayload } from "../../tts/tts-config.js";
 import { createCronExecutionId } from "../run-id.js";
 import { hasScheduledNextRunAtMs } from "../service/jobs.js";
@@ -514,6 +515,14 @@ export async function dispatchCronDelivery(
     });
   const cleanupDirectCronSessionIfNeeded = async (): Promise<void> => {
     if (!params.job.deleteAfterRun || directCronSessionDeleted) {
+      return;
+    }
+
+    // deleteAfterRun only applies to sessions created for cron runs.
+    // Non-cron sessions (user-owned, meeting, feishu, etc.) must not be deleted.
+    // Mark as handled so repeated finalizers do not retry.
+    if (!isCronSessionKey(params.agentSessionKey)) {
+      directCronSessionDeleted = true;
       return;
     }
     try {
