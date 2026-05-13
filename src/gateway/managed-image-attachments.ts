@@ -21,6 +21,7 @@ import type { ResolvedGatewayAuth } from "./auth.js";
 import { sendJson, sendMethodNotAllowed, sendMissingScopeForbidden } from "./http-common.js";
 import {
   authorizeGatewayHttpRequestOrReply,
+  getBearerToken,
   resolveOpenAiCompatibleHttpOperatorScopes,
   resolveOpenAiCompatibleHttpSenderIsOwner,
 } from "./http-utils.js";
@@ -40,6 +41,7 @@ export const DEFAULT_MANAGED_IMAGE_ATTACHMENT_LIMITS = {
   maxHeight: 4096,
   maxPixels: 20_000_000,
 } as const;
+const DEFAULT_MANAGED_IMAGE_THUMBNAIL_MAX_SIDE = 300;
 
 export type ManagedImageAttachmentLimits = {
   maxBytes: number;
@@ -273,7 +275,11 @@ function resolveOutgoingRecordPath(attachmentId: string, stateDir = resolveState
   return path.join(resolveOutgoingRecordsDir(stateDir), `${attachmentId}.json`);
 }
 
-function buildOutgoingVariantUrl(sessionKey: string, attachmentId: string, variant: "full") {
+function buildOutgoingVariantUrl(
+  sessionKey: string,
+  attachmentId: string,
+  variant: "full" | "thumbnail",
+) {
   return `${OUTGOING_IMAGE_ROUTE_PREFIX}/${encodeURIComponent(sessionKey)}/${attachmentId}/${variant}`;
 }
 
@@ -565,7 +571,9 @@ function asArray(value: string[] | undefined | null) {
 function parseManagedOutgoingRoute(value: string) {
   try {
     const parsed = new URL(value, "http://localhost");
-    const match = parsed.pathname.match(/^\/api\/chat\/media\/outgoing\/([^/]+)\/([^/]+)\/full$/);
+    const match = parsed.pathname.match(
+      /^\/api\/chat\/media\/outgoing\/([^/]+)\/([^/]+)\/(?:full|thumbnail)$/,
+    );
     if (!match) {
       return null;
     }
@@ -697,7 +705,7 @@ async function getSessionManagedOutgoingAttachmentIndex(
   });
   const index: SessionManagedOutgoingAttachmentIndex = new Set();
   for (const message of messages) {
-    const meta = (message as { __openclaw?: { id?: string } } | null)?.__openclaw;
+    const meta = (message as { __openclaw?: { id?: string } } | null)?.["__openclaw"];
     const messageId = meta?.id;
     if (typeof messageId !== "string" || !messageId) {
       continue;
@@ -959,10 +967,14 @@ export async function handleManagedOutgoingImageHttpRequest(
     allowRealIpFallback?: boolean;
     rateLimiter?: AuthRateLimiter;
     stateDir?: string;
+    thumbnailMaxSide?: number;
+    authorizeControlUiDeviceReadToken?: (token: string) => Promise<boolean>;
   },
 ): Promise<boolean> {
   const requestUrl = new URL(req.url ?? "/", "http://localhost");
-  const match = requestUrl.pathname.match(/^\/api\/chat\/media\/outgoing\/([^/]+)\/([^/]+)\/full$/);
+  const match = requestUrl.pathname.match(
+    /^\/api\/chat\/media\/outgoing\/([^/]+)\/([^/]+)\/(full|thumbnail)$/,
+  );
   if (!match) {
     return false;
   }
@@ -972,27 +984,9 @@ export async function handleManagedOutgoingImageHttpRequest(
     return true;
   }
 
-  const requestAuth = await authorizeGatewayHttpRequestOrReply({
-    req,
-    res,
-    auth: opts.auth,
-    trustedProxies: opts.trustedProxies,
-    allowRealIpFallback: opts.allowRealIpFallback,
-    rateLimiter: opts.rateLimiter,
-  });
-  if (!requestAuth) {
-    return true;
-  }
-
-  const requestedScopes = resolveOpenAiCompatibleHttpOperatorScopes(req, requestAuth);
-  const scopeAuth = authorizeOperatorScopesForMethod("chat.history", requestedScopes);
-  if (!scopeAuth.allowed) {
-    sendMissingScopeForbidden(res, scopeAuth.missingScope);
-    return true;
-  }
-
   const encodedSessionKey = match[1];
   const attachmentId = match[2];
+  const variant = match[3] === "thumbnail" ? "thumbnail" : "full";
   if (!encodedSessionKey || !attachmentId) {
     return false;
   }
@@ -1007,23 +1001,62 @@ export async function handleManagedOutgoingImageHttpRequest(
     sendStatus(res, 404, "not found");
     return true;
   }
+  const bearerToken = getBearerToken(req);
+  const isControlUiDeviceRead =
+    bearerToken && opts.authorizeControlUiDeviceReadToken
+      ? await opts.authorizeControlUiDeviceReadToken(bearerToken)
+      : false;
+  if (!isControlUiDeviceRead) {
+    const requestAuth = await authorizeGatewayHttpRequestOrReply({
+      req,
+      res,
+      auth: opts.auth,
+      trustedProxies: opts.trustedProxies,
+      allowRealIpFallback: opts.allowRealIpFallback,
+      rateLimiter: opts.rateLimiter,
+    });
+    if (!requestAuth) {
+      return true;
+    }
+
+    const requestedScopes = resolveOpenAiCompatibleHttpOperatorScopes(req, requestAuth);
+    const scopeAuth = authorizeOperatorScopesForMethod("chat.history", requestedScopes);
+    if (!scopeAuth.allowed) {
+      sendMissingScopeForbidden(res, scopeAuth.missingScope);
+      return true;
+    }
+
+    // Requester-session headers are client-declared, so media bytes require
+    // authenticated owner/admin context. Control UI read tokens are paired to
+    // the logged-in UI session and authorized above before this branch.
+    if (!resolveOpenAiCompatibleHttpSenderIsOwner(req, requestAuth)) {
+      sendJson(res, 403, {
+        ok: false,
+        error: {
+          type: "forbidden",
+          message: "owner access required",
+        },
+      });
+      return true;
+    }
+  }
+
   const record = await readManagedImageRecord(attachmentId, opts.stateDir);
   if (!record || record.sessionKey !== sessionKey) {
     sendStatus(res, 404, "not found");
     return true;
   }
-  // Requester-session headers are client-declared, so media bytes require
-  // authenticated owner/admin context rather than trusting a URL-scoped header.
-  if (!resolveOpenAiCompatibleHttpSenderIsOwner(req, requestAuth)) {
-    sendJson(res, 403, {
-      ok: false,
-      error: {
-        type: "forbidden",
-        message: "owner access required",
-      },
-    });
-    return true;
-  }
+  return await serveManagedOutgoingImageRecord(res, record, variant, {
+    thumbnailMaxSide: opts.thumbnailMaxSide,
+  });
+}
+
+async function serveManagedOutgoingImageRecord(
+  res: ServerResponse,
+  record: ManagedImageRecord,
+  variant: "full" | "thumbnail" = "full",
+  opts?: { thumbnailMaxSide?: number },
+) {
   if (!(await recordMatchesTranscriptMessage(record))) {
     sendStatus(res, 404, "not found");
     return true;
@@ -1035,6 +1068,29 @@ export async function handleManagedOutgoingImageHttpRequest(
   } catch {
     sendStatus(res, 404, "not found");
     return true;
+  }
+
+  if (variant === "thumbnail") {
+    try {
+      body = await resizeToPng({
+        buffer: body,
+        maxSide: opts?.thumbnailMaxSide ?? DEFAULT_MANAGED_IMAGE_THUMBNAIL_MAX_SIDE,
+        compressionLevel: 8,
+        withoutEnlargement: true,
+      });
+      res.statusCode = 200;
+      res.setHeader("content-type", "image/png");
+      res.setHeader("content-length", String(body.byteLength));
+      res.setHeader("cache-control", "private, max-age=31536000, immutable");
+      res.setHeader(
+        "content-disposition",
+        `inline; filename="${safeAttachmentFilename(record.original.filename).replace(/\.[a-z0-9]{2,5}$/i, "") || "generated-image"}-thumbnail.png"`,
+      );
+      res.end(body);
+      return true;
+    } catch {
+      // Fall through to the full image if the thumbnail backend is unavailable.
+    }
   }
 
   res.statusCode = 200;

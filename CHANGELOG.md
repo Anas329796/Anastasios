@@ -563,6 +563,9 @@ Docs: https://docs.openclaw.ai
 - CLI/migrate: return cleanly without apply confirmation when interactive Codex migration leaves both skill copies and native plugin activations unselected. Thanks @kevinslin.
 - Cron CLI: add `openclaw cron list --agent <id>`, normalize the requested agent id, and include jobs without a stored agent id under the configured default agent while keeping `cron list` unfiltered when no agent is supplied. Fixes #77118. Thanks @zhanggttry.
 - Slack/performance: reduce message preparation, stream recipient lookup, and thread-context allocation overhead on Slack reply hot paths. Thanks @vincentkoc.
+- Channels/streaming: cap progress-draft tool lines by default so edited progress boxes avoid jumpy reflow from long wrapped lines.
+- Control UI/chat: add an agent-first filter to the chat session picker, keep chat controls/composer responsive across phone/tablet/desktop widths, keep desktop chat controls on one row, avoid duplicate avatar refreshes during initial chat load, and hide that row while scrolling down the transcript. Thanks @BunsDev.
+- Control UI/WebChat: add open, download, and copy actions for generated chat images, with stable rounded thumbnail frames while managed image previews load.
 - Control UI/chat: strip untrusted sender metadata from live streams and transcript display, preserve canvas preview anchors, and stop operator UI clients from injecting their internal client id as sender identity. Fixes #78739. Thanks @tmimmanuel, @guguangxin-eng, @hclsys, and @BunsDev.
 - Control UI/chat: collapse consecutive duplicate text messages into one bubble with a count so repeated text-only messages stay compact without hiding nearby context.
 - Control UI/chat and Sessions: label inherited thinking defaults separately from explicit overrides while preserving provider-supplied option labels. Fixes #77581. Thanks @BunsDev and @Beandon13.
@@ -2040,6 +2043,7 @@ Docs: https://docs.openclaw.ai
 - Models/DeepInfra: declare DeepInfra manifest catalog discovery and derive its runtime fallback catalog from the manifest, restoring provider-filtered `models list --all --provider deepinfra` rows without duplicated static model data. Thanks @shakkernerd.
 - CLI/update: verify managed gateway restarts against the installed service port instead of the caller shell port, so package updates do not report a healthy daemon as failed when profiles use different gateway ports. Thanks @vincentkoc.
 - Gateway/agent: reject strict `openclaw agent --deliver` requests with missing delivery targets before starting the agent run, so users do not wait for a completed turn that cannot send anywhere. Thanks @vincentkoc.
+- Gateway/WebChat: replace a raw Codex `MEDIA:` transcript turn with the normalized inline image message instead of appending a duplicate assistant reply in the Control UI. Thanks @Ittiz.
 - Setup/import: honor non-interactive `--import-from` onboarding flags by running the migration import path instead of silently completing normal setup without importing anything. Thanks @vincentkoc.
 - Discord/voice: run voice-channel turns under a voice-output policy that hides the agent `tts` tool and asks for spoken reply text, so `/vc join` sessions synthesize and play agent replies instead of ending with `NO_REPLY`. Fixes #61536. Thanks @aounakram.
 - Doctor/plugins: keep plain `doctor --non-interactive` from installing bundled plugin runtime dependencies, so headless health checks report missing deps while `doctor --fix` remains the explicit repair path. Thanks @vincentkoc.
