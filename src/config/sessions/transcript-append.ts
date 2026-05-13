@@ -272,7 +272,9 @@ async function findTranscriptEntryByIdempotencyKey(
     const buffer = Buffer.allocUnsafe(TRANSCRIPT_APPEND_SCAN_CHUNK_BYTES);
     let carry = "";
     const scan = (line: string): { id: string; message: unknown } | undefined => {
-      if (!line.trim()) return undefined;
+      if (!line.trim()) {
+        return undefined;
+      }
       try {
         const parsed = JSON.parse(line) as {
           id?: unknown;
@@ -292,13 +294,17 @@ async function findTranscriptEntryByIdempotencyKey(
     };
     while (true) {
       const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
-      if (bytesRead <= 0) break;
+      if (bytesRead <= 0) {
+        break;
+      }
       const text = carry + decoder.write(buffer.subarray(0, bytesRead));
       const lines = text.split(/\r?\n/);
       carry = lines.pop() ?? "";
       for (const line of lines) {
         const hit = scan(line);
-        if (hit) return hit;
+        if (hit) {
+          return hit;
+        }
       }
       await yieldTranscriptAppendScan();
     }
