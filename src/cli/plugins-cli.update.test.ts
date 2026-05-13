@@ -210,6 +210,35 @@ describe("plugins cli update", () => {
     expect(updateParams.dangerouslyForceUnsafeInstall).toBe(true);
   });
 
+  it("passes ClawHub risk acknowledgement to plugin updates", async () => {
+    const config = createTrackedPluginConfig({
+      pluginId: "openclaw-codex-app-server",
+      spec: "openclaw-codex-app-server@beta",
+    });
+    loadConfig.mockReturnValue(config);
+    setInstalledPluginIndexInstallRecords(config.plugins?.installs ?? {});
+    updateNpmInstalledPlugins.mockResolvedValue({
+      config,
+      changed: false,
+      outcomes: [],
+    });
+
+    await runPluginsCommand([
+      "plugins",
+      "update",
+      "openclaw-codex-app-server",
+      "--acknowledge-clawhub-risk",
+    ]);
+
+    expect(updateNpmInstalledPlugins).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config,
+        pluginIds: ["openclaw-codex-app-server"],
+        acknowledgeClawHubRisk: true,
+      }),
+    );
+  });
+
   it("writes updated config when updater reports changes", async () => {
     const cfg = {
       plugins: {
@@ -318,6 +347,44 @@ describe("plugins cli update", () => {
       reason: "source-changed",
     });
     expect(runtimeLogs).toContain("Failed to update beta: registry timeout");
+  });
+
+  it("exits non-zero when a ClawHub update is skipped for missing risk acknowledgement", async () => {
+    const cfg = {
+      plugins: {
+        installs: {
+          demo: {
+            source: "clawhub",
+            spec: "clawhub:@openclaw/plugin-demo@1.0.0",
+            clawhubPackage: "@openclaw/plugin-demo",
+          },
+        },
+      },
+    } as OpenClawConfig;
+    loadConfig.mockReturnValue(cfg);
+    setInstalledPluginIndexInstallRecords(cfg.plugins?.installs ?? {});
+    updateNpmInstalledPlugins.mockResolvedValue({
+      outcomes: [
+        {
+          pluginId: "demo",
+          status: "skipped",
+          message:
+            'Skipped demo ClawHub update: ClawHub release "@openclaw/plugin-demo@1.1.0" has trust warnings. Review the package and rerun with --acknowledge-clawhub-risk to continue. Existing installed plugin left unchanged.',
+        },
+      ],
+      changed: false,
+      config: cfg,
+    });
+    updateNpmInstalledHookPacks.mockResolvedValue({
+      outcomes: [],
+      changed: false,
+      config: cfg,
+    });
+
+    await expect(runPluginsCommand(["plugins", "update", "demo"])).rejects.toThrow("__exit__:1");
+
+    expect(writePersistedInstalledPluginIndexInstallRecords).not.toHaveBeenCalled();
+    expect(runtimeLogs.at(-1)).toContain("--acknowledge-clawhub-risk");
   });
 
   it("exits non-zero when a hook pack update reports an error", async () => {

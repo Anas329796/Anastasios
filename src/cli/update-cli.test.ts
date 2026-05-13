@@ -10,6 +10,7 @@ import type { OpenClawConfig, ConfigFileSnapshot } from "../config/types.opencla
 import { writePackageDistInventory } from "../infra/package-dist-inventory.js";
 import { isBetaTag } from "../infra/update-channels.js";
 import type { UpdateRunResult } from "../infra/update-runner.js";
+import type { ClawHubRiskAcknowledgementRequest } from "../plugins/clawhub.js";
 import { withEnvAsync } from "../test-utils/env.js";
 import { VERSION } from "../version.js";
 import { createCliRuntimeCapture } from "./test-runtime-capture.js";
@@ -19,6 +20,10 @@ const confirm = vi.fn();
 const select = vi.fn();
 const spinner = vi.fn(() => ({ start: vi.fn(), stop: vi.fn() }));
 const isCancel = (value: unknown) => value === "cancel";
+
+type ClawHubRiskHandler = (
+  request: ClawHubRiskAcknowledgementRequest,
+) => boolean | Promise<boolean>;
 
 const readPackageName = vi.fn();
 const readPackageVersion = vi.fn();
@@ -278,7 +283,13 @@ const { runCommandWithTimeout } = await import("../process/exec.js");
 const { runDaemonRestart, runDaemonInstall } = await import("./daemon-cli.js");
 const { doctorCommand } = await import("../commands/doctor.js");
 const { defaultRuntime } = await import("../runtime.js");
-const { updateCommand, updateStatusCommand, updateWizardCommand } = await import("./update-cli.js");
+const postCorePluginConvergence = await import("./update-cli/post-core-plugin-convergence.js");
+const runPostCorePluginConvergenceSpy = vi.spyOn(
+  postCorePluginConvergence,
+  "runPostCorePluginConvergence",
+);
+const { registerUpdateCli, updateCommand, updateStatusCommand, updateWizardCommand } =
+  await import("./update-cli.js");
 const updateCliShared = await import("./update-cli/shared.js");
 const { resolveGitInstallDir } = updateCliShared;
 const { spawnSync } = await import("node:child_process");
@@ -405,19 +416,36 @@ describe("update-cli", () => {
 
   const syncPluginCall = (index = 0) => {
     const calls = syncPluginsForUpdateChannel.mock.calls as unknown as Array<
-      [{ channel?: string; config?: OpenClawConfig }]
+      [Record<string, unknown> & { channel?: string; config?: OpenClawConfig }]
     >;
     return calls[index]?.[0];
   };
 
   const npmPluginUpdateCall = (index = 0) => {
     const calls = updateNpmInstalledPlugins.mock.calls as unknown as Array<
-      [{ config?: OpenClawConfig; timeoutMs?: number }]
+      [Record<string, unknown> & { config?: OpenClawConfig; timeoutMs?: number }]
     >;
     return calls[index]?.[0];
   };
   const lastNpmPluginUpdateCall = () =>
     npmPluginUpdateCall(updateNpmInstalledPlugins.mock.calls.length - 1);
+
+  const hasClawHubRiskHandler = (
+    call: Record<string, unknown> | undefined,
+  ): call is Record<string, unknown> & { onClawHubRisk: ClawHubRiskHandler } =>
+    typeof call?.onClawHubRisk === "function";
+
+  const getConfirmMessage = (): string => {
+    const options = confirm.mock.calls[0]?.[0];
+    if (!options || typeof options !== "object" || !("message" in options)) {
+      throw new Error("expected confirm message");
+    }
+    const message = options.message;
+    if (typeof message !== "string") {
+      throw new Error("expected confirm message to be a string");
+    }
+    return message;
+  };
 
   const replaceConfigCall = (index = 0) => vi.mocked(replaceConfigFile).mock.calls[index]?.[0];
   const lastReplaceConfigCall = () =>
@@ -930,6 +958,33 @@ describe("update-cli", () => {
     expect(updateNpmInstalledPlugins).not.toHaveBeenCalled();
   });
 
+  it("carries ClawHub risk acknowledgement into post-core resume", async () => {
+    const { entrypoints } = setupUpdatedRootRefresh({
+      gatewayUpdateImpl: async (root) =>
+        makeOkUpdateResult({
+          mode: "git",
+          root,
+          before: { sha: "old-sha", version: "2026.4.26" },
+          after: { sha: "new-sha", version: "2026.4.27" },
+        }),
+    });
+
+    await updateCommand({
+      channel: "dev",
+      yes: true,
+      restart: false,
+      acknowledgeClawHubRisk: true,
+    });
+
+    expect(spawnCall()?.[1]).toEqual([
+      entrypoints[0],
+      "update",
+      "--no-restart",
+      "--yes",
+      "--acknowledge-clawhub-risk",
+    ]);
+  });
+
   it("keeps downgrade post-update work in the current process", async () => {
     const downgradedRoot = createCaseDir("openclaw-downgraded-root");
     setupUpdatedRootRefresh({
@@ -1309,6 +1364,36 @@ describe("update-cli", () => {
     );
   });
 
+  it("includes non-blocking ClawHub trust warnings in json post-core plugin output", async () => {
+    const trustWarning =
+      'ClawHub trust warning for "@openclaw/demo@1.0.0": scan=pending; moderation=none; blockedFromDownload=false; pending=true; stale=false; reasons=pending.';
+    updateNpmInstalledPlugins.mockImplementationOnce(
+      async (params: { config: OpenClawConfig; logger?: { warn?: (message: string) => void } }) => {
+        params.logger?.warn?.(trustWarning);
+        return {
+          changed: false,
+          config: params.config,
+          outcomes: [
+            {
+              pluginId: "demo",
+              status: "unchanged",
+              message: "demo is up to date.",
+            },
+          ],
+        };
+      },
+    );
+    vi.mocked(defaultRuntime.writeJson).mockClear();
+
+    await updateCommand({ json: true, restart: false });
+
+    const jsonOutput = lastWriteJsonCall() as UpdateRunResult | undefined;
+    expect(jsonOutput?.postUpdate?.plugins?.status).toBe("warning");
+    expect(pluginWarning(jsonOutput)?.reason).toBe(trustWarning);
+    expect(pluginWarning(jsonOutput)?.guidance).toEqual([]);
+    expect(pluginOutcome(jsonOutput)?.status).toBe("unchanged");
+  });
+
   it("detects missing plugin payloads from persisted records before npm updates", async () => {
     const installPath = createCaseDir("openclaw-missing-plugin-payload");
     fsSync.mkdirSync(installPath, { recursive: true });
@@ -1420,6 +1505,60 @@ describe("update-cli", () => {
     ]);
     expect(pluginOutcome(jsonOutput)?.pluginId).toBe("demo");
     expect(pluginOutcome(jsonOutput)?.status).toBe("skipped");
+  });
+
+  it("marks unacknowledged ClawHub risk skips as post-update warnings", async () => {
+    updateNpmInstalledPlugins.mockResolvedValueOnce({
+      changed: false,
+      config: baseConfig,
+      outcomes: [
+        {
+          pluginId: "demo",
+          status: "skipped",
+          message:
+            'Skipped demo ClawHub update: ClawHub release "demo@1.2.4" has trust warnings. Review the package and rerun with --acknowledge-clawhub-risk to continue. Existing installed plugin left unchanged.',
+        },
+      ],
+    });
+    vi.mocked(defaultRuntime.writeJson).mockClear();
+
+    await updateCommand({ json: true, restart: false });
+
+    const jsonOutput = lastWriteJsonCall() as UpdateRunResult | undefined;
+    expect(jsonOutput?.postUpdate?.plugins?.status).toBe("warning");
+    expect(pluginWarning(jsonOutput)?.pluginId).toBe("demo");
+    expect(pluginWarning(jsonOutput)?.reason).toContain("--acknowledge-clawhub-risk");
+    expect(pluginWarning(jsonOutput)?.guidance).toEqual([
+      "Run openclaw doctor --fix to attempt automatic repair.",
+      "Run openclaw plugins inspect demo --runtime --json for details.",
+    ]);
+    expect(pluginOutcome(jsonOutput)?.pluginId).toBe("demo");
+    expect(pluginOutcome(jsonOutput)?.status).toBe("skipped");
+  });
+
+  it("prints unacknowledged ClawHub risk skips in human post-update output", async () => {
+    updateNpmInstalledPlugins.mockResolvedValueOnce({
+      changed: false,
+      config: baseConfig,
+      outcomes: [
+        {
+          pluginId: "demo",
+          status: "skipped",
+          message:
+            'Skipped demo ClawHub update: ClawHub release "demo@1.2.4" has trust warnings. Review the package and rerun with --acknowledge-clawhub-risk to continue. Existing installed plugin left unchanged.',
+        },
+      ],
+    });
+
+    await updateCommand({ yes: true, restart: false });
+
+    const logs = vi
+      .mocked(defaultRuntime.log)
+      .mock.calls.map((call) => String(call[0]))
+      .join("\n");
+    expect(logs).toContain("--acknowledge-clawhub-risk");
+    expect(logs).toContain("Run openclaw doctor --fix to attempt automatic repair.");
+    expect(logs).toContain("Run openclaw plugins inspect demo --runtime --json for details.");
   });
 
   it("fails unexpected post-core plugin sync exceptions", async () => {
@@ -1601,6 +1740,29 @@ describe("update-cli", () => {
     await program.parseAsync(["node", "openclaw", "update", "status", "--json"]);
 
     expect(seenJson).toBe(true);
+  });
+
+  it("parses update --acknowledge-clawhub-risk as the update command option", async () => {
+    const tempDir = createCaseDir("openclaw-update");
+    mockPackageInstallStatus(tempDir);
+    const program = new Command();
+    program.name("openclaw");
+    program.exitOverride();
+    registerUpdateCli(program);
+
+    await program.parseAsync([
+      "node",
+      "openclaw",
+      "update",
+      "--channel",
+      "beta",
+      "--yes",
+      "--no-restart",
+      "--acknowledge-clawhub-risk",
+    ]);
+
+    expect(syncPluginCall()?.acknowledgeClawHubRisk).toBe(true);
+    expect(npmPluginUpdateCall()?.acknowledgeClawHubRisk).toBe(true);
   });
 
   it.each([
@@ -2890,6 +3052,97 @@ describe("update-cli", () => {
     expect(syncConfig?.plugins?.entries).toBeUndefined();
     expect(updateCall?.skipDisabledPlugins).toBe(true);
     expect(updateCall?.syncOfficialPluginInstalls).toBe(true);
+  });
+
+  it("forwards ClawHub risk acknowledgement to post-update plugin work", async () => {
+    const tempDir = createCaseDir("openclaw-update");
+    mockPackageInstallStatus(tempDir);
+
+    await updateCommand({
+      channel: "beta",
+      yes: true,
+      restart: false,
+      acknowledgeClawHubRisk: true,
+    });
+
+    expect(syncPluginCall()?.acknowledgeClawHubRisk).toBe(true);
+    expect(npmPluginUpdateCall()?.acknowledgeClawHubRisk).toBe(true);
+    expect(lastNpmPluginUpdateCall()?.acknowledgeClawHubRisk).toBe(true);
+    expect(runPostCorePluginConvergenceSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ acknowledgeClawHubRisk: true }),
+    );
+  });
+
+  it("does not prompt for ClawHub risk during post-update plugin work when stdout is not interactive", async () => {
+    const tempDir = createCaseDir("openclaw-update");
+    mockPackageInstallStatus(tempDir);
+    setTty(true);
+    setStdoutTty(false);
+
+    await updateCommand({
+      channel: "beta",
+      restart: false,
+    });
+
+    expect(syncPluginCall()?.onClawHubRisk).toBeUndefined();
+    expect(npmPluginUpdateCall()?.onClawHubRisk).toBeUndefined();
+    expect(lastNpmPluginUpdateCall()?.onClawHubRisk).toBeUndefined();
+  });
+
+  it("does not prompt for ClawHub risk during post-update plugin work when --yes is set", async () => {
+    const tempDir = createCaseDir("openclaw-update");
+    mockPackageInstallStatus(tempDir);
+    setTty(true);
+    setStdoutTty(true);
+
+    await updateCommand({
+      channel: "beta",
+      yes: true,
+      restart: false,
+    });
+
+    expect(syncPluginCall()?.onClawHubRisk).toBeUndefined();
+    expect(npmPluginUpdateCall()?.onClawHubRisk).toBeUndefined();
+    expect(lastNpmPluginUpdateCall()?.onClawHubRisk).toBeUndefined();
+  });
+
+  it("sanitizes ClawHub risk prompt labels during post-update plugin work", async () => {
+    const tempDir = createCaseDir("openclaw-update");
+    mockPackageInstallStatus(tempDir);
+    setTty(true);
+    setStdoutTty(true);
+
+    await updateCommand({
+      channel: "beta",
+      restart: false,
+    });
+
+    const syncCall = syncPluginCall();
+    expect(hasClawHubRiskHandler(syncCall)).toBe(true);
+    if (!hasClawHubRiskHandler(syncCall)) {
+      throw new Error("expected ClawHub risk prompt handler");
+    }
+
+    confirm.mockClear();
+    confirm.mockResolvedValueOnce(true);
+    await syncCall.onClawHubRisk({
+      packageName: "demo\npkg",
+      version: "1.2.3\u001b[2K",
+      trust: {
+        scanStatus: "suspicious",
+        moderationState: null,
+        blockedFromDownload: false,
+        reasons: ["payload_strings"],
+        pending: false,
+        stale: false,
+      },
+      warning: "warning",
+    });
+
+    const message = getConfirmMessage();
+    expect(message).toContain('"demo\\npkg@1.2.3"');
+    expect(message).not.toContain("\n");
+    expect(message).not.toContain("\u001b");
   });
 
   it("persists channel and runs post-update work after switching from package to git", async () => {

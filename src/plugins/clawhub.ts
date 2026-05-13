@@ -15,6 +15,7 @@ import {
   downloadClawHubPackageArchive,
   fetchClawHubPackageArtifact,
   fetchClawHubPackageDetail,
+  fetchClawHubPackageSecurity,
   fetchClawHubPackageVersion,
   normalizeClawHubSha256Integrity,
   normalizeClawHubSha256Hex,
@@ -27,11 +28,14 @@ import {
   type ClawHubPackageCompatibility,
   type ClawHubPackageDetail,
   type ClawHubPackageClawPackSummary,
+  type ClawHubPackageSecurityResponse,
+  type ClawHubPackageSecurityTrust,
   type ClawHubResolvedArtifact,
   type ClawHubPackageVersion,
 } from "../infra/clawhub.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
+import { sanitizeTerminalText } from "../terminal/safe-text.js";
 import { resolveCompatibilityHostVersion } from "../version.js";
 import type { ClawHubPluginInstallRecordFields } from "./clawhub-install-records.js";
 import type { InstallSafetyOverrides } from "./install-security-scan.js";
@@ -49,6 +53,9 @@ export const CLAWHUB_INSTALL_ERROR_CODE = {
   INCOMPATIBLE_GATEWAY: "incompatible_gateway",
   MISSING_ARCHIVE_INTEGRITY: "missing_archive_integrity",
   ARCHIVE_INTEGRITY_MISMATCH: "archive_integrity_mismatch",
+  CLAWHUB_SECURITY_UNAVAILABLE: "clawhub_security_unavailable",
+  CLAWHUB_DOWNLOAD_BLOCKED: "clawhub_download_blocked",
+  CLAWHUB_RISK_ACKNOWLEDGEMENT_REQUIRED: "clawhub_risk_acknowledgement_required",
 } as const;
 
 export type ClawHubInstallErrorCode =
@@ -59,10 +66,18 @@ type PluginInstallLogger = {
   warn?: (message: string) => void;
 };
 
+export type ClawHubRiskAcknowledgementRequest = {
+  packageName: string;
+  version: string;
+  trust: ClawHubPackageSecurityTrust;
+  warning: string;
+};
+
 type ClawHubInstallFailure = {
   ok: false;
   error: string;
   code?: ClawHubInstallErrorCode;
+  warning?: string;
 };
 
 type ClawHubFileEntryLike = {
@@ -316,8 +331,14 @@ export function formatClawHubSpecifier(params: { name: string; version?: string 
 function buildClawHubInstallFailure(
   error: string,
   code?: ClawHubInstallErrorCode,
+  warning?: string,
 ): ClawHubInstallFailure {
-  return { ok: false, error, code };
+  return {
+    ok: false,
+    error,
+    ...(code ? { code } : {}),
+    ...(warning ? { warning } : {}),
+  };
 }
 
 function isClawHubInstallFailure(value: unknown): value is ClawHubInstallFailure {
@@ -347,6 +368,190 @@ function mapClawHubRequestError(
     );
   }
   return buildClawHubInstallFailure(formatErrorMessage(error));
+}
+
+const CLAWHUB_RISK_MODERATION_STATES = new Set(["blocked", "quarantined", "revoked"]);
+const CLAWHUB_SAFE_MODERATION_STATES = new Set(["", "approved"]);
+const CLAWHUB_NON_RISK_SCAN_STATUSES = new Set(["pending", "scan_pending", "stale", "stale_scan"]);
+const CLAWHUB_NON_RISK_REASONS = new Set([
+  "pending",
+  "pending_scan",
+  "scan:pending",
+  "scan_pending",
+  "stale",
+  "scan:stale",
+  "stale_scan",
+]);
+
+function normalizeClawHubTrustToken(value: string | null | undefined): string {
+  return normalizeOptionalString(value)?.toLowerCase() ?? "";
+}
+
+function formatClawHubTrustTokenForWarning(label: string, token: string): string {
+  return token ? `${label} ${token}` : `${label} missing`;
+}
+
+function isPendingOrStaleTrustWarning(trust: ClawHubPackageSecurityTrust): boolean {
+  return trust.pending || trust.stale;
+}
+
+function isNonRiskScanStatus(trust: ClawHubPackageSecurityTrust, scanStatus: string): boolean {
+  return isPendingOrStaleTrustWarning(trust) && CLAWHUB_NON_RISK_SCAN_STATUSES.has(scanStatus);
+}
+
+function isNonRiskReason(trust: ClawHubPackageSecurityTrust, reason: string): boolean {
+  return isPendingOrStaleTrustWarning(trust) && CLAWHUB_NON_RISK_REASONS.has(reason);
+}
+
+function resolveClawHubRiskReasons(trust: ClawHubPackageSecurityTrust): string[] {
+  const reasons: string[] = [];
+  if (trust.blockedFromDownload) {
+    reasons.push("blocked from download");
+  }
+  const scanStatus = normalizeClawHubTrustToken(trust.scanStatus);
+  if (scanStatus !== "clean" && !isNonRiskScanStatus(trust, scanStatus)) {
+    reasons.push(formatClawHubTrustTokenForWarning("scan status", scanStatus));
+  }
+  const moderationState = normalizeClawHubTrustToken(trust.moderationState);
+  if (
+    CLAWHUB_RISK_MODERATION_STATES.has(moderationState) ||
+    !CLAWHUB_SAFE_MODERATION_STATES.has(moderationState)
+  ) {
+    reasons.push(formatClawHubTrustTokenForWarning("moderation state", moderationState));
+  }
+  for (const reason of trust.reasons) {
+    const normalized = normalizeClawHubTrustToken(reason);
+    if (normalized && !isNonRiskReason(trust, normalized)) {
+      reasons.push(reason);
+    }
+  }
+  return reasons;
+}
+
+function formatClawHubTrustWarning(params: {
+  packageName: string;
+  version: string;
+  trust: ClawHubPackageSecurityTrust;
+  riskReasons: readonly string[];
+}): string {
+  const reasons = params.trust.reasons.map((reason) => sanitizeTerminalText(reason));
+  const details = [
+    `scan=${sanitizeTerminalText(params.trust.scanStatus ?? "unknown")}`,
+    `moderation=${sanitizeTerminalText(params.trust.moderationState ?? "none")}`,
+    `blockedFromDownload=${String(params.trust.blockedFromDownload)}`,
+    `pending=${String(params.trust.pending)}`,
+    `stale=${String(params.trust.stale)}`,
+    `reasons=${reasons.length ? reasons.join(", ") : "none"}`,
+  ];
+  const riskSuffix =
+    params.riskReasons.length > 0
+      ? ` Risk signals: ${params.riskReasons.map((reason) => sanitizeTerminalText(reason)).join(", ")}.`
+      : "";
+  return `ClawHub trust warning for "${sanitizeTerminalText(params.packageName)}@${sanitizeTerminalText(params.version)}": ${details.join("; ")}.${riskSuffix}`;
+}
+
+function formatClawHubReleaseLabel(packageName: string, version: string): string {
+  return `${sanitizeTerminalText(packageName)}@${sanitizeTerminalText(version)}`;
+}
+
+function validateClawHubSecurityIdentity(params: {
+  security: ClawHubPackageSecurityResponse;
+  packageName: string;
+  version: string;
+}): ClawHubInstallFailure | null {
+  const responsePackageName = normalizeOptionalString(params.security.package?.name);
+  if (responsePackageName !== params.packageName) {
+    return buildClawHubInstallFailure(
+      `ClawHub release trust check for "${formatClawHubReleaseLabel(params.packageName, params.version)}" returned package "${sanitizeTerminalText(responsePackageName ?? "unknown")}".`,
+      CLAWHUB_INSTALL_ERROR_CODE.CLAWHUB_SECURITY_UNAVAILABLE,
+    );
+  }
+  const responseVersion = normalizeOptionalString(params.security.release?.version);
+  if (responseVersion !== params.version) {
+    return buildClawHubInstallFailure(
+      `ClawHub release trust check for "${formatClawHubReleaseLabel(params.packageName, params.version)}" returned version "${sanitizeTerminalText(responseVersion ?? "unknown")}".`,
+      CLAWHUB_INSTALL_ERROR_CODE.CLAWHUB_SECURITY_UNAVAILABLE,
+    );
+  }
+  return null;
+}
+
+async function ensureClawHubPackageTrustAcknowledged(params: {
+  packageName: string;
+  version: string;
+  baseUrl?: string;
+  token?: string;
+  timeoutMs?: number;
+  acknowledgeClawHubRisk?: boolean;
+  onClawHubRisk?: (request: ClawHubRiskAcknowledgementRequest) => boolean | Promise<boolean>;
+  logger?: PluginInstallLogger;
+}): Promise<ClawHubInstallFailure | null> {
+  let trust: ClawHubPackageSecurityTrust;
+  try {
+    const security = await fetchClawHubPackageSecurity({
+      name: params.packageName,
+      version: params.version,
+      baseUrl: params.baseUrl,
+      token: params.token,
+      timeoutMs: params.timeoutMs,
+    });
+    const identityFailure = validateClawHubSecurityIdentity({
+      security,
+      packageName: params.packageName,
+      version: params.version,
+    });
+    if (identityFailure) {
+      return identityFailure;
+    }
+    trust = security.trust;
+  } catch (error) {
+    return buildClawHubInstallFailure(
+      `ClawHub release trust check failed for "${formatClawHubReleaseLabel(params.packageName, params.version)}": ${sanitizeTerminalText(formatErrorMessage(error))}`,
+      CLAWHUB_INSTALL_ERROR_CODE.CLAWHUB_SECURITY_UNAVAILABLE,
+    );
+  }
+
+  const riskReasons = resolveClawHubRiskReasons(trust);
+  const warning = formatClawHubTrustWarning({
+    packageName: params.packageName,
+    version: params.version,
+    trust,
+    riskReasons,
+  });
+  if (trust.blockedFromDownload) {
+    params.logger?.warn?.(warning);
+    return buildClawHubInstallFailure(
+      `ClawHub release "${formatClawHubReleaseLabel(params.packageName, params.version)}" is blocked from download by ClawHub.`,
+      CLAWHUB_INSTALL_ERROR_CODE.CLAWHUB_DOWNLOAD_BLOCKED,
+      warning,
+    );
+  }
+
+  if (riskReasons.length === 0 && !trust.pending && !trust.stale) {
+    return null;
+  }
+
+  params.logger?.warn?.(warning);
+  if (riskReasons.length === 0 || params.acknowledgeClawHubRisk) {
+    return null;
+  }
+
+  const acknowledged = params.onClawHubRisk
+    ? await params.onClawHubRisk({
+        packageName: params.packageName,
+        version: params.version,
+        trust,
+        warning,
+      })
+    : false;
+  if (acknowledged) {
+    return null;
+  }
+  return buildClawHubInstallFailure(
+    `ClawHub release "${formatClawHubReleaseLabel(params.packageName, params.version)}" has trust warnings. Review the package and rerun with --acknowledge-clawhub-risk to continue.`,
+    CLAWHUB_INSTALL_ERROR_CODE.CLAWHUB_RISK_ACKNOWLEDGEMENT_REQUIRED,
+    warning,
+  );
 }
 
 function isMissingArtifactResolverRoute(error: unknown): boolean {
@@ -1055,6 +1260,8 @@ export async function installPluginFromClawHub(
     timeoutMs?: number;
     dryRun?: boolean;
     expectedPluginId?: string;
+    acknowledgeClawHubRisk?: boolean;
+    onClawHubRisk?: (request: ClawHubRiskAcknowledgementRequest) => boolean | Promise<boolean>;
   },
 ): Promise<
   | ({
@@ -1125,11 +1332,24 @@ export async function installPluginFromClawHub(
     compatibility: versionState.compatibility,
     logger: params.logger,
   });
+  const trustFailure = await ensureClawHubPackageTrustAcknowledged({
+    packageName: canonicalPackageName,
+    version: versionState.version,
+    baseUrl: params.baseUrl,
+    token: params.token,
+    timeoutMs: params.timeoutMs,
+    acknowledgeClawHubRisk: params.acknowledgeClawHubRisk,
+    onClawHubRisk: params.onClawHubRisk,
+    logger: params.logger,
+  });
+  if (trustFailure) {
+    return trustFailure;
+  }
 
   let archive;
   try {
     archive = await downloadClawHubPackageArchive({
-      name: parsed.name,
+      name: canonicalPackageName,
       version: versionState.version,
       artifact: expectedClawPackSha256 ? "clawpack" : "archive",
       baseUrl: params.baseUrl,
@@ -1160,27 +1380,27 @@ export async function installPluginFromClawHub(
         archive.integrity !== expectedIntegrity
       ) {
         return buildClawHubInstallFailure(
-          `ClawHub ClawPack integrity mismatch for "${parsed.name}@${versionState.version}": expected ${expectedClawPackSha256}, got ${archive.sha256Hex}.`,
+          `ClawHub ClawPack integrity mismatch for "${canonicalPackageName}@${versionState.version}": expected ${expectedClawPackSha256}, got ${archive.sha256Hex}.`,
           CLAWHUB_INSTALL_ERROR_CODE.ARCHIVE_INTEGRITY_MISMATCH,
         );
       }
       if (expectedNpmIntegrity && archive.npmIntegrity !== expectedNpmIntegrity) {
         return buildClawHubInstallFailure(
-          `ClawHub ClawPack npm integrity mismatch for "${parsed.name}@${versionState.version}": expected ${expectedNpmIntegrity}, got ${archive.npmIntegrity ?? "unknown"}.`,
+          `ClawHub ClawPack npm integrity mismatch for "${canonicalPackageName}@${versionState.version}": expected ${expectedNpmIntegrity}, got ${archive.npmIntegrity ?? "unknown"}.`,
           CLAWHUB_INSTALL_ERROR_CODE.ARCHIVE_INTEGRITY_MISMATCH,
         );
       }
       const expectedNpmShasum = resolveClawHubNpmShasum(versionState.clawpack);
       if (expectedNpmShasum && archive.npmShasum !== expectedNpmShasum) {
         return buildClawHubInstallFailure(
-          `ClawHub ClawPack npm shasum mismatch for "${parsed.name}@${versionState.version}": expected ${expectedNpmShasum}, got ${archive.npmShasum ?? "unknown"}.`,
+          `ClawHub ClawPack npm shasum mismatch for "${canonicalPackageName}@${versionState.version}": expected ${expectedNpmShasum}, got ${archive.npmShasum ?? "unknown"}.`,
           CLAWHUB_INSTALL_ERROR_CODE.ARCHIVE_INTEGRITY_MISMATCH,
         );
       }
     } else if (versionState.verification?.kind === "archive-integrity") {
       if (archive.integrity !== versionState.verification.integrity) {
         return buildClawHubInstallFailure(
-          `ClawHub archive integrity mismatch for "${parsed.name}@${versionState.version}": expected ${versionState.verification.integrity}, got ${archive.integrity}.`,
+          `ClawHub archive integrity mismatch for "${canonicalPackageName}@${versionState.version}": expected ${versionState.verification.integrity}, got ${archive.integrity}.`,
           CLAWHUB_INSTALL_ERROR_CODE.ARCHIVE_INTEGRITY_MISMATCH,
         );
       }
@@ -1207,7 +1427,7 @@ export async function installPluginFromClawHub(
       );
     }
     params.logger?.info?.(
-      `Downloading ${detail.package?.family === "bundle-plugin" ? "bundle" : "plugin"} ${parsed.name}@${versionState.version} from ClawHub…`,
+      `Downloading ${detail.package?.family === "bundle-plugin" ? "bundle" : "plugin"} ${canonicalPackageName}@${versionState.version} from ClawHub…`,
     );
     const installResult = await installPluginFromArchive({
       archivePath: archive.archivePath,
@@ -1250,14 +1470,14 @@ export async function installPluginFromClawHub(
     }
     return {
       ...installResult,
-      packageName: parsed.name,
+      packageName: canonicalPackageName,
       clawhub: {
         source: "clawhub",
         clawhubUrl:
           normalizeOptionalString(params.baseUrl) ||
           normalizeOptionalString(process.env.OPENCLAW_CLAWHUB_URL) ||
           "https://clawhub.ai",
-        clawhubPackage: parsed.name,
+        clawhubPackage: canonicalPackageName,
         clawhubFamily,
         clawhubChannel: pkg.channel,
         version: installResult.version ?? versionState.version,

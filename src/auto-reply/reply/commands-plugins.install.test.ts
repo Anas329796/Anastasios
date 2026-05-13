@@ -186,6 +186,128 @@ describe("handleCommands /plugins install", () => {
     });
   });
 
+  it("includes non-blocking ClawHub warnings in successful chat install replies", async () => {
+    const warning =
+      'ClawHub trust warning for "@openclaw/clawhub-demo@1.2.3": scan=pending; reasons=pending.';
+    installPluginFromClawHubMock.mockImplementation(async (params: unknown) => {
+      if (!params || typeof params !== "object" || !("logger" in params)) {
+        throw new Error("expected ClawHub install logger");
+      }
+      const logger = params.logger;
+      if (
+        !logger ||
+        typeof logger !== "object" ||
+        !("warn" in logger) ||
+        typeof logger.warn !== "function"
+      ) {
+        throw new Error("expected ClawHub install warn logger");
+      }
+      logger.warn(warning);
+      return {
+        ok: true,
+        pluginId: "clawhub-demo",
+        targetDir: "/tmp/clawhub-demo",
+        version: "1.2.3",
+        extensions: ["index.js"],
+        packageName: "@openclaw/clawhub-demo",
+        clawhub: {
+          source: "clawhub",
+          clawhubUrl: "https://clawhub.ai",
+          clawhubPackage: "@openclaw/clawhub-demo",
+          clawhubFamily: "code-plugin",
+          clawhubChannel: "official",
+          version: "1.2.3",
+          integrity: "sha512-demo",
+          resolvedAt: "2026-03-22T12:00:00.000Z",
+        },
+      };
+    });
+    persistPluginInstallMock.mockResolvedValue({});
+
+    await withTempHome("openclaw-command-plugins-home-", async () => {
+      const workspaceDir = await workspaceHarness.createWorkspace();
+      const params = buildPluginsParams(
+        "/plugins install clawhub:@openclaw/clawhub-demo@1.2.3",
+        workspaceDir,
+      );
+      const result = await handlePluginsCommand(params, true);
+      if (result === null) {
+        throw new Error("expected plugin install result");
+      }
+      expect(result.reply?.text).toContain('Installed plugin "clawhub-demo"');
+      expect(result.reply?.text).toContain(warning);
+      expectPersistedInstall("clawhub-demo", {
+        source: "clawhub",
+        spec: "clawhub:@openclaw/clawhub-demo@1.2.3",
+        installPath: "/tmp/clawhub-demo",
+      });
+    });
+  });
+
+  it("reports risky ClawHub install failures without persisting install metadata", async () => {
+    const warning =
+      'ClawHub trust warning for "@openclaw/risky-demo@1.2.3": scan=suspicious; moderation=none; blockedFromDownload=false; pending=false; stale=false; reasons=payload_string. Risk signals: scan status suspicious, payload_string.';
+    installPluginFromClawHubMock.mockResolvedValue({
+      ok: false,
+      code: "clawhub_risk_acknowledgement_required",
+      error:
+        'ClawHub release "@openclaw/risky-demo@1.2.3" has trust warnings. Review the package and rerun with --acknowledge-clawhub-risk to continue.',
+      warning,
+    });
+
+    await withTempHome("openclaw-command-plugins-home-", async () => {
+      const workspaceDir = await workspaceHarness.createWorkspace();
+      const params = buildPluginsParams(
+        "/plugins install clawhub:@openclaw/risky-demo@1.2.3",
+        workspaceDir,
+      );
+      const result = await handlePluginsCommand(params, true);
+      if (result === null) {
+        throw new Error("expected plugin install result");
+      }
+
+      expect(result.reply?.text).toContain("has trust warnings");
+      expect(result.reply?.text).toContain("scan=suspicious");
+      expect(result.reply?.text).toContain("payload_string");
+      expect(result.reply?.text).toContain("--acknowledge-clawhub-risk");
+      expect(result.reply?.text).toContain("local openclaw plugins install command");
+      expect(result.reply?.text).toContain("trusted shell");
+      expect(mockFirstObjectArg(installPluginFromClawHubMock).spec).toBe(
+        "clawhub:@openclaw/risky-demo@1.2.3",
+      );
+      expect(persistPluginInstallMock).not.toHaveBeenCalled();
+    });
+  });
+
+  it("includes ClawHub trust details for blocked chat install failures", async () => {
+    const warning =
+      'ClawHub trust warning for "@openclaw/blocked-demo@1.2.3": scan=suspicious; moderation=blocked; blockedFromDownload=true; pending=false; stale=false; reasons=payload_string. Risk signals: blocked from download, scan status suspicious, moderation state blocked, payload_string.';
+    installPluginFromClawHubMock.mockResolvedValue({
+      ok: false,
+      code: "clawhub_download_blocked",
+      error: 'ClawHub release "@openclaw/blocked-demo@1.2.3" is blocked from download by ClawHub.',
+      warning,
+    });
+
+    await withTempHome("openclaw-command-plugins-home-", async () => {
+      const workspaceDir = await workspaceHarness.createWorkspace();
+      const params = buildPluginsParams(
+        "/plugins install clawhub:@openclaw/blocked-demo@1.2.3",
+        workspaceDir,
+      );
+      const result = await handlePluginsCommand(params, true);
+      if (result === null) {
+        throw new Error("expected plugin install result");
+      }
+
+      expect(result.reply?.text).toContain("blocked from download");
+      expect(result.reply?.text).toContain("scan=suspicious");
+      expect(result.reply?.text).toContain("moderation=blocked");
+      expect(result.reply?.text).toContain("payload_string");
+      expect(persistPluginInstallMock).not.toHaveBeenCalled();
+    });
+  });
+
   it("refuses plugin installs in Nix mode before package installer side effects", async () => {
     const previousNixMode = process.env.OPENCLAW_NIX_MODE;
     process.env.OPENCLAW_NIX_MODE = "1";
