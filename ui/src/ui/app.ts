@@ -711,6 +711,13 @@ export class OpenClawApp extends LitElement {
   @state() logsLimit = 500;
   @state() logsMaxBytes = 250_000;
   @state() logsAtBottom = true;
+  @state() pluginUiEntryPoints: PluginControlUiEntryPoint[] = [];
+  @state() activePluginUiEntryPoint: PluginControlUiEntryPoint | null = null;
+  @state() activePluginUiEntryPointSrc: string | null = null;
+  private pluginUiBridgeFrame: HTMLIFrameElement | null = null;
+  private pluginUiBridgeLoadHandler: (() => void) | null = null;
+  private pluginUiBridgePort: MessagePort | null = null;
+  private pluginUiBridgeKey: string | null = null;
 
   client: GatewayBrowserClient | null = null;
   chatScrollFrame: number | null = null;
@@ -816,7 +823,7 @@ export class OpenClawApp extends LitElement {
     this.pluginUiBridgePort?.close();
     const channel = new MessageChannel();
     this.pluginUiBridgePort = channel.port1;
-    this.pluginUiBridgePort.addEventListener("message", (event) => {
+    this.pluginUiBridgePort.addEventListener("message", (event: MessageEvent) => {
       const data = event.data as PluginUiRequestMessage | null;
       if (
         data?.type !== "openclaw.pluginUi.request" ||

@@ -725,6 +725,12 @@ export const validatePluginApprovalResolveParams = ajv.compile<PluginApprovalRes
 export const validatePluginsUiDescriptorsParams = ajv.compile<PluginsUiDescriptorsParams>(
   PluginsUiDescriptorsParamsSchema,
 );
+export const validatePluginsUiEntryPointsParams = ajv.compile<PluginsUiEntryPointsParams>(
+  PluginsUiEntryPointsParamsSchema,
+);
+export const validatePluginsUiEntryPointLaunchParams = ajv.compile<PluginsUiEntryPointLaunchParams>(
+  PluginsUiEntryPointLaunchParamsSchema,
+);
 export const validatePluginsSessionActionParams = ajv.compile<PluginsSessionActionParams>(
   PluginsSessionActionParamsSchema,
 );

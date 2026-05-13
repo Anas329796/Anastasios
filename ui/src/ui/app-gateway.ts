@@ -93,6 +93,7 @@ type GatewayHost = {
   presenceEntries: PresenceEntry[];
   presenceError: string | null;
   presenceStatus: StatusSummary | null;
+  pluginUiEntryPoints: PluginUiEntryPointsState["pluginUiEntryPoints"];
   agentsLoading: boolean;
   agentsList: AgentsListResult | null;
   agentsError: string | null;
@@ -574,6 +575,7 @@ export function connectGateway(host: GatewayHost, options?: ConnectGatewayOption
         void refreshChatAvatar(host as unknown as Parameters<typeof refreshChatAvatar>[0]);
       }
       void loadHealthState(host as unknown as HealthState);
+      void loadPluginUiEntryPoints(host as unknown as PluginUiEntryPointsState);
       void loadAgentsThenRefreshActiveTab(host);
       // Re-run push reconciliation now that the gateway client is available.
       void host.reconcileWebPushState?.();
