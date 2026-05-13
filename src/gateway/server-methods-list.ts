@@ -194,6 +194,7 @@ export const GATEWAY_EVENTS = [
   "session.message",
   "session.tool",
   "sessions.changed",
+  "socket.drain",
   "presence",
   "tick",
   "talk.mode",
