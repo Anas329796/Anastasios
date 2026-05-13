@@ -1510,3 +1510,46 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
     });
   });
 });
+
+describe("deliverSubagentAnnouncement requesterRunId propagation", () => {
+  const origin = {
+    channel: "slack",
+    to: "channel:C123",
+    accountId: "acct-1",
+    threadId: "171.222",
+  } as const;
+
+  async function runDirectAnnounce(params: { requesterRunId?: string }) {
+    const callGateway = createGatewayMock();
+    __testing.setDepsForTest({
+      callGateway,
+      getRequesterSessionActivity: () => ({ sessionId: "requester-session", isActive: false }),
+      getRuntimeConfig: () => ({}) as never,
+    });
+    await deliverSubagentAnnouncement({
+      requesterSessionKey: "agent:main:slack:channel:C123:thread:171.222",
+      targetRequesterSessionKey: "agent:main:slack:channel:C123:thread:171.222",
+      triggerMessage: "child done",
+      steerMessage: "child done",
+      requesterOrigin: origin,
+      requesterSessionOrigin: origin,
+      completionDirectOrigin: origin,
+      directOrigin: origin,
+      requesterIsSubagent: false,
+      expectsCompletionMessage: false,
+      bestEffortDeliver: true,
+      directIdempotencyKey: "announce-runid",
+      ...(params.requesterRunId ? { requesterRunId: params.requesterRunId } : {}),
+    });
+    return callGateway;
+  }
+
+  it("forwards requesterRunId as spawnedByRunId on the Gateway agent call, and omits it when absent", async () => {
+    const withRunId = await runDirectAnnounce({ requesterRunId: "parent-run-abc" });
+    expectGatewayAgentParams(withRunId, { spawnedByRunId: "parent-run-abc" });
+
+    const withoutRunId = await runDirectAnnounce({});
+    const params = expectRecordFields(mockCallArg(withoutRunId), { method: "agent" }).params;
+    expect(expectRecordFields(params, {}).spawnedByRunId).toBeUndefined();
+  });
+});

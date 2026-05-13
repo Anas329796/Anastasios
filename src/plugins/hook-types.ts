@@ -71,6 +71,7 @@ export type PluginHookName =
   | "before_prompt_build"
   | "before_agent_start"
   | "before_agent_reply"
+  | "agent_start"
   | "model_call_started"
   | "model_call_ended"
   | "llm_input"
@@ -109,6 +110,7 @@ export const PLUGIN_HOOK_NAMES = [
   "before_prompt_build",
   "before_agent_start",
   "before_agent_reply",
+  "agent_start",
   "model_call_started",
   "model_call_ended",
   "llm_input",
@@ -208,13 +210,31 @@ export type PluginHookBeforeAgentReplyResult = {
   reason?: string;
 };
 
+export type PluginHookAgentStartEvent = {
+  runId: string;
+  parentRunId?: string;
+  requesterSessionKey?: string;
+  startedAt?: number;
+  sessionId?: string;
+  sessionKey?: string;
+  agentId?: string;
+  provider?: string;
+  model?: string;
+  prompt?: string;
+};
+
 export type PluginHookLlmInputEvent = {
   runId: string;
   sessionId: string;
   provider: string;
   model: string;
   systemPrompt?: string;
+  /** Authoritative final prompt text handed to the model. */
   prompt: string;
+  /** Input prompt received by this runner invocation; may already carry upstream wrapping. */
+  userPrompt?: string;
+  /** Hook-prepended context only (prompt_build / before_agent_start `prependContext`); does NOT cover runtime `currentTurnContext` prefix or hook `appendContext` suffix. Use `prompt` for full text. */
+  prependedContext?: string;
   historyMessages: unknown[];
   imagesCount: number;
 };
@@ -865,6 +885,10 @@ export type PluginHookHandlerMap = {
     event: PluginHookBeforeAgentStartEvent,
     ctx: PluginHookAgentContext,
   ) => Promise<PluginHookBeforeAgentStartResult | void> | PluginHookBeforeAgentStartResult | void;
+  agent_start: (
+    event: PluginHookAgentStartEvent,
+    ctx: PluginHookAgentContext,
+  ) => Promise<void> | void;
   before_agent_reply: (
     event: PluginHookBeforeAgentReplyEvent,
     ctx: PluginHookAgentContext,

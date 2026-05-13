@@ -589,6 +589,7 @@ export const agentHandlers: GatewayRequestHandlers = {
       groupId?: string;
       groupChannel?: string;
       groupSpace?: string;
+      spawnedByRunId?: string;
       lane?: string;
       extraSystemPrompt?: string;
       modelRun?: boolean;
@@ -1477,6 +1478,7 @@ export const agentHandlers: GatewayRequestHandlers = {
             groupChannel: resolvedGroupChannel,
             groupSpace: resolvedGroupSpace,
             spawnedBy: spawnedByValue,
+            spawnedByRunId: request.spawnedByRunId,
             timeout: request.timeout?.toString(),
             bestEffortDeliver,
             messageChannel: originMessageChannel,
