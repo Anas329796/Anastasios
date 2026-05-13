@@ -81,8 +81,8 @@ import {
 import { resolveSessionKeyForRun } from "../server-session-key.js";
 import {
   forkCompactionCheckpointTranscriptAsync,
-  getSessionCompactionCheckpoint,
-  listSessionCompactionCheckpoints,
+  getSessionCompactionCheckpointWithFilesAsync,
+  listSessionCompactionCheckpointsWithFilesAsync,
 } from "../session-compaction-checkpoints.js";
 import { reactivateCompletedSubagentSession } from "../session-subagent-reactivation.js";
 import {
@@ -1085,7 +1085,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
     }
     respond(true, { ok: true, key: resolved.key }, undefined);
   },
-  "sessions.compaction.list": ({ params, respond }) => {
+  "sessions.compaction.list": async ({ params, respond }) => {
     if (
       !assertValidParams(
         params,
@@ -1100,18 +1100,22 @@ export const sessionsHandlers: GatewayRequestHandlers = {
     if (!key) {
       return;
     }
-    const { entry, canonicalKey } = loadSessionEntry(key);
+    const { entry, canonicalKey, storePath } = loadSessionEntry(key);
     respond(
       true,
       {
         ok: true,
         key: canonicalKey,
-        checkpoints: listSessionCompactionCheckpoints(entry),
+        checkpoints: await listSessionCompactionCheckpointsWithFilesAsync({
+          entry,
+          sessionKey: canonicalKey,
+          storePath,
+        }),
       },
       undefined,
     );
   },
-  "sessions.compaction.get": ({ params, respond }) => {
+  "sessions.compaction.get": async ({ params, respond }) => {
     if (
       !assertValidParams(
         params,
@@ -1132,8 +1136,13 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "checkpointId required"));
       return;
     }
-    const { entry, canonicalKey } = loadSessionEntry(key);
-    const checkpoint = getSessionCompactionCheckpoint({ entry, checkpointId });
+    const { entry, canonicalKey, storePath } = loadSessionEntry(key);
+    const checkpoint = await getSessionCompactionCheckpointWithFilesAsync({
+      entry,
+      sessionKey: canonicalKey,
+      storePath,
+      checkpointId,
+    });
     if (!checkpoint) {
       respond(
         false,
@@ -1456,7 +1465,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       return;
     }
     const loaded = loadSessionEntry(key);
-    const { cfg, entry, canonicalKey } = loaded;
+    const { cfg, entry, canonicalKey, storePath } = loaded;
     const target = resolveGatewaySessionStoreTarget({ cfg, key: canonicalKey });
     if (!entry?.sessionId) {
       respond(
@@ -1466,7 +1475,12 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       );
       return;
     }
-    const checkpoint = getSessionCompactionCheckpoint({ entry, checkpointId });
+    const checkpoint = await getSessionCompactionCheckpointWithFilesAsync({
+      entry,
+      sessionKey: canonicalKey,
+      storePath,
+      checkpointId,
+    });
     if (!checkpoint?.preCompaction.sessionFile) {
       respond(
         false,
@@ -1565,7 +1579,12 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       );
       return;
     }
-    const checkpoint = getSessionCompactionCheckpoint({ entry, checkpointId });
+    const checkpoint = await getSessionCompactionCheckpointWithFilesAsync({
+      entry,
+      sessionKey: canonicalKey,
+      storePath,
+      checkpointId,
+    });
     if (!checkpoint?.preCompaction.sessionFile) {
       respond(
         false,

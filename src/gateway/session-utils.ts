@@ -47,9 +47,12 @@ import { resolveStateDir } from "../config/paths.js";
 import {
   buildGroupDisplayName,
   loadSessionStore,
+  parseCompactionCheckpointTranscriptFileName,
   resolveAllAgentSessionStoreTargetsSync,
   resolveAgentMainSessionKey,
   resolveFreshSessionTotalTokens,
+  resolveSessionFilePath,
+  resolveSessionFilePathOptions,
   resolveStorePath,
   type SessionEntry,
   type SessionStoreTarget,
@@ -294,6 +297,76 @@ function buildCompactionCheckpointPreview(
   };
 }
 
+function discoverDiskCompactionCheckpointPreviewsSync(params: {
+  key: string;
+  storePath: string;
+  entry?: Pick<SessionEntry, "sessionId" | "sessionFile" | "compactionCheckpoints">;
+  checkpointFileNamesByDir?: Map<string, string[] | null>;
+}): GatewaySessionRow["latestCompactionCheckpoint"][] {
+  if (!params.entry?.sessionId) {
+    return [];
+  }
+  const agentId = parseAgentSessionKey(params.key)?.agentId;
+  let sessionFile: string;
+  try {
+    sessionFile = resolveSessionFilePath(
+      params.entry.sessionId,
+      params.entry,
+      resolveSessionFilePathOptions({ storePath: params.storePath, agentId }),
+    );
+  } catch {
+    return [];
+  }
+  const sessionDir = path.dirname(sessionFile);
+  const checkpointTranscriptBase = path.parse(sessionFile).name;
+  const knownIds = new Set(
+    (params.entry.compactionCheckpoints ?? []).map((checkpoint) => checkpoint.checkpointId),
+  );
+  let fileNames: string[];
+  const cachedFileNames = params.checkpointFileNamesByDir?.get(sessionDir);
+  if (cachedFileNames !== undefined) {
+    if (cachedFileNames === null) {
+      return [];
+    }
+    fileNames = cachedFileNames;
+  } else {
+    try {
+      fileNames = fs.readdirSync(sessionDir);
+      params.checkpointFileNamesByDir?.set(sessionDir, fileNames);
+    } catch {
+      params.checkpointFileNamesByDir?.set(sessionDir, null);
+      return [];
+    }
+  }
+  const previews: GatewaySessionRow["latestCompactionCheckpoint"][] = [];
+  for (const fileName of fileNames) {
+    const parsed = parseCompactionCheckpointTranscriptFileName(fileName);
+    if (
+      !parsed ||
+      parsed.sessionId !== checkpointTranscriptBase ||
+      knownIds.has(parsed.checkpointId)
+    ) {
+      continue;
+    }
+    const checkpointFile = path.join(sessionDir, fileName);
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(checkpointFile);
+    } catch {
+      continue;
+    }
+    if (!stat.isFile()) {
+      continue;
+    }
+    previews.push({
+      checkpointId: parsed.checkpointId,
+      createdAt: stat.mtimeMs,
+      reason: "manual",
+    });
+  }
+  return previews;
+}
+
 function resolveEstimatedSessionCostUsd(params: {
   cfg: OpenClawConfig;
   provider?: string;
@@ -379,6 +452,7 @@ type SessionListRowContext = {
       defaultLevel: ReturnType<typeof resolveGatewaySessionThinkingDefault>;
     }
   >;
+  checkpointFileNamesByDir: Map<string, string[] | null>;
 };
 
 function resolveRuntimeChildSessionKeys(
@@ -497,6 +571,7 @@ function buildSessionListRowContext(params: {
     storeChildSessionsByKey: buildStoreChildSessionIndex(params.store, params.now, subagentRuns),
     selectedModelByOverrideRef: new Map(),
     thinkingMetadataByModelRef: new Map(),
+    checkpointFileNamesByDir: new Map(),
   };
 }
 
@@ -1714,9 +1789,36 @@ export function buildGatewaySessionRow(params: {
         params.storeChildSessionsByKey.get(key),
       )
     : resolveChildSessionKeys(key, store, now, rowContext?.subagentRuns);
-  const latestCompactionCheckpoint = buildCompactionCheckpointPreview(
-    resolveLatestCompactionCheckpoint(entry),
+  const storedCompactionCheckpointPreviews = [
+    buildCompactionCheckpointPreview(resolveLatestCompactionCheckpoint(entry)),
+  ].filter(
+    (checkpoint): checkpoint is NonNullable<GatewaySessionRow["latestCompactionCheckpoint"]> =>
+      Boolean(checkpoint),
   );
+  const diskCompactionCheckpointPreviews = discoverDiskCompactionCheckpointPreviewsSync({
+    key,
+    storePath,
+    entry,
+    checkpointFileNamesByDir: rowContext?.checkpointFileNamesByDir,
+  });
+  const compactionCheckpointPreviews = [
+    ...storedCompactionCheckpointPreviews,
+    ...diskCompactionCheckpointPreviews,
+  ].filter(
+    (checkpoint): checkpoint is NonNullable<GatewaySessionRow["latestCompactionCheckpoint"]> =>
+      Boolean(checkpoint),
+  );
+  const latestCompactionCheckpoint = compactionCheckpointPreviews.reduce<
+    GatewaySessionRow["latestCompactionCheckpoint"] | undefined
+  >(
+    (latest, checkpoint) =>
+      !latest || checkpoint.createdAt > latest.createdAt ? checkpoint : latest,
+    undefined,
+  );
+  const totalCompactionCheckpointCount =
+    (entry?.compactionCheckpoints?.length ?? 0) + diskCompactionCheckpointPreviews.length;
+  const compactionCheckpointCount =
+    totalCompactionCheckpointCount > 0 ? totalCompactionCheckpointCount : undefined;
   const selectedOrRuntimeModelProvider = selectedModel?.provider ?? modelProvider;
   const selectedOrRuntimeModel = selectedModel?.model ?? model;
   const rowModelIdentity = lightweight
@@ -1845,7 +1947,7 @@ export function buildGatewaySessionRow(params: {
     lastTo: deliveryFields.lastTo ?? entry?.lastTo,
     lastAccountId: deliveryFields.lastAccountId ?? entry?.lastAccountId,
     lastThreadId: deliveryFields.lastThreadId ?? entry?.lastThreadId,
-    compactionCheckpointCount: entry?.compactionCheckpoints?.length,
+    compactionCheckpointCount,
     latestCompactionCheckpoint,
     pluginExtensions: pluginExtensions.length > 0 ? pluginExtensions : undefined,
   };
