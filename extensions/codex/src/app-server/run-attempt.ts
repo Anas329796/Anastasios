@@ -155,6 +155,10 @@ const CODEX_TURN_TERMINAL_IDLE_TIMEOUT_MS = 30 * 60_000;
 const CODEX_NATIVE_HOOK_RELAY_MIN_TTL_MS = 30 * 60_000;
 const CODEX_NATIVE_HOOK_RELAY_TTL_GRACE_MS = 5 * 60_000;
 const CODEX_STEER_ALL_DEBOUNCE_MS = 500;
+const OPENAI_PROVIDER_ID = "openai";
+const OPENAI_RESPONSES_API = "openai-responses";
+const OPENAI_CODEX_PROVIDER_ID = "openai-codex";
+const OPENAI_CODEX_RESPONSES_API = "openai-codex-responses";
 const LOG_FIELD_MAX_LENGTH = 160;
 const CODEX_NATIVE_PROJECT_DOC_BASENAMES = new Set(["agents.md"]);
 const CODEX_NATIVE_HOOK_RELAY_EVENTS_WITH_APP_SERVER_APPROVALS =
@@ -216,6 +220,34 @@ function emitCodexAppServerEvent(
 
 function collectTerminalAssistantText(result: EmbeddedRunAttemptResult): string {
   return result.assistantTexts.join("\n\n").trim();
+}
+
+function normalizeRuntimeId(value: string | undefined): string {
+  return value?.trim().toLowerCase() ?? "";
+}
+
+function shouldUseOpenAICodexRuntimeAttribution(params: EmbeddedRunAttemptParams): boolean {
+  return (
+    normalizeRuntimeId(params.model.provider) === OPENAI_PROVIDER_ID &&
+    normalizeRuntimeId(params.model.api) === OPENAI_RESPONSES_API
+  );
+}
+
+function withCodexAppServerRuntimeAttribution<TParams extends EmbeddedRunAttemptParams>(
+  params: TParams,
+): TParams {
+  if (!shouldUseOpenAICodexRuntimeAttribution(params)) {
+    return params;
+  }
+  return {
+    ...params,
+    provider: OPENAI_CODEX_PROVIDER_ID,
+    model: {
+      ...params.model,
+      provider: OPENAI_CODEX_PROVIDER_ID,
+      api: OPENAI_CODEX_RESPONSES_API,
+    },
+  } as TParams;
 }
 
 type CodexSteeringQueueOptions = {
@@ -506,6 +538,7 @@ export async function runCodexAppServerAttempt(
     sessionKey: sandboxSessionKey,
     ...(startupAuthProfileId ? { authProfileId: startupAuthProfileId } : {}),
   };
+  const codexRuntimeParams = withCodexAppServerRuntimeAttribution(runtimeParams);
   const startupAuthAccountCacheKey = await resolveCodexAppServerAuthAccountCacheKey({
     authProfileId: startupAuthProfileId,
     authProfileStore: params.authProfileStore,
@@ -522,7 +555,7 @@ export async function runCodexAppServerAttempt(
     : undefined;
   let yieldDetected = false;
   const tools = await buildDynamicTools({
-    params,
+    params: codexRuntimeParams,
     resolvedWorkspace,
     effectiveWorkspace,
     sandboxSessionKey,
@@ -567,7 +600,7 @@ export async function runCodexAppServerAttempt(
       sessionKey: sandboxSessionKey,
       sessionFile: params.sessionFile,
       runtimeContext: buildHarnessContextEngineRuntimeContext({
-        attempt: runtimeParams,
+        attempt: codexRuntimeParams,
         workspaceDir: effectiveWorkspace,
         agentDir,
         tokenBudget: params.contextTokenBudget,
@@ -579,7 +612,7 @@ export async function runCodexAppServerAttempt(
     historyMessages =
       (await readMirroredSessionHistoryMessages(params.sessionFile)) ?? historyMessages;
   }
-  const baseDeveloperInstructions = buildDeveloperInstructions(params);
+  const baseDeveloperInstructions = buildDeveloperInstructions(codexRuntimeParams);
   // Build the workspace bootstrap block before finalizing developer
   // instructions so persona files (SOUL.md, IDENTITY.md, ...) reach Codex
   // through the explicit `developerInstructions` field.
@@ -660,7 +693,7 @@ export async function runCodexAppServerAttempt(
     ctx: hookContext,
   });
   const systemPromptReport = buildCodexSystemPromptReport({
-    attempt: params,
+    attempt: codexRuntimeParams,
     sessionKey: sandboxSessionKey,
     workspaceDir: effectiveWorkspace,
     developerInstructions: promptBuild.developerInstructions,
@@ -668,7 +701,7 @@ export async function runCodexAppServerAttempt(
     tools: toolBridge.specs,
   });
   const trajectoryRecorder = createCodexTrajectoryRecorder({
-    attempt: params,
+    attempt: codexRuntimeParams,
     cwd: effectiveWorkspace,
     developerInstructions: promptBuild.developerInstructions,
     prompt: promptBuild.prompt,
@@ -766,7 +799,7 @@ export async function runCodexAppServerAttempt(
           });
           const threadLifecycleParams = {
             client: startupClient,
-            params: runtimeParams,
+            params: codexRuntimeParams,
             cwd: effectiveWorkspace,
             dynamicTools: toolBridge.specs,
             appServer: pluginAppServer,
@@ -861,7 +894,7 @@ export async function runCodexAppServerAttempt(
     toolCount: toolBridge.specs.length,
   });
   recordCodexTrajectoryContext(trajectoryRecorder, {
-    attempt: params,
+    attempt: codexRuntimeParams,
     cwd: effectiveWorkspace,
     developerInstructions: promptBuild.developerInstructions,
     prompt: promptBuild.prompt,
@@ -1599,7 +1632,7 @@ export async function runCodexAppServerAttempt(
     prompt: promptBuild.prompt,
     imagesCount: params.images?.length ?? 0,
   });
-  projector = new CodexAppServerEventProjector(params, thread.threadId, activeTurnId, {
+  projector = new CodexAppServerEventProjector(codexRuntimeParams, thread.threadId, activeTurnId, {
     nativePostToolUseRelayEnabled:
       nativeHookRelay?.allowedEvents.includes("post_tool_use") === true,
   });
@@ -1699,7 +1732,7 @@ export async function runCodexAppServerAttempt(
     }
     const finalPromptErrorSource = timedOut ? "prompt" : result.promptErrorSource;
     recordCodexTrajectoryCompletion(trajectoryRecorder, {
-      attempt: params,
+      attempt: codexRuntimeParams,
       result,
       threadId: thread.threadId,
       turnId: activeTurnId,
@@ -1757,7 +1790,7 @@ export async function runCodexAppServerAttempt(
         prePromptMessageCount,
         tokenBudget: params.contextTokenBudget,
         runtimeContext: buildHarnessContextEngineRuntimeContextFromUsage({
-          attempt: runtimeParams,
+          attempt: codexRuntimeParams,
           workspaceDir: effectiveWorkspace,
           agentDir,
           tokenBudget: params.contextTokenBudget,
