@@ -11,6 +11,7 @@ export {
   extractErrorCode,
   formatErrorMessage,
   hasProxyEnvConfigured,
+  isBlockedHostnameOrIp,
   isNotFoundPathError,
   isPathInside,
   isPrivateNetworkAllowedByPolicy,

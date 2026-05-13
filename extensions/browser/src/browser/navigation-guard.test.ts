@@ -334,4 +334,194 @@ describe("browser navigation guard", () => {
       false,
     );
   });
+
+  describe("external-browser-proxy mode", () => {
+    // When the browser profile has its own network stack (e.g. `existing-session`
+    // with a system proxy/PAC/VPN), Node's DNS resolution does not reflect the
+    // real connect target. The guard should skip DNS-to-IP checks but still
+    // enforce the hostname denylist as defense-in-depth.
+
+    it("allows public hostnames even when DNS resolves to a private IP on the gateway host", async () => {
+      // Simulates split-tunnel VPN DNS hijack: `www.example.com` resolves to
+      // the proxy's loopback IP on the gateway host, but the host browser
+      // would send the request through the VPN to the real public target.
+      const lookupFn = createLookupFn("192.168.42.1");
+      await expect(
+        assertBrowserNavigationAllowed({
+          url: "https://www.example.com/",
+          browserProxyMode: "external-browser-proxy",
+          lookupFn,
+        }),
+      ).resolves.toBeUndefined();
+      // The guard should not even consult DNS for external-browser-proxy mode.
+      expect(lookupFn).not.toHaveBeenCalled();
+    });
+
+    it("still blocks cloud metadata hostnames (metadata.google.internal)", async () => {
+      await expect(
+        assertBrowserNavigationAllowed({
+          url: "http://metadata.google.internal/computeMetadata/v1/",
+          browserProxyMode: "external-browser-proxy",
+        }),
+      ).rejects.toBeInstanceOf(SsrFBlockedError);
+    });
+
+    it("still blocks localhost hostnames", async () => {
+      await expect(
+        assertBrowserNavigationAllowed({
+          url: "http://localhost:8080/admin",
+          browserProxyMode: "external-browser-proxy",
+        }),
+      ).rejects.toBeInstanceOf(SsrFBlockedError);
+    });
+
+    it("still blocks reserved internal TLDs (*.internal, *.local, *.localhost)", async () => {
+      for (const url of [
+        "https://intranet.internal/",
+        "http://printer.local/",
+        "http://dev.localhost:3000/",
+      ]) {
+        await expect(
+          assertBrowserNavigationAllowed({ url, browserProxyMode: "external-browser-proxy" }),
+        ).rejects.toBeInstanceOf(SsrFBlockedError);
+      }
+    });
+
+    it("still blocks non-network protocols (file, data, javascript)", async () => {
+      for (const url of [
+        "file:///etc/passwd",
+        "data:text/html,<h1>x</h1>",
+        "javascript:alert(1)",
+      ]) {
+        await expect(
+          assertBrowserNavigationAllowed({ url, browserProxyMode: "external-browser-proxy" }),
+        ).rejects.toBeInstanceOf(InvalidBrowserNavigationUrlError);
+      }
+    });
+
+    it("still allows about:blank", async () => {
+      await expect(
+        assertBrowserNavigationAllowed({
+          url: "about:blank",
+          browserProxyMode: "external-browser-proxy",
+        }),
+      ).resolves.toBeUndefined();
+    });
+
+    it("keeps direct-mode behavior unchanged when browserProxyMode is omitted", async () => {
+      // Direct mode (default) should still perform the DNS-to-IP check and
+      // block a hostname that resolves to a private IP.
+      const lookupFn = createLookupFn("192.168.42.1");
+      await expect(
+        assertBrowserNavigationAllowed({
+          url: "https://www.example.com/",
+          lookupFn,
+        }),
+      ).rejects.toBeInstanceOf(SsrFBlockedError);
+      expect(lookupFn).toHaveBeenCalled();
+    });
+
+    // Codex review #77913 P1: strict-mode SSRF policy must still be enforced
+    // in external-browser-proxy mode. The Node-side DNS pinning is skipped,
+    // but hostname-policy gates (IP-literal requirement, explicit allowlist)
+    // apply equally because they do not depend on where Node thinks the
+    // hostname resolves.
+    it("blocks non-allowlisted hostnames in strict mode (dangerouslyAllowPrivateNetwork: false)", async () => {
+      const lookupFn = createLookupFn("93.184.216.34");
+      await expect(
+        assertBrowserNavigationAllowed({
+          url: "https://example.com",
+          browserProxyMode: "external-browser-proxy",
+          ssrfPolicy: { dangerouslyAllowPrivateNetwork: false },
+          lookupFn,
+        }),
+      ).rejects.toThrow(/dns rebinding protections are unavailable/i);
+      expect(lookupFn).not.toHaveBeenCalled();
+    });
+
+    it("allows explicitly allowed hostnames in strict mode", async () => {
+      const lookupFn = createLookupFn("192.168.42.1");
+      await expect(
+        assertBrowserNavigationAllowed({
+          url: "https://agent.internal",
+          browserProxyMode: "external-browser-proxy",
+          ssrfPolicy: {
+            dangerouslyAllowPrivateNetwork: false,
+            allowedHostnames: ["agent.internal"],
+          },
+          lookupFn,
+        }),
+      ).resolves.toBeUndefined();
+      expect(lookupFn).not.toHaveBeenCalled();
+    });
+
+    it("allows wildcard-allowlisted hostnames in strict mode", async () => {
+      const lookupFn = createLookupFn("192.168.42.1");
+      await expect(
+        assertBrowserNavigationAllowed({
+          url: "https://sub.example.com",
+          browserProxyMode: "external-browser-proxy",
+          ssrfPolicy: {
+            dangerouslyAllowPrivateNetwork: false,
+            hostnameAllowlist: ["*.example.com"],
+          },
+          lookupFn,
+        }),
+      ).resolves.toBeUndefined();
+      expect(lookupFn).not.toHaveBeenCalled();
+    });
+
+    it("does not match sibling domains against wildcard allowlist entries in strict mode", async () => {
+      const lookupFn = createLookupFn("192.168.42.1");
+      await expect(
+        assertBrowserNavigationAllowed({
+          url: "https://evil-example.com",
+          browserProxyMode: "external-browser-proxy",
+          ssrfPolicy: {
+            dangerouslyAllowPrivateNetwork: false,
+            hostnameAllowlist: ["*.example.com"],
+          },
+          lookupFn,
+        }),
+      ).rejects.toThrow(/dns rebinding protections are unavailable/i);
+      expect(lookupFn).not.toHaveBeenCalled();
+    });
+
+    it("honors explicit allowlist for denylisted hostnames, matching direct-mode semantics", async () => {
+      // direct-mode allows `agent.internal` when `allowedHostnames` explicitly
+      // names it (the hostname ends in `.internal` which is on the intrinsic
+      // denylist, but explicit user opt-in takes precedence — see
+      // "allows blocked hostnames when explicitly allowed" test above).
+      // external-browser-proxy should match that semantics to avoid a stricter-
+      // than-direct surprise.
+      const lookupFn = createLookupFn("169.254.169.254");
+      await expect(
+        assertBrowserNavigationAllowed({
+          url: "http://metadata.google.internal/computeMetadata/v1/",
+          browserProxyMode: "external-browser-proxy",
+          ssrfPolicy: {
+            allowedHostnames: ["metadata.google.internal"],
+          },
+          lookupFn,
+        }),
+      ).resolves.toBeUndefined();
+      expect(lookupFn).not.toHaveBeenCalled();
+    });
+
+    it("allows IP-literal URLs in strict mode with private-network opt-in", async () => {
+      // Strict mode with dangerouslyAllowPrivateNetwork: true treats the
+      // allowlist as authoritative regardless of reachability. This is the
+      // "trust the host browser's proxy" configuration.
+      const lookupFn = createLookupFn("93.184.216.34");
+      await expect(
+        assertBrowserNavigationAllowed({
+          url: "https://example.com",
+          browserProxyMode: "external-browser-proxy",
+          ssrfPolicy: { dangerouslyAllowPrivateNetwork: true },
+          lookupFn,
+        }),
+      ).resolves.toBeUndefined();
+      expect(lookupFn).not.toHaveBeenCalled();
+    });
+  });
 });
