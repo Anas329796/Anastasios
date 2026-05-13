@@ -110,6 +110,7 @@ type SkillInstallSpec = {
   bins?: string[];
   os?: string[];
   formula?: string;
+  cask?: boolean;
   package?: string;
   module?: string;
   url?: string;
