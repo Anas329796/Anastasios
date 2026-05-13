@@ -4,7 +4,11 @@ import {
   takeMessageIdAfterStop,
 } from "openclaw/plugin-sdk/channel-lifecycle";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
-import { buildTelegramThreadParams, type TelegramThreadSpec } from "./bot/helpers.js";
+import {
+  buildTelegramThreadParams,
+  shouldAllowTelegramThreadlessFallback,
+  type TelegramThreadSpec,
+} from "./bot/helpers.js";
 import { isSafeToRetrySendError, isTelegramClientRejection } from "./network-errors.js";
 import { normalizeTelegramReplyToMessageId } from "./outbound-params.js";
 
@@ -109,7 +113,6 @@ export function createTelegramDraftStream(params: {
   const minInitialChars = params.minInitialChars;
   const chatId = params.chatId;
   const threadParams = buildTelegramThreadParams(params.thread);
-  const allowThreadlessRetry = params.thread?.scope !== "dm";
   const replyToMessageId = normalizeTelegramReplyToMessageId(params.replyToMessageId);
   const replyParams =
     replyToMessageId != null
@@ -154,7 +157,10 @@ export function createTelegramDraftStream(params: {
         usedThreadParams,
       };
     } catch (err) {
-      if (!allowThreadlessRetry || !usedThreadParams || !THREAD_NOT_FOUND_RE.test(String(err))) {
+      if (!usedThreadParams || !THREAD_NOT_FOUND_RE.test(String(err))) {
+        throw err;
+      }
+      if (!shouldAllowTelegramThreadlessFallback(params.thread)) {
         throw err;
       }
       const threadlessParams: TelegramSendMessageParams = { ...sendParams };
