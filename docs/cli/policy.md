@@ -226,10 +226,10 @@ for approval and reports both the current and expected attestation hashes.
 
 Policy findings can include both `target` and `requirement`. `target` is the
 observed thing that does not conform. `requirement` is the authored policy rule
-that made it a finding. Config and workspace findings usually use `oc://`
-paths because they can point to resolvable documents. Runtime findings can use
-non-`oc://` evidence refs, such as `runtime:channels/...`, because they point
-to observed runtime state rather than an editable oc-path document.
+that made it a finding. Config and workspace findings can use `oc://` when
+they point to resolvable documents. Runtime findings should stay focused on the
+runtime evidence payload; any `target` value is only a compact evidence label,
+not a new path language.
 
 ## Configuration
 

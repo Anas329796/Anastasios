@@ -91,10 +91,10 @@ load plugins itself. Runtime tool policy uses OpenClaw's existing trusted tool
 policy hook, not a separate gateway or supervisor path.
 
 Policy findings do not have to be backed by oc-path. Config and workspace
-findings use `oc://` targets where the system can point to a resolvable
-document address. Runtime audit findings can use evidence refs such as
-`runtime:channels/...` when the finding points to live observed state instead
-of an editable document.
+findings use `oc://` targets only when the system can point to a resolvable
+document address. Runtime audit findings stay centered on the runtime evidence
+payload; any `target` value is a compact evidence label, not a separate path
+syntax.
 
 ## Config
 
