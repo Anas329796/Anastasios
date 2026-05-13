@@ -1961,6 +1961,7 @@ async function continuePostCoreUpdateInFreshProcess(params: {
     const childStdio = resolvePostCoreUpdateChildStdio();
     const child = spawn(resolveNodeRunner(), argv, {
       stdio: childStdio,
+      windowsHide: true,
       env: {
         ...stripGatewayServiceMarkerEnv(disableUpdatedPackageCompileCacheEnv(process.env)),
         [POST_CORE_UPDATE_ENV]: "1",
