@@ -238,16 +238,17 @@ export const buildTelegramMessageContext = async ({
     loadFreshConfig?.() ??
     (runtime?.getRuntimeConfig ?? (await loadTelegramMessageContextRuntime()).getRuntimeConfig)();
   const telegramCfg = mergeTelegramAccountConfig(freshCfg, account.accountId);
-  let { route, configuredBinding, configuredBindingSessionKey } = resolveTelegramConversationRoute({
-    cfg: freshCfg,
-    accountId: account.accountId,
-    chatId,
-    isGroup,
-    resolvedThreadId,
-    replyThreadId,
-    senderId,
-    topicAgentId: topicConfig?.agentId,
-  });
+  let { route, configuredBinding, configuredBindingSessionKey, pluginOwnedRuntimeBinding } =
+    resolveTelegramConversationRoute({
+      cfg: freshCfg,
+      accountId: account.accountId,
+      chatId,
+      isGroup,
+      resolvedThreadId,
+      replyThreadId,
+      senderId,
+      topicAgentId: topicConfig?.agentId,
+    });
   const requiresExplicitAccountBinding = (
     candidate: ReturnType<typeof resolveTelegramConversationRoute>["route"],
   ): boolean =>
@@ -427,12 +428,15 @@ export const buildTelegramMessageContext = async ({
     agentId: route.agentId,
   });
   const baseRequireMention = resolveGroupRequireMention(chatId);
-  const requireMention = firstDefined(
-    topicConfig?.requireMention,
-    activationOverride,
-    telegramGroupConfig?.requireMention,
-    baseRequireMention,
-  );
+  const requireMention =
+    isGroup && pluginOwnedRuntimeBinding
+      ? false
+      : firstDefined(
+          topicConfig?.requireMention,
+          activationOverride,
+          telegramGroupConfig?.requireMention,
+          baseRequireMention,
+        );
 
   const recordChannelActivity =
     runtime?.recordChannelActivity ??
