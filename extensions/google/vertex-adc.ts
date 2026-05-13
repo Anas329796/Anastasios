@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { gunzipSync } from "node:zlib";
 
 type GoogleAuthorizedUserCredentials = {
   type: "authorized_user";
@@ -15,6 +16,13 @@ type GoogleVertexAuthorizedUserToken = {
   expiresAtMs: number;
   credentialsPath: string;
   refreshToken: string;
+};
+
+type GoogleOauthTokenResponsePayload = {
+  access_token?: unknown;
+  expires_in?: unknown;
+  error?: unknown;
+  error_description?: unknown;
 };
 
 const GCP_VERTEX_CREDENTIALS_MARKER = "gcp-vertex-credentials";
@@ -139,15 +147,16 @@ async function refreshGoogleVertexAuthorizedUserAccessToken(params: {
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
   });
-  const payload = (await response.json().catch(() => undefined)) as
-    | { access_token?: unknown; expires_in?: unknown; error?: unknown; error_description?: unknown }
-    | undefined;
+  const payload = await readGoogleOauthTokenResponsePayload(response);
   if (!response.ok) {
     const description = normalizeOptionalString(payload?.error_description);
     const code = normalizeOptionalString(payload?.error);
     throw new Error(
       `Google Vertex ADC token refresh failed: ${response.status}${code ? ` ${code}` : ""}${description ? ` (${description})` : ""}`,
     );
+  }
+  if (!payload) {
+    throw new Error("Google Vertex ADC token refresh response could not be parsed as JSON.");
   }
   const token = normalizeOptionalString(payload?.access_token);
   if (!token) {
@@ -164,6 +173,45 @@ async function refreshGoogleVertexAuthorizedUserAccessToken(params: {
     refreshToken,
   };
   return token;
+}
+
+async function readGoogleOauthTokenResponsePayload(
+  response: Response,
+): Promise<GoogleOauthTokenResponsePayload | undefined> {
+  const bytes = Buffer.from(await response.arrayBuffer());
+  const text = decodeGoogleOauthTokenResponseBody(bytes, response.headers.get("content-encoding"));
+  if (!text.trim()) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(text) as GoogleOauthTokenResponsePayload;
+  } catch {
+    return undefined;
+  }
+}
+
+function decodeGoogleOauthTokenResponseBody(bytes: Buffer, contentEncoding: string | null): string {
+  if (shouldGunzipGoogleOauthTokenResponse(bytes, contentEncoding)) {
+    try {
+      return gunzipSync(bytes).toString("utf8");
+    } catch {
+      return bytes.toString("utf8");
+    }
+  }
+  return bytes.toString("utf8");
+}
+
+function shouldGunzipGoogleOauthTokenResponse(
+  bytes: Buffer,
+  contentEncoding: string | null,
+): boolean {
+  if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
+    return true;
+  }
+  return (contentEncoding ?? "")
+    .split(",")
+    .map((encoding) => encoding.trim().toLowerCase())
+    .includes("gzip");
 }
 
 export async function resolveGoogleVertexAuthorizedUserHeaders(
