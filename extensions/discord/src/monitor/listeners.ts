@@ -10,6 +10,16 @@ import {
   ThreadUpdateListener,
 } from "../internal/discord.js";
 import { discordEventQueueLog, runDiscordListenerWithSlowLog } from "./listeners.queue.js";
+import type {
+  DiscordInteractionEvent,
+  DiscordMessageEvent,
+  DiscordMessageHandler,
+} from "./listeners.types.js";
+export type {
+  DiscordInteractionEvent,
+  DiscordMessageEvent,
+  DiscordMessageHandler,
+} from "./listeners.types.js";
 import { backfillRecentDiscordInboundMessages } from "./reconnect-backfill.js";
 export { DiscordReactionListener, DiscordReactionRemoveListener } from "./listeners.reactions.js";
 import { setPresence } from "./presence-cache.js";
@@ -17,15 +27,6 @@ import { isThreadArchived } from "./thread-bindings.discord-api.js";
 import { closeDiscordThreadSessions } from "./thread-session-close.js";
 
 type Logger = ReturnType<typeof import("openclaw/plugin-sdk/runtime-env").createSubsystemLogger>;
-
-export type DiscordMessageEvent = Parameters<MessageCreateListener["handle"]>[0];
-export type DiscordInteractionEvent = Parameters<InteractionCreateListener["handle"]>[0];
-
-export type DiscordMessageHandler = (
-  data: DiscordMessageEvent,
-  client: Client,
-  options?: { abortSignal?: AbortSignal },
-) => Promise<void>;
 
 export function registerDiscordListener(listeners: Array<object>, listener: object) {
   if (listeners.some((existing) => existing.constructor === listener.constructor)) {

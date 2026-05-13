@@ -3,7 +3,7 @@ import { danger } from "openclaw/plugin-sdk/runtime-env";
 import { listChannelMessages } from "../internal/api.messages.js";
 import { Guild, type Client, Message, User } from "../internal/discord.js";
 import { listRecentDiscordOutboundMessages } from "../recent-outbound.js";
-import type { DiscordMessageEvent, DiscordMessageHandler } from "./listeners.js";
+import type { DiscordMessageEvent, DiscordMessageHandler } from "./listeners.types.js";
 
 const RECENT_OUTBOUND_BACKFILL_WINDOW_MS = 15 * 60 * 1000;
 const RECENT_OUTBOUND_BACKFILL_LIMIT = 50;
