@@ -76,6 +76,7 @@ Docs: https://docs.openclaw.ai
 
 ### Changes
 
+- Auth/fallback: add `openclaw models auth login --force` to drop cached provider profiles before invoking the auth flow, so operators can recover from stuck OAuth credentials (expired refresh tokens, swapped accounts) without hand-editing `auth-profiles.json`; surface a copy-pasteable re-login command in `FallbackSummaryError` messages when auth-class failures exhaust the chain; and cache `(sessionId, provider, model)` skip markers with a 60s TTL after `auth` / `auth_permanent` failures so the fallback chain stops re-attempting the same broken candidate on every turn within a conversation burst. Thanks @MertBasar0.
 - Maintainers: add a Clawdtributor skill for Discrawl-backed contributor PR triage, live status checks, and compact review formatting.
 - Telegram: support Mini App `web_app` buttons in generic message presentation payloads, allowing `openclaw message send --presentation` to render Telegram Web App inline buttons for private chats. (#81356) Thanks @jzakirov.
 - Scripts: add `OPENCLAW_HEAVY_CHECK_LOCK_SCOPE=worktree` so high-capacity local worktrees can use independent heavy-check locks while shared locks remain the default. Fixes #80729. (#80734) Thanks @samzong.

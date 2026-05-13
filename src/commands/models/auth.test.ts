@@ -46,6 +46,7 @@ const mocks = vi.hoisted(() => ({
   resolveAgentWorkspaceDir: vi.fn(),
   resolveDefaultAgentWorkspaceDir: vi.fn(),
   upsertAuthProfile: vi.fn(),
+  removeProviderAuthProfilesWithLock: vi.fn(),
   resolvePluginProviders: vi.fn(),
   createClackPrompter: vi.fn(),
   loadValidConfigOrThrow: vi.fn(),
@@ -64,6 +65,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../../agents/auth-profiles/profiles.js", () => ({
   listProfilesForProvider: mocks.listProfilesForProvider,
   promoteAuthProfileInOrder: mocks.promoteAuthProfileInOrder,
+  removeProviderAuthProfilesWithLock: mocks.removeProviderAuthProfilesWithLock,
   upsertAuthProfile: mocks.upsertAuthProfile,
 }));
 
@@ -324,6 +326,8 @@ describe("modelsAuthLoginCommand", () => {
     mocks.clackText.mockReset();
     mocks.upsertAuthProfile.mockReset();
     mocks.promoteAuthProfileInOrder.mockReset();
+    mocks.removeProviderAuthProfilesWithLock.mockReset();
+    mocks.removeProviderAuthProfilesWithLock.mockResolvedValue(null);
 
     mocks.resolveDefaultAgentId.mockReturnValue("main");
     mocks.resolveAgentDir.mockReturnValue("/tmp/openclaw/agents/main");
@@ -1099,6 +1103,81 @@ describe("modelsAuthLoginCommand", () => {
     await modelsAuthLoginCommand({ provider: "openai-codex" }, runtime);
 
     expect(runProviderAuth).toHaveBeenCalledOnce();
+  });
+
+  it("--force purges cached profiles for the provider before login", async () => {
+    const runtime = createRuntime();
+
+    await modelsAuthLoginCommand({ provider: "openai-codex", force: true }, runtime);
+
+    expect(mocks.removeProviderAuthProfilesWithLock).toHaveBeenCalledWith({
+      provider: "openai-codex",
+      agentDir: "/tmp/openclaw/agents/main",
+    });
+    expect(runProviderAuth).toHaveBeenCalledOnce();
+    expect(runtime.log).toHaveBeenCalledWith(
+      expect.stringContaining('Removed cached auth profiles for provider "openai-codex"'),
+    );
+  });
+
+  it("--force does not purge when omitted", async () => {
+    const runtime = createRuntime();
+
+    await modelsAuthLoginCommand({ provider: "openai-codex" }, runtime);
+
+    expect(mocks.removeProviderAuthProfilesWithLock).not.toHaveBeenCalled();
+    expect(runProviderAuth).toHaveBeenCalledOnce();
+  });
+
+  it("--force surfaces a warning and still proceeds when purge throws", async () => {
+    const runtime = createRuntime();
+    mocks.removeProviderAuthProfilesWithLock.mockRejectedValueOnce(new Error("disk full"));
+
+    await modelsAuthLoginCommand({ provider: "openai-codex", force: true }, runtime);
+
+    expect(runtime.error).toHaveBeenCalledWith(
+      expect.stringContaining("Could not clear cached profiles"),
+    );
+    expect(runProviderAuth).toHaveBeenCalledOnce();
+  });
+
+  it("--force does NOT purge cached profiles when the requested auth method is unknown", async () => {
+    const runtime = createRuntime();
+    const runOauthAuth = vi.fn().mockResolvedValue({ profiles: [] });
+    const runApiKeyAuth = vi.fn().mockResolvedValue({ profiles: [] });
+    mocks.resolvePluginSetupProvider.mockReturnValue(
+      createProvider({
+        id: "openai",
+        label: "OpenAI",
+        run: runOauthAuth as ProviderPlugin["auth"][number]["run"],
+        auth: [
+          {
+            id: "oauth",
+            label: "ChatGPT Login",
+            kind: "oauth",
+            run: runOauthAuth,
+          },
+          {
+            id: "api-key",
+            label: "OpenAI API Key",
+            kind: "api_key",
+            run: runApiKeyAuth,
+          },
+        ],
+      }),
+    );
+
+    // Using the wrong method id ("api_key" vs the registered "api-key") forces
+    // pickProviderAuthMethod to return null, which throws "Unknown auth method".
+    // The purge must NOT have run, otherwise the user's working credentials
+    // would be deleted before any auth flow had a chance to start.
+    await expect(
+      modelsAuthLoginCommand({ provider: "openai", method: "api_key", force: true }, runtime),
+    ).rejects.toThrow("Unknown auth method");
+
+    expect(mocks.removeProviderAuthProfilesWithLock).not.toHaveBeenCalled();
+    expect(runOauthAuth).not.toHaveBeenCalled();
+    expect(runApiKeyAuth).not.toHaveBeenCalled();
   });
 
   it("reports loaded plugin providers when requested provider is unavailable", async () => {
