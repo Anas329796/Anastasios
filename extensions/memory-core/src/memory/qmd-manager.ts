@@ -129,6 +129,8 @@ type QmdUpdateQueueState = {
   tails: Map<string, Promise<void>>;
 };
 
+type JsonExtractionResult = { found: true; value: unknown } | { found: false };
+
 function getMcporterState(): McporterState {
   return resolveGlobalSingleton<McporterState>(MCPORTER_STATE_KEY, () => ({
     coldStartWarned: false,
@@ -142,14 +144,14 @@ function parseMcporterResponseJson(stdout: string): unknown {
     return JSON.parse(trimmed) as unknown;
   } catch (err) {
     const payload = extractFirstJsonValue(trimmed);
-    if (payload !== null) {
-      return payload;
+    if (payload.found) {
+      return payload.value;
     }
     throw err;
   }
 }
 
-function extractFirstJsonValue(raw: string): unknown | null {
+function extractFirstJsonValue(raw: string): JsonExtractionResult {
   for (let start = 0; start < raw.length; start += 1) {
     const opening = raw[start];
     if (opening !== "{" && opening !== "[") {
@@ -186,7 +188,7 @@ function extractFirstJsonValue(raw: string): unknown | null {
         depth -= 1;
         if (depth === 0) {
           try {
-            return JSON.parse(raw.slice(start, index + 1)) as unknown;
+            return { found: true, value: JSON.parse(raw.slice(start, index + 1)) as unknown };
           } catch {
             break;
           }
@@ -194,7 +196,7 @@ function extractFirstJsonValue(raw: string): unknown | null {
       }
     }
   }
-  return null;
+  return { found: false };
 }
 
 function getQmdEmbedQueueState(): QmdEmbedQueueState {
@@ -2050,18 +2052,99 @@ export class QmdMemoryManager implements MemorySearchManager {
 
   private async ensureMcporterConfig(): Promise<void> {
     await fs.mkdir(path.dirname(this.mcporterConfigPath), { recursive: true });
-    const env = this.buildMcporterQmdEnv();
+    const server =
+      (await this.resolveConfiguredMcporterServer()) ?? this.buildDefaultMcporterQmdServer();
     const config = {
+      imports: [],
       mcpServers: {
-        [this.qmd.mcporter.serverName]: {
-          command: this.qmd.command,
-          args: ["mcp"],
-          env,
-          lifecycle: { mode: "keep-alive", idleTimeoutMs: 300_000 },
-        },
+        [this.qmd.mcporter.serverName]: server,
       },
     };
     await fs.writeFile(this.mcporterConfigPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  }
+
+  private buildDefaultMcporterQmdServer(): Record<string, unknown> {
+    return {
+      command: this.qmd.command,
+      args: ["mcp"],
+      env: this.buildMcporterQmdEnv(),
+      lifecycle: { mode: "keep-alive", idleTimeoutMs: 300_000 },
+    };
+  }
+
+  private async resolveConfiguredMcporterServer(): Promise<Record<string, unknown> | null> {
+    const serverName = this.qmd.mcporter.serverName;
+    let result: { stdout: string; stderr: string };
+    try {
+      result = await this.runMcporterCommand(["config", "get", serverName, "--json"], {
+        includeGeneratedConfig: false,
+        timeoutMs: 5_000,
+      });
+    } catch (err) {
+      if (serverName === "qmd") {
+        return null;
+      }
+      throw new Error(
+        `mcporter server "${serverName}" is not configured or could not be read: ${formatErrorMessage(
+          err,
+        )}`,
+        { cause: err },
+      );
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = parseMcporterResponseJson(result.stdout);
+    } catch (err) {
+      if (serverName === "qmd") {
+        return null;
+      }
+      throw new Error(`mcporter server "${serverName}" returned invalid JSON`, { cause: err });
+    }
+    const serialized = asRecord(parsed);
+    if (!serialized) {
+      if (serverName === "qmd") {
+        return null;
+      }
+      throw new Error(`mcporter server "${serverName}" returned an invalid JSON definition`);
+    }
+
+    const server = this.toMcporterRawServerEntry(serialized);
+    if (!server) {
+      if (serverName === "qmd") {
+        return null;
+      }
+      throw new Error(`mcporter server "${serverName}" returned an unsupported definition`);
+    }
+    return server;
+  }
+
+  private toMcporterRawServerEntry(
+    serialized: Record<string, unknown>,
+  ): Record<string, unknown> | null {
+    const server: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(serialized)) {
+      if (key === "name" || key === "source" || value === undefined) {
+        continue;
+      }
+      server[key] = value;
+    }
+
+    if (typeof server.command === "string" && server.command.length > 0) {
+      const copiedEnv = asRecord(server.env) ?? {};
+      server.env = { ...copiedEnv, ...this.buildMcporterQmdEnv() };
+      return server;
+    }
+
+    const hasRemoteEndpoint =
+      typeof server.baseUrl === "string" ||
+      typeof server.url === "string" ||
+      typeof server.serverUrl === "string";
+    if (hasRemoteEndpoint) {
+      return server;
+    }
+
+    return null;
   }
 
   private buildMcporterQmdEnv(): Record<string, string> {
@@ -2089,27 +2172,45 @@ export class QmdMemoryManager implements MemorySearchManager {
     return env;
   }
 
-  private async runMcporter(
+  private buildMcporterProcessEnv(): NodeJS.ProcessEnv {
+    const env: NodeJS.ProcessEnv = { ...this.env };
+    delete env.XDG_CONFIG_HOME;
+    delete env.QMD_CONFIG_DIR;
+    delete env.XDG_CACHE_HOME;
+    return env;
+  }
+
+  private async runMcporterCommand(
     args: string[],
-    opts?: { timeoutMs?: number },
+    opts?: { includeGeneratedConfig?: boolean; timeoutMs?: number },
   ): Promise<{ stdout: string; stderr: string }> {
-    await this.ensureMcporterConfig();
-    const mcporterArgs = [...args, "--config", this.mcporterConfigPath];
+    const mcporterArgs =
+      opts?.includeGeneratedConfig === false
+        ? args
+        : [...args, "--config", this.mcporterConfigPath];
+    const env = this.buildMcporterProcessEnv();
     const spawnInvocation = resolveCliSpawnInvocation({
       command: "mcporter",
       args: mcporterArgs,
-      env: this.env,
+      env,
       packageName: "mcporter",
     });
     return await runCliCommand({
       commandSummary: `${spawnInvocation.command} ${spawnInvocation.argv.join(" ")}`,
       spawnInvocation,
-      // Keep mcporter and direct qmd commands on the same agent-scoped XDG state.
-      env: this.env,
+      env,
       cwd: this.workspaceDir,
       timeoutMs: opts?.timeoutMs,
       maxOutputChars: this.maxQmdOutputChars,
     });
+  }
+
+  private async runMcporter(
+    args: string[],
+    opts?: { timeoutMs?: number },
+  ): Promise<{ stdout: string; stderr: string }> {
+    await this.ensureMcporterConfig();
+    return await this.runMcporterCommand(args, opts);
   }
 
   private async runQmdSearchViaMcporter(
