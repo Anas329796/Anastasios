@@ -367,6 +367,7 @@ describe("sessions tools", () => {
     });
     expect(callGatewayMock).toHaveBeenNthCalledWith(1, {
       method: "sessions.list",
+      timeoutMs: 60_000,
       params: {
         activeMinutes: undefined,
         agentId: "main",
