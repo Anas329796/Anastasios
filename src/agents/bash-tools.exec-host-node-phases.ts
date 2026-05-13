@@ -50,6 +50,16 @@ type NodeApprovalAnalysis = {
   inlineEvalHit: InterpreterInlineEvalHit | null;
 };
 
+function buildNodeApprovalAnalysisEnv(env: Record<string, string> | undefined): NodeJS.ProcessEnv {
+  return {
+    ...(env ?? {}),
+    // The gateway cannot see the node host PATH, so bare-name resolution must
+    // not fall back to the gateway process environment during the precheck.
+    PATH: "",
+    Path: "",
+  };
+}
+
 export function shouldSkipNodeApprovalPrepare(params: {
   hostSecurity: ExecSecurity;
   hostAsk: ExecAsk;
@@ -299,12 +309,13 @@ export async function analyzeNodeApprovalRequirement(params: {
   hostSecurity: ExecSecurity;
   hostAsk: ExecAsk;
 }): Promise<NodeApprovalAnalysis> {
+  const analysisEnv = buildNodeApprovalAnalysisEnv(params.target.env);
   const baseAllowlistEval = evaluateShellAllowlist({
     command: params.request.command,
     allowlist: [],
     safeBins: new Set(),
     cwd: params.request.workdir,
-    env: params.request.env,
+    env: analysisEnv,
     platform: params.target.platform,
     trustedSafeBinDirs: params.request.trustedSafeBinDirs,
   });
@@ -345,7 +356,7 @@ export async function analyzeNodeApprovalRequirement(params: {
           allowlist: resolved.allowlist,
           safeBins: new Set(),
           cwd: params.request.workdir,
-          env: params.request.env,
+          env: analysisEnv,
           platform: params.target.platform,
           trustedSafeBinDirs: params.request.trustedSafeBinDirs,
         });
