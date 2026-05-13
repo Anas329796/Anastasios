@@ -437,6 +437,7 @@ describe("handleInlineActions", () => {
       kind: "continue",
       directives: clearInlineDirectives("<@123> what's next?"),
       abortedLastRun: false,
+      cleanedBody: "<@123> what's next?",
     });
     expect(buildStatusReplyMock).toHaveBeenCalledTimes(1);
     expect(handleCommandsMock).toHaveBeenCalledTimes(1);
@@ -508,6 +509,7 @@ describe("handleInlineActions", () => {
       kind: "continue",
       directives: clearInlineDirectives("new message"),
       abortedLastRun: false,
+      cleanedBody: "new message",
     });
     expect(sessionStore["s:main"]?.abortCutoffMessageSid).toBeUndefined();
     expect(sessionStore["s:main"]?.abortCutoffTimestamp).toBeUndefined();

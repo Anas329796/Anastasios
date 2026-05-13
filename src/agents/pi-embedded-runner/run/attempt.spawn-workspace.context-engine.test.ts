@@ -1084,12 +1084,11 @@ describe("runEmbeddedAttempt context engine sessionKey forwarding", () => {
     });
 
     expect(ingest).toHaveBeenCalledTimes(1);
-    expect(ingest).toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: doneMessage,
-        sessionKey,
-      }),
-    );
+    expect(ingest).toHaveBeenCalledWith({
+      message: doneMessage,
+      sessionId: embeddedSessionId,
+      sessionKey,
+    });
   });
 
   it("forwards silentExpected to the embedded subscription", () => {
