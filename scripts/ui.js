@@ -25,7 +25,13 @@ function which(cmd) {
       .filter(Boolean);
     const extensions =
       process.platform === "win32"
-        ? (process.env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM").split(";").filter(Boolean)
+        ? [
+            ...(process.env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM")
+              .split(";")
+              .flatMap((ext) => [ext, ext.toLowerCase()])
+              .filter(Boolean),
+            "",
+          ]
         : [""];
     for (const entry of paths) {
       for (const ext of extensions) {
@@ -48,7 +54,11 @@ function which(cmd) {
 function resolveRunner() {
   const pnpm = which("pnpm");
   if (pnpm) {
-    return { cmd: pnpm, kind: "pnpm" };
+    return { cmd: pnpm, argsPrefix: [], kind: "pnpm" };
+  }
+  const corepack = which("corepack");
+  if (corepack) {
+    return { cmd: corepack, argsPrefix: ["pnpm"], kind: "corepack" };
   }
   return null;
 }
@@ -181,17 +191,17 @@ export function main(argv = process.argv.slice(2)) {
   }
 
   if (action === "install") {
-    run(runner.cmd, ["install", ...rest]);
+    run(runner.cmd, [...runner.argsPrefix, "install", ...rest]);
     return;
   }
 
   if (!depsInstalled(action === "test" ? "test" : "build")) {
     const installEnv = process.env;
-    const installArgs = ["install"];
+    const installArgs = [...runner.argsPrefix, "install"];
     runSync(runner.cmd, installArgs, installEnv);
   }
 
-  run(runner.cmd, ["run", script, ...rest]);
+  run(runner.cmd, [...runner.argsPrefix, "run", script, ...rest]);
 }
 
 const isDirectExecution = (() => {

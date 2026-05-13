@@ -98,6 +98,7 @@ import type {
   PluginAgentEventEmitResult,
   PluginAgentEventSubscriptionRegistration,
   PluginControlUiDescriptor,
+  PluginControlUiEntryPoint,
   PluginJsonValue,
   PluginNextTurnInjection,
   PluginNextTurnInjectionEnqueueResult,
@@ -206,6 +207,7 @@ export type {
   PluginAgentTurnPrepareEvent,
   PluginAgentTurnPrepareResult,
   PluginControlUiDescriptor,
+  PluginControlUiEntryPoint,
   PluginHeartbeatPromptContributionEvent,
   PluginHeartbeatPromptContributionResult,
   PluginJsonValue,
@@ -2491,6 +2493,8 @@ export type OpenClawPluginSessionControlsApi = {
   registerSessionAction: (action: PluginSessionActionRegistration) => void;
   /** Register a generic Control UI contribution descriptor. */
   registerControlUiDescriptor: (descriptor: PluginControlUiDescriptor) => void;
+  /** Register a top-level Control UI entry point such as an app-nav item. */
+  registerControlUiEntryPoint: (entryPoint: PluginControlUiEntryPoint) => void;
 };
 
 export type OpenClawPluginSessionApi = {
@@ -2709,6 +2713,11 @@ export type OpenClawPluginApi = {
    * @deprecated Use `api.session.controls.registerControlUiDescriptor(...)`.
    */
   registerControlUiDescriptor: (descriptor: PluginControlUiDescriptor) => void;
+  /**
+   * Register a top-level Control UI entry point such as an app-nav item.
+   * @deprecated Use `api.session.controls.registerControlUiEntryPoint(...)`.
+   */
+  registerControlUiEntryPoint: (entryPoint: PluginControlUiEntryPoint) => void;
   /**
    * Register cleanup hooks for plugin-owned host state and background work.
    * @deprecated Use `api.lifecycle.registerRuntimeLifecycle(...)`.

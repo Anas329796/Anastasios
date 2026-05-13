@@ -200,6 +200,10 @@ import {
   PluginsSessionActionResultSchema,
   type PluginsUiDescriptorsParams,
   PluginsUiDescriptorsParamsSchema,
+  type PluginsUiEntryPointLaunchParams,
+  PluginsUiEntryPointLaunchParamsSchema,
+  type PluginsUiEntryPointsParams,
+  PluginsUiEntryPointsParamsSchema,
   ErrorCodes,
   type EnvironmentSummary,
   EnvironmentSummarySchema,
@@ -721,6 +725,12 @@ export const validatePluginApprovalResolveParams = ajv.compile<PluginApprovalRes
 export const validatePluginsUiDescriptorsParams = ajv.compile<PluginsUiDescriptorsParams>(
   PluginsUiDescriptorsParamsSchema,
 );
+export const validatePluginsUiEntryPointsParams = ajv.compile<PluginsUiEntryPointsParams>(
+  PluginsUiEntryPointsParamsSchema,
+);
+export const validatePluginsUiEntryPointLaunchParams = ajv.compile<PluginsUiEntryPointLaunchParams>(
+  PluginsUiEntryPointLaunchParamsSchema,
+);
 export const validatePluginsSessionActionParams = ajv.compile<PluginsSessionActionParams>(
   PluginsSessionActionParamsSchema,
 );
@@ -926,6 +936,8 @@ export {
   PluginsSessionActionParamsSchema,
   PluginsSessionActionResultSchema,
   PluginsUiDescriptorsParamsSchema,
+  PluginsUiEntryPointLaunchParamsSchema,
+  PluginsUiEntryPointsParamsSchema,
   ModelsListParamsSchema,
   SkillsStatusParamsSchema,
   ToolsCatalogParamsSchema,

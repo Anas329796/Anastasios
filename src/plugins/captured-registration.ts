@@ -9,6 +9,7 @@ import type { CodexAppServerExtensionFactory } from "./codex-app-server-extensio
 import type {
   PluginAgentEventSubscriptionRegistration,
   PluginControlUiDescriptor,
+  PluginControlUiEntryPoint,
   PluginRuntimeLifecycleRegistration,
   PluginSessionActionRegistration,
   PluginSessionSchedulerJobRegistration,
@@ -72,6 +73,7 @@ export type CapturedPluginRegistration = {
   trustedToolPolicies: PluginTrustedToolPolicyRegistration[];
   toolMetadata: PluginToolMetadataRegistration[];
   controlUiDescriptors: PluginControlUiDescriptor[];
+  controlUiEntryPoints: PluginControlUiEntryPoint[];
   runtimeLifecycles: PluginRuntimeLifecycleRegistration[];
   agentEventSubscriptions: PluginAgentEventSubscriptionRegistration[];
   sessionSchedulerJobs: PluginSessionSchedulerJobRegistration[];
@@ -109,6 +111,7 @@ export function createCapturedPluginRegistration(params?: {
   const trustedToolPolicies: PluginTrustedToolPolicyRegistration[] = [];
   const toolMetadata: PluginToolMetadataRegistration[] = [];
   const controlUiDescriptors: PluginControlUiDescriptor[] = [];
+  const controlUiEntryPoints: PluginControlUiEntryPoint[] = [];
   const runtimeLifecycles: PluginRuntimeLifecycleRegistration[] = [];
   const agentEventSubscriptions: PluginAgentEventSubscriptionRegistration[] = [];
   const sessionSchedulerJobs: PluginSessionSchedulerJobRegistration[] = [];
@@ -149,6 +152,7 @@ export function createCapturedPluginRegistration(params?: {
     trustedToolPolicies,
     toolMetadata,
     controlUiDescriptors,
+    controlUiEntryPoints,
     runtimeLifecycles,
     agentEventSubscriptions,
     sessionSchedulerJobs,
@@ -268,6 +272,9 @@ export function createCapturedPluginRegistration(params?: {
         },
         registerControlUiDescriptor(descriptor: PluginControlUiDescriptor) {
           controlUiDescriptors.push(descriptor);
+        },
+        registerControlUiEntryPoint(entryPoint: PluginControlUiEntryPoint) {
+          controlUiEntryPoints.push(entryPoint);
         },
         registerRuntimeLifecycle(lifecycle: PluginRuntimeLifecycleRegistration) {
           runtimeLifecycles.push(lifecycle);

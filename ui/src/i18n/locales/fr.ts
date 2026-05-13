@@ -383,6 +383,7 @@ export const fr: TranslationMap = {
     control: "Contrôle",
     agent: "Agent",
     settings: "Paramètres",
+    plugins: "Extensions",
     expand: "Développer la barre latérale",
     collapse: "Réduire la barre latérale",
     resize: "Redimensionner la barre latérale",
