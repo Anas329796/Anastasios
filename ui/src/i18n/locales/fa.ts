@@ -1123,6 +1123,10 @@ export const fa: TranslationMap = {
   },
   cron: {
     channelLast: "last",
+    presenter: {
+      at: "در",
+      every: "هر",
+    },
     newJob: "+ New",
     runIfDue: "Run if due",
     tokens: "{count} tokens",

@@ -1090,6 +1090,10 @@ export const th: TranslationMap = {
   },
   cron: {
     channelLast: "last",
+    presenter: {
+      at: "เวลา",
+      every: "ทุก",
+    },
     newJob: "+ New",
     runIfDue: "Run if due",
     tokens: "{count} tokens",

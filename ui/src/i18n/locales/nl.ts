@@ -1125,6 +1125,10 @@ export const nl: TranslationMap = {
   },
   cron: {
     channelLast: "last",
+    presenter: {
+      at: "Om",
+      every: "Elke",
+    },
     newJob: "+ New",
     runIfDue: "Run if due",
     tokens: "{count} tokens",

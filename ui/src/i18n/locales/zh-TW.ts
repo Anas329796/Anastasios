@@ -1088,6 +1088,10 @@ export const zh_TW: TranslationMap = {
   },
   cron: {
     channelLast: "last",
+    presenter: {
+      at: "於",
+      every: "每",
+    },
     newJob: "+ New",
     runIfDue: "Run if due",
     tokens: "{count} tokens",
