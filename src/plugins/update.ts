@@ -1607,6 +1607,7 @@ export async function syncPluginsForUpdateChannel(params: {
   workspaceDir?: string;
   env?: NodeJS.ProcessEnv;
   logger?: PluginUpdateLogger;
+  onIntegrityDrift?: (params: PluginUpdateIntegrityDriftParams) => boolean | Promise<boolean>;
   externalizedBundledPluginBridges?: readonly ExternalizedBundledPluginBridge[];
 }): Promise<PluginChannelSyncResult> {
   const env = params.env ?? process.env;
@@ -1720,6 +1721,11 @@ export async function syncPluginsForUpdateChannel(params: {
         targetPluginId,
         npmSpec,
       });
+      // Only bind recorded integrity to the exact fallback artifact it came from.
+      const fallbackExpectedIntegrity =
+        existing?.record.source === "npm" && existing.record.spec === npmSpec
+          ? expectedIntegrityForUpdate(existing.record.spec, existing.record.integrity)
+          : undefined;
       let installSource = preferredSource;
       let installSpec = preferredSource === "clawhub" ? clawhubSpec : npmSpec;
       let result:
@@ -1752,6 +1758,13 @@ export async function syncPluginsForUpdateChannel(params: {
             mode: "update",
             expectedPluginId: targetPluginId,
             trustedSourceLinkedOfficialInstall,
+            expectedIntegrity: fallbackExpectedIntegrity,
+            onIntegrityDrift: createPluginUpdateIntegrityDriftHandler({
+              pluginId: targetPluginId,
+              dryRun: false,
+              logger,
+              onIntegrityDrift: params.onIntegrityDrift,
+            }),
             logger,
           });
         }

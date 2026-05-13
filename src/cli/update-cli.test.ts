@@ -405,7 +405,19 @@ describe("update-cli", () => {
 
   const syncPluginCall = (index = 0) => {
     const calls = syncPluginsForUpdateChannel.mock.calls as unknown as Array<
-      [{ channel?: string; config?: OpenClawConfig }]
+      [
+        {
+          channel?: string;
+          config?: OpenClawConfig;
+          onIntegrityDrift?: (drift: {
+            pluginId: string;
+            spec: string;
+            expectedIntegrity: string;
+            actualIntegrity: string;
+            resolvedSpec?: string;
+          }) => Promise<boolean>;
+        },
+      ]
     >;
     return calls[index]?.[0];
   };
@@ -1203,6 +1215,9 @@ describe("update-cli", () => {
         await updateCommand({ restart: false });
       },
     );
+
+    const syncCall = syncPluginCall();
+    expect(syncCall?.onIntegrityDrift).toBeTypeOf("function");
 
     const updateCall = npmPluginUpdateCall() as
       | {
