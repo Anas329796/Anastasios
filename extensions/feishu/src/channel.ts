@@ -68,6 +68,7 @@ import {
   parseFeishuTargetId,
 } from "./conversation-id.js";
 import { listFeishuDirectoryGroups, listFeishuDirectoryPeers } from "./directory.static.js";
+import { feishuDoctor } from "./doctor.js";
 import { messageActionTargetAliases } from "./message-action-contract.js";
 import { resolveFeishuGroupToolPolicy } from "./policy.js";
 import { collectRuntimeConfigAssignments, secretTargetRegistryEntries } from "./secret-contract.js";
@@ -712,6 +713,7 @@ export const feishuPlugin: ChannelPlugin<ResolvedFeishuAccount, FeishuProbeResul
         stripPatterns: () => ['<at user_id="[^"]*">[^<]*</at>'],
       },
       reload: { configPrefixes: ["channels.feishu"] },
+      doctor: feishuDoctor,
       configSchema: buildChannelConfigSchema(FeishuConfigSchema),
       config: {
         ...feishuConfigAdapter,
