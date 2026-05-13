@@ -93,6 +93,38 @@ test("sessions.reset drops cached skills snapshot so /new rebuilds visible skill
   expect(store["agent:main:main"]?.skillsSnapshot).toBeUndefined();
 });
 
+test("sessions.reset does not reuse stale default transcript paths", async () => {
+  const { storePath } = await createSessionStoreDir();
+  const oldSessionId = "sess-stale-default-transcript";
+  const oldSessionFile = path.join(
+    await fs.realpath(path.dirname(storePath)),
+    `${oldSessionId}.jsonl`,
+  );
+  await writeSessionStore({
+    entries: {
+      main: sessionStoreEntry(oldSessionId, {
+        sessionFile: oldSessionFile,
+      }),
+    },
+  });
+
+  const reset = await directSessionReq<{
+    ok: true;
+    key: string;
+    entry: {
+      sessionId: string;
+      sessionFile?: string;
+    };
+  }>("sessions.reset", { key: "main" });
+
+  expect(reset.ok).toBe(true);
+  expect(reset.payload?.entry.sessionId).not.toBe(oldSessionId);
+  expect(reset.payload?.entry.sessionFile).not.toBe(oldSessionFile);
+  expect(path.basename(reset.payload?.entry.sessionFile ?? "")).toBe(
+    `${reset.payload?.entry.sessionId}.jsonl`,
+  );
+});
+
 test("sessions.reset preserves legacy explicit model overrides without modelOverrideSource", async () => {
   const { storePath } = await createSessionStoreDir();
   testState.agentConfig = {

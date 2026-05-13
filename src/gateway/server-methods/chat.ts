@@ -12,6 +12,7 @@ import { dispatchInboundMessage } from "../../auto-reply/dispatch.js";
 import type { ReplyPayload } from "../../auto-reply/reply-payload.js";
 import { createReplyDispatcher } from "../../auto-reply/reply/reply-dispatcher.js";
 import { stageSandboxMedia } from "../../auto-reply/reply/stage-sandbox-media.js";
+import { stripInboundMetadata } from "../../auto-reply/reply/strip-inbound-meta.js";
 import type { MsgContext, TemplateContext } from "../../auto-reply/templating.js";
 import { extractCanvasFromText } from "../../chat/canvas-render.js";
 import { resolveSessionFilePath } from "../../config/sessions.js";
@@ -853,12 +854,14 @@ function buildChatSendTranscriptMessage(params: {
   message: string;
   savedImages: SavedMedia[];
   timestamp: number;
+  clientRunId?: string;
 }) {
   const mediaFields = resolveChatSendTranscriptMediaFields(params.savedImages);
   return {
     role: "user" as const,
     content: params.message,
     timestamp: params.timestamp,
+    ...(params.clientRunId ? { idempotencyKey: params.clientRunId } : {}),
     ...mediaFields,
   };
 }
@@ -1016,6 +1019,96 @@ function extractTranscriptUserText(content: unknown): string | undefined {
     )
     .filter((text): text is string => typeof text === "string");
   return textBlocks.length > 0 ? textBlocks.join("") : undefined;
+}
+
+function normalizePendingComparableUserText(text: string | undefined): string | undefined {
+  if (typeof text !== "string") {
+    return text;
+  }
+  return stripInboundMetadata(text).replace(/\s+/g, " ").trim();
+}
+
+function normalizePendingRunIdentity(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function extractPendingRunIdentity(message: Record<string, unknown>): string | undefined {
+  const openclawMeta =
+    message.__openclaw &&
+    typeof message.__openclaw === "object" &&
+    !Array.isArray(message.__openclaw)
+      ? (message.__openclaw as Record<string, unknown>)
+      : undefined;
+  return (
+    normalizePendingRunIdentity(message.idempotencyKey) ??
+    normalizePendingRunIdentity(message.clientRunId) ??
+    normalizePendingRunIdentity(message.messageId) ??
+    normalizePendingRunIdentity(message.runId) ??
+    normalizePendingRunIdentity(openclawMeta?.id)
+  );
+}
+
+function chatHistoryMessageMatchesPending(
+  message: unknown,
+  pendingEntry: { clientRunId?: string; message: Record<string, unknown> },
+): boolean {
+  if (!message || typeof message !== "object") {
+    return false;
+  }
+  const entry = message as Record<string, unknown>;
+  const pendingMessage = pendingEntry.message;
+  const pendingRunId =
+    normalizePendingRunIdentity(pendingEntry.clientRunId) ??
+    extractPendingRunIdentity(pendingMessage);
+  if (pendingRunId) {
+    return extractPendingRunIdentity(entry) === pendingRunId;
+  }
+  if (entry.role !== pendingMessage.role) {
+    return false;
+  }
+  const messageText = normalizePendingComparableUserText(extractTranscriptUserText(entry.content));
+  const pendingText = normalizePendingComparableUserText(
+    extractTranscriptUserText(pendingMessage.content),
+  );
+  if (messageText !== pendingText) {
+    return false;
+  }
+  const messageTs = typeof entry.timestamp === "number" ? entry.timestamp : null;
+  const pendingTs = typeof pendingMessage.timestamp === "number" ? pendingMessage.timestamp : null;
+  if (messageTs !== null && pendingTs !== null && Math.abs(messageTs - pendingTs) > 60 * 60_000) {
+    return false;
+  }
+  return true;
+}
+
+function appendPendingChatHistoryMessages(params: {
+  context: GatewayRequestContext;
+  sessionKey: string;
+  rawMessages: unknown[];
+}): unknown[] {
+  const pendingStore = params.context.chatPendingUserMessages;
+  if (!pendingStore) {
+    return params.rawMessages;
+  }
+  const pendingMessages: Record<string, unknown>[] = [];
+  for (const entry of pendingStore.values()) {
+    if (entry.sessionKey !== params.sessionKey) {
+      continue;
+    }
+    if (params.rawMessages.some((message) => chatHistoryMessageMatchesPending(message, entry))) {
+      continue;
+    }
+    pendingMessages.push(entry.message);
+  }
+  if (pendingMessages.length === 0) {
+    return params.rawMessages;
+  }
+  pendingMessages.sort(
+    (a, b) =>
+      (typeof a.timestamp === "number" ? a.timestamp : 0) -
+      (typeof b.timestamp === "number" ? b.timestamp : 0),
+  );
+  return [...params.rawMessages, ...pendingMessages];
 }
 
 async function rewriteChatSendUserTurnMediaPaths(params: {
@@ -1674,6 +1767,76 @@ function broadcastChatFinal(params: {
   params.context.agentRunSeq.delete(params.runId);
 }
 
+const WEBCHAT_PREFLIGHT_ACK_MARKER = "OPENCLAW_WEBCHAT_PREFLIGHT_ACK_V1";
+
+function shouldSkipWebchatPreflightAcknowledgement(message: string): boolean {
+  const trimmed = message.trim();
+  if (!trimmed || trimmed.startsWith("/")) {
+    return true;
+  }
+  const lower = trimmed.toLowerCase();
+  return (
+    /\b(no reply|do not reply|don't reply|silent|no commentary)\b/.test(lower) ||
+    /\b(return|respond)\s+(only|exactly)\b/.test(lower) ||
+    /\bexactly\s+(this|the following)\b/.test(lower)
+  );
+}
+
+function buildWebchatPreflightAcknowledgement(message: string): string | undefined {
+  if (shouldSkipWebchatPreflightAcknowledgement(message)) {
+    return undefined;
+  }
+  const lower = message.toLowerCase();
+  if (/\b(review|audit|verify|test)\b/.test(lower)) {
+    return "Got it. I am reviewing that now.";
+  }
+  if (/\b(fix|implement|add|change|update|patch|repair|lower)\b/.test(lower)) {
+    return "Got it. I am going to fix that now.";
+  }
+  if (
+    /\b(inspect|debug|diagnos|check|look|stuck|slow|broken|respond|response|refresh|why)\b/.test(
+      lower,
+    )
+  ) {
+    return "Got it. I am checking that now.";
+  }
+  if (/\b(explain|what does|how can|should|tell me|walk me through)\b/.test(lower)) {
+    return "Got it. I am thinking that through now.";
+  }
+  return "Got it. I am on it.";
+}
+
+function broadcastWebchatPreflightAcknowledgement(params: {
+  context: Pick<GatewayRequestContext, "broadcast" | "nodeSendToSession">;
+  runId: string;
+  sessionKey: string;
+  message: string;
+}) {
+  const text = buildWebchatPreflightAcknowledgement(params.message);
+  if (!text) {
+    return;
+  }
+  const payload = {
+    runId: params.runId,
+    sessionKey: params.sessionKey,
+    seq: 0,
+    state: "preflight" as const,
+    ephemeral: true,
+    marker: WEBCHAT_PREFLIGHT_ACK_MARKER,
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text }],
+      timestamp: Date.now(),
+    },
+  };
+  params.context.broadcast("chat", payload, { dropIfSlow: true });
+  params.context.nodeSendToSession(params.sessionKey, "chat", payload);
+}
+
+export const __testing = {
+  buildWebchatPreflightAcknowledgement,
+};
+
 function isBtwReplyPayload(payload: ReplyPayload | undefined): payload is ReplyPayload & {
   btw: { question: string };
   text: string;
@@ -1733,12 +1896,16 @@ export const chatHandlers: GatewayRequestHandlers = {
       );
       return;
     }
-    const { sessionKey, limit, maxChars } = params as {
+    const {
+      sessionKey: rawSessionKey,
+      limit,
+      maxChars,
+    } = params as {
       sessionKey: string;
       limit?: number;
       maxChars?: number;
     };
-    const { cfg, storePath, entry } = loadSessionEntry(sessionKey);
+    const { cfg, storePath, entry, canonicalKey: sessionKey } = loadSessionEntry(rawSessionKey);
     const sessionId = entry?.sessionId;
     const sessionAgentId = resolveSessionAgentId({ sessionKey, config: cfg });
     const resolvedSessionModel = resolveSessionModelRef(cfg, entry, sessionAgentId);
@@ -1759,9 +1926,14 @@ export const chatHandlers: GatewayRequestHandlers = {
       provider: resolvedSessionModel.provider,
       localMessages,
     });
+    const rawMessagesWithPending = appendPendingChatHistoryMessages({
+      context,
+      sessionKey,
+      rawMessages,
+    });
     const effectiveMaxChars = resolveEffectiveChatHistoryMaxChars(cfg, maxChars);
     const normalized = augmentChatHistoryWithCanvasBlocks(
-      projectRecentChatDisplayMessages(rawMessages, {
+      projectRecentChatDisplayMessages(rawMessagesWithPending, {
         maxChars: effectiveMaxChars,
         maxMessages: max,
       }),
@@ -1800,7 +1972,7 @@ export const chatHandlers: GatewayRequestHandlers = {
     }
     const verboseLevel = entry?.verboseLevel ?? cfg.agents?.defaults?.verboseDefault;
     respond(true, {
-      sessionKey,
+      sessionKey: rawSessionKey,
       sessionId,
       messages: bounded.messages,
       thinkingLevel,
@@ -2213,11 +2385,28 @@ export const chatHandlers: GatewayRequestHandlers = {
         sessionKey,
         clientRunId,
       });
+      context.chatPendingUserMessages?.set(clientRunId, {
+        sessionKey,
+        clientRunId,
+        message: buildChatSendTranscriptMessage({
+          message: parsedMessage,
+          savedImages: [],
+          timestamp: now,
+          clientRunId,
+        }),
+        ts: now,
+      });
       const ackPayload = {
         runId: clientRunId,
         status: "started" as const,
       };
       respond(true, ackPayload, undefined, { runId: clientRunId });
+      broadcastWebchatPreflightAcknowledgement({
+        context,
+        runId: clientRunId,
+        sessionKey,
+        message: parsedMessage,
+      });
       const persistedImagesPromise = persistChatSendImages({
         images: parsedImages,
         imageOrder,
@@ -2334,14 +2523,22 @@ export const chatHandlers: GatewayRequestHandlers = {
                 return;
               }
               const persistedImages = await persistedImagesPromise;
+              const userMessage = buildChatSendTranscriptMessage({
+                message: parsedMessage,
+                savedImages: persistedImages,
+                timestamp: now,
+                clientRunId,
+              });
+              context.chatPendingUserMessages?.set(clientRunId, {
+                sessionKey,
+                clientRunId,
+                message: userMessage,
+                ts: now,
+              });
               emitSessionTranscriptUpdate({
                 sessionFile: transcriptPath,
                 sessionKey,
-                message: buildChatSendTranscriptMessage({
-                  message: parsedMessage,
-                  savedImages: persistedImages,
-                  timestamp: now,
-                }),
+                message: userMessage,
               });
             },
             {
@@ -2795,10 +2992,12 @@ export const chatHandlers: GatewayRequestHandlers = {
         })
         .finally(() => {
           activeRunAbort.cleanup();
+          context.chatPendingUserMessages?.delete(clientRunId);
           context.removeChatRun(clientRunId, clientRunId, sessionKey);
         });
     } catch (err) {
       context.chatAbortControllers.delete(clientRunId);
+      context.chatPendingUserMessages?.delete(clientRunId);
       context.removeChatRun(clientRunId, clientRunId, sessionKey);
       const error = errorShape(ErrorCodes.UNAVAILABLE, String(err));
       const payload = {

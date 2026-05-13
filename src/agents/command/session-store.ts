@@ -45,6 +45,23 @@ function removeLifecycleStateFromMetadataPatch(entry: SessionEntry): SessionEntr
   return next;
 }
 
+function buildTerminalLifecycleFallbackPatch(
+  existing: SessionEntry | undefined,
+  entry: SessionEntry,
+): Partial<SessionEntry> {
+  if (entry.status !== "done" && entry.status !== "killed") {
+    return {};
+  }
+  if (existing?.status && existing.status !== "running") {
+    return {};
+  }
+  return {
+    status: entry.status,
+    endedAt: entry.endedAt,
+    runtimeMs: entry.runtimeMs,
+  };
+}
+
 export async function updateSessionStoreAfterAgentRun(params: {
   cfg: OpenClawConfig;
   contextTokensOverride?: number;
@@ -171,6 +188,15 @@ export async function updateSessionStoreAfterAgentRun(params: {
     }
   }
   next.abortedLastRun = result.meta.aborted ?? false;
+  next.status = next.abortedLastRun ? "killed" : "done";
+  next.endedAt = now;
+  next.runtimeMs = Math.max(
+    0,
+    now -
+      (typeof next.startedAt === "number" && Number.isFinite(next.startedAt)
+        ? next.startedAt
+        : now),
+  );
   if (result.meta.systemPromptReport) {
     next.systemPromptReport = result.meta.systemPromptReport;
   }
@@ -234,7 +260,11 @@ export async function updateSessionStoreAfterAgentRun(params: {
   }
   const metadataPatch = removeLifecycleStateFromMetadataPatch(next);
   const persisted = await updateSessionStore(storePath, (store) => {
-    const merged = mergeSessionEntry(store[sessionKey], metadataPatch);
+    const existing = store[sessionKey];
+    const merged = mergeSessionEntry(existing, {
+      ...metadataPatch,
+      ...buildTerminalLifecycleFallbackPatch(existing, next),
+    });
     store[sessionKey] = merged;
     return merged;
   });

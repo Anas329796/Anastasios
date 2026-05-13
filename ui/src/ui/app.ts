@@ -183,6 +183,7 @@ export class OpenClawApp extends LitElement {
   eventLogBuffer: EventLogEntry[] = [];
   toolStreamSyncTimer: number | null = null;
   private sidebarCloseTimer: number | null = null;
+  private _disconnectTimer: number | null = null;
 
   @state() assistantName = bootAssistantIdentity.name;
   @state() assistantAvatar = bootAssistantIdentity.avatar;
@@ -210,6 +211,7 @@ export class OpenClawApp extends LitElement {
   @state() chatStreamSegments: Array<{ text: string; ts: number }> = [];
   @state() chatStream: string | null = null;
   @state() chatStreamStartedAt: number | null = null;
+  @state() chatStreamEphemeral = false;
   @state() chatRunId: string | null = null;
   @state() chatSideResult: ChatSideResult | null = null;
   @state() compactionStatus: CompactionStatus | null = null;
@@ -643,6 +645,11 @@ export class OpenClawApp extends LitElement {
 
   override connectedCallback() {
     super.connectedCallback();
+    const hadPendingDisconnect = this._disconnectTimer !== null;
+    if (this._disconnectTimer !== null) {
+      window.clearTimeout(this._disconnectTimer);
+      this._disconnectTimer = null;
+    }
     this.onSlashAction = async (action: string) => {
       switch (action) {
         case "new-session":
@@ -666,7 +673,9 @@ export class OpenClawApp extends LitElement {
     document.addEventListener("keydown", this.globalKeydownHandler);
     document.addEventListener("keydown", this.chatMobileControlsKeydownHandler);
     document.addEventListener("pointerdown", this.chatMobileControlsPointerdownHandler);
-    handleConnected(this as unknown as Parameters<typeof handleConnected>[0]);
+    if (!hadPendingDisconnect) {
+      handleConnected(this as unknown as Parameters<typeof handleConnected>[0]);
+    }
     this.nativeBridgeCleanup = initNativeBridge(this);
     void this.initWebPushState();
   }
@@ -690,7 +699,13 @@ export class OpenClawApp extends LitElement {
       this.sessionSwitchFlashTimer = null;
     }
     this.chatMobileControlsTrigger = null;
-    handleDisconnected(this as unknown as Parameters<typeof handleDisconnected>[0]);
+    if (this._disconnectTimer !== null) {
+      window.clearTimeout(this._disconnectTimer);
+    }
+    this._disconnectTimer = window.setTimeout(() => {
+      this._disconnectTimer = null;
+      handleDisconnected(this as unknown as Parameters<typeof handleDisconnected>[0]);
+    }, 250);
     super.disconnectedCallback();
   }
 

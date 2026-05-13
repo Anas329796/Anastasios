@@ -416,5 +416,25 @@ describe("message-normalizer", () => {
 
       expect(result.senderLabel).toBe("Iris");
     });
+
+    it("hides the Control UI transport sender label for local user messages", () => {
+      const result = normalizeMessage({
+        role: "user",
+        content: "Hello from the browser",
+        senderLabel: "openclaw-control-ui",
+      });
+
+      expect(result.senderLabel).toBeNull();
+    });
+
+    it("preserves Control UI-like sender labels on non-user messages", () => {
+      const result = normalizeMessage({
+        role: "assistant",
+        content: "Assistant reply",
+        senderLabel: "openclaw-control-ui",
+      });
+
+      expect(result.senderLabel).toBe("openclaw-control-ui");
+    });
   });
 });
