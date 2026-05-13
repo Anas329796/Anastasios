@@ -4,6 +4,7 @@ import {
   PLUGIN_APPROVAL_DESCRIPTION_MAX_LENGTH,
   PLUGIN_APPROVAL_TITLE_MAX_LENGTH,
 } from "../../../infra/plugin-approvals.js";
+import { PluginJsonValueSchema } from "./plugins.js";
 import { NonEmptyString } from "./primitives.js";
 
 export const PluginApprovalRequestParamsSchema = Type.Object(
@@ -26,6 +27,7 @@ export const PluginApprovalRequestParamsSchema = Type.Object(
     turnSourceTo: Type.Optional(Type.String()),
     turnSourceAccountId: Type.Optional(Type.String()),
     turnSourceThreadId: Type.Optional(Type.Union([Type.String(), Type.Number()])),
+    metadata: Type.Optional(PluginJsonValueSchema),
     timeoutMs: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_PLUGIN_APPROVAL_TIMEOUT_MS })),
     twoPhase: Type.Optional(Type.Boolean()),
   },
