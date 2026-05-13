@@ -138,6 +138,7 @@ export type PluginManifestRecord = {
   providerAuthChoices?: PluginManifest["providerAuthChoices"];
   activation?: PluginManifestActivation;
   setup?: PluginManifestSetup;
+  authRequirements?: PluginManifest["authRequirements"];
   packageManifest?: OpenClawPackageManifest;
   packageDependencies?: PluginDependencySpecMap;
   packageOptionalDependencies?: PluginDependencySpecMap;
@@ -438,6 +439,7 @@ function buildRecord(params: {
     providerAuthChoices: params.manifest.providerAuthChoices,
     activation: params.manifest.activation,
     setup: params.manifest.setup,
+    authRequirements: params.manifest.authRequirements,
     packageManifest: params.candidate.packageManifest,
     packageDependencies: params.candidate.packageDependencies,
     packageOptionalDependencies: params.candidate.packageOptionalDependencies,
