@@ -38,6 +38,7 @@ import type { TypingController } from "./typing.js";
 
 type SkillCommandsRuntime = typeof import("../skill-commands.runtime.js");
 type OpenClawToolsRuntime = typeof import("../../agents/openclaw-tools.runtime.js");
+type BeforeToolCallRuntime = typeof import("../../agents/pi-tools.before-tool-call.js");
 type AbortCutoffRuntime = typeof import("./abort-cutoff.runtime.js");
 type CommandsRuntime = typeof import("./commands.runtime.js");
 
@@ -46,6 +47,9 @@ const skillCommandsRuntimeLoader = createLazyImportLoader<SkillCommandsRuntime>(
 );
 const openClawToolsRuntimeLoader = createLazyImportLoader<OpenClawToolsRuntime>(
   () => import("../../agents/openclaw-tools.runtime.js"),
+);
+const beforeToolCallRuntimeLoader = createLazyImportLoader<BeforeToolCallRuntime>(
+  () => import("../../agents/pi-tools.before-tool-call.js"),
 );
 const abortCutoffRuntimeLoader = createLazyImportLoader<AbortCutoffRuntime>(
   () => import("./abort-cutoff.runtime.js"),
@@ -61,6 +65,10 @@ function loadSkillCommandsRuntime(): Promise<SkillCommandsRuntime> {
 
 function loadOpenClawToolsRuntime(): Promise<OpenClawToolsRuntime> {
   return openClawToolsRuntimeLoader.load();
+}
+
+function loadBeforeToolCallRuntime(): Promise<BeforeToolCallRuntime> {
+  return beforeToolCallRuntimeLoader.load();
 }
 
 function loadAbortCutoffRuntime(): Promise<AbortCutoffRuntime> {
@@ -313,6 +321,17 @@ export async function handleInlineActions(params: {
         typing.cleanup();
         return { kind: "reply", reply: { text: `❌ Tool not available: ${dispatch.toolName}` } };
       }
+      const executableTool = targetSessionEntry?.skillsSnapshot
+        ? (await loadBeforeToolCallRuntime()).wrapToolWithBeforeToolCallHook(tool, {
+            agentId,
+            config: cfg,
+            cwd: workspaceDir,
+            workspaceDir,
+            sessionKey,
+            sessionId: targetSessionEntry.sessionId,
+            skillsSnapshot: targetSessionEntry.skillsSnapshot,
+          })
+        : tool;
 
       const toolCallId = `cmd_${generateSecureToken(8)}`;
       try {
@@ -321,7 +340,7 @@ export async function handleInlineActions(params: {
           commandName: skillInvocation.command.name,
           skillName: skillInvocation.command.skillName,
         };
-        const result = await tool.execute(toolCallId, toolArgs, opts?.abortSignal);
+        const result = await executableTool.execute(toolCallId, toolArgs, opts?.abortSignal);
         const blockedReason = extractBlockedToolReason(result);
         if (blockedReason) {
           typing.cleanup();

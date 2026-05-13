@@ -107,6 +107,23 @@ describe("before_tool_call loop detection behavior", () => {
     }
   }
 
+  async function withSkillEvents(
+    run: (emitted: DiagnosticEventPayload[], flush: () => Promise<void>) => Promise<void>,
+  ) {
+    const emitted: DiagnosticEventPayload[] = [];
+    const stop = onInternalDiagnosticEvent((evt) => {
+      if (evt.type === "skill.used") {
+        emitted.push(evt);
+      }
+    });
+    const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+    try {
+      await run(emitted, flush);
+    } finally {
+      stop();
+    }
+  }
+
   function createPingPongTools(options?: { withProgress?: boolean }) {
     const readExecute = options?.withProgress
       ? vi.fn().mockImplementation(async (toolCallId: string) => ({
@@ -475,6 +492,119 @@ describe("before_tool_call loop detection behavior", () => {
       expect(typeof completed.durationMs).toBe("number");
       expect(JSON.stringify(emitted)).not.toContain("sk-1234567890abcdef1234567890abcdef");
       expect(JSON.stringify(emitted)).not.toContain("pwd");
+    });
+  });
+
+  it("emits skill usage diagnostics when read opens a known skill file", async () => {
+    const execute = vi.fn().mockResolvedValue({
+      content: [{ type: "text", text: "skill instructions" }],
+    });
+    const tool = wrapToolWithBeforeToolCallHook({ name: "read", execute } as any, {
+      agentId: "main",
+      sessionKey: "session-key",
+      sessionId: "session-id",
+      runId: "run-1",
+      workspaceDir: "/workspace",
+      skillsSnapshot: {
+        prompt: "",
+        skills: [{ name: "tiny-llm-brainstorm" }],
+        resolvedSkills: [
+          {
+            name: "tiny-llm-brainstorm",
+            description: "Design small local language models.",
+            filePath: "/workspace/.codex/skills/tiny-llm-brainstorm/SKILL.md",
+            baseDir: "/workspace/.codex/skills/tiny-llm-brainstorm",
+            sourceInfo: {
+              path: "/workspace/.codex/skills/tiny-llm-brainstorm",
+              source: "workspace",
+              scope: "project",
+              origin: "top-level",
+              baseDir: "/workspace/.codex/skills/tiny-llm-brainstorm",
+            },
+            source: "workspace",
+            disableModelInvocation: false,
+          },
+        ],
+      },
+      loopDetection: { enabled: false },
+    });
+
+    await withSkillEvents(async (emitted, flush) => {
+      await tool.execute(
+        "tool-call-skill",
+        { path: "@/workspace/.codex/skills/tiny-llm-brainstorm/SKILL.md" },
+        undefined,
+        undefined,
+      );
+      await flush();
+
+      expect(emitted).toHaveLength(1);
+      expect(emitted[0]).toMatchObject({
+        type: "skill.used",
+        agentId: "main",
+        sessionKey: "session-key",
+        sessionId: "session-id",
+        runId: "run-1",
+        skillName: "tiny-llm-brainstorm",
+        skillSource: "workspace",
+        activation: "read",
+        toolName: "read",
+        toolCallId: "tool-call-skill",
+      });
+      expect(JSON.stringify(emitted[0])).not.toContain("/workspace/.codex");
+    });
+  });
+
+  it("emits skill usage diagnostics for command-dispatched skill tools", async () => {
+    const execute = vi.fn().mockResolvedValue({
+      content: [{ type: "text", text: "command done" }],
+    });
+    const tool = wrapToolWithBeforeToolCallHook({ name: "exec", execute } as any, {
+      agentId: "main",
+      sessionKey: "session-key",
+      runId: "run-1",
+      skillsSnapshot: {
+        prompt: "",
+        skills: [{ name: "qa-helper" }],
+        resolvedSkills: [
+          {
+            name: "qa-helper",
+            description: "Run focused QA commands.",
+            filePath: "/workspace/.agents/skills/qa-helper/SKILL.md",
+            baseDir: "/workspace/.agents/skills/qa-helper",
+            sourceInfo: {
+              path: "/workspace/.agents/skills/qa-helper",
+              source: "workspace",
+              scope: "project",
+              origin: "top-level",
+              baseDir: "/workspace/.agents/skills/qa-helper",
+            },
+            source: "workspace",
+            disableModelInvocation: false,
+          },
+        ],
+      },
+      loopDetection: { enabled: false },
+    });
+
+    await withSkillEvents(async (emitted, flush) => {
+      await tool.execute(
+        "tool-call-command-skill",
+        { skillName: "qa-helper", commandName: "qa", command: "test" },
+        undefined,
+        undefined,
+      );
+      await flush();
+
+      expect(emitted).toHaveLength(1);
+      expect(emitted[0]).toMatchObject({
+        type: "skill.used",
+        skillName: "qa-helper",
+        skillSource: "workspace",
+        activation: "command",
+        toolName: "exec",
+      });
+      expect(JSON.stringify(emitted[0])).not.toContain("test");
     });
   });
 

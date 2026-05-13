@@ -94,6 +94,36 @@ describe("diagnostics-prometheus service", () => {
     expect(__test__.renderPrometheusMetrics(store)).toBe("");
   });
 
+  it("records skill usage metrics without raw paths", () => {
+    const store = __test__.createPrometheusMetricStore();
+
+    __test__.recordDiagnosticEvent(
+      store,
+      {
+        ...baseEvent(),
+        type: "skill.used",
+        agentId: "main",
+        runId: "run-should-not-export",
+        sessionKey: "session-should-not-export",
+        skillName: "tiny-llm-brainstorm",
+        skillSource: "workspace",
+        activation: "read",
+        toolName: "read",
+      },
+      trusted,
+    );
+
+    const rendered = __test__.renderPrometheusMetrics(store);
+
+    expect(rendered).toContain("# TYPE openclaw_skill_used_total counter");
+    expect(rendered).toContain(
+      'openclaw_skill_used_total{activation="read",agent="main",skill="tiny-llm-brainstorm",source="workspace"} 1',
+    );
+    expect(rendered).not.toContain("run-should-not-export");
+    expect(rendered).not.toContain("session-should-not-export");
+    expect(rendered).not.toContain("SKILL.md");
+  });
+
   it("redacts and bounds label values", () => {
     const store = __test__.createPrometheusMetricStore();
 

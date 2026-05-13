@@ -96,6 +96,7 @@ For traces, logs, OTLP push, and OpenTelemetry GenAI semantic attributes, see [O
 | `openclaw_model_tokens_total`                 | counter   | `agent`, `channel`, `model`, `provider`, `token_type`                                     |
 | `openclaw_gen_ai_client_token_usage`          | histogram | `model`, `provider`, `token_type`                                                         |
 | `openclaw_model_cost_usd_total`               | counter   | `agent`, `channel`, `model`, `provider`                                                   |
+| `openclaw_skill_used_total`                   | counter   | `activation`, `agent`, `skill`, `source`                                                  |
 | `openclaw_tool_execution_total`               | counter   | `error_category`, `outcome`, `params_kind`, `tool`                                        |
 | `openclaw_tool_execution_duration_seconds`    | histogram | `error_category`, `outcome`, `params_kind`, `tool`                                        |
 | `openclaw_harness_run_total`                  | counter   | `channel`, `error_category`, `harness`, `model`, `outcome`, `phase`, `plugin`, `provider` |
@@ -119,6 +120,16 @@ For traces, logs, OTLP push, and OpenTelemetry GenAI semantic attributes, see [O
 | `openclaw_memory_pressure_total`              | counter   | `level`, `reason`                                                                         |
 | `openclaw_telemetry_exporter_total`           | counter   | `exporter`, `reason`, `signal`, `status`                                                  |
 | `openclaw_prometheus_series_dropped_total`    | counter   | none                                                                                      |
+
+### Skill usage labels
+
+`openclaw_skill_used_total` uses these skill-specific labels:
+
+- `activation`: how the skill was activated. `read` means a run read a known `SKILL.md` file; `command` means a skill command dispatched a tool.
+- `skill`: the skill name.
+- `source`: the bounded skill source, such as `workspace`, `bundled`, or `unknown`.
+
+The `skill` label is redacted and bounded by the same low-cardinality label policy as other Prometheus labels. Raw skill file paths, run IDs, session IDs, command arguments, prompts, and tool outputs are not exported as labels. If an environment has many custom skills, prefer dashboards that aggregate by `source` or filter to a curated skill set, and watch `openclaw_prometheus_series_dropped_total` for cap pressure.
 
 ## Label policy
 
@@ -166,6 +177,12 @@ histogram_quantile(
   0.95,
   sum by (le, lane) (rate(openclaw_queue_lane_wait_seconds_bucket[5m]))
 ) < 2
+
+# Recent skill usage for debugging, split by skill and source
+sum by (skill, source) (increase(openclaw_skill_used_total[5m]))
+
+# Daily skill usage trend, split by skill and source
+sum by (skill, source) (increase(openclaw_skill_used_total[24h]))
 
 # Dropped Prometheus series (cardinality alarm)
 increase(openclaw_prometheus_series_dropped_total[15m]) > 0

@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SkillCommandSpec } from "../../agents/skills.js";
 import type { SessionEntry } from "../../config/sessions.js";
+import {
+  onInternalDiagnosticEvent,
+  type DiagnosticEventPayload,
+} from "../../infra/diagnostic-events.js";
 import type { TemplateContext } from "../templating.js";
 import { clearInlineDirectives } from "./get-reply-directives-utils.js";
 import { handleInlineActions } from "./get-reply-inline-actions.js";
@@ -141,6 +145,22 @@ async function runInlineStatusAction(storePath?: string) {
   );
 
   return { result, typing };
+}
+
+async function collectSkillEvents(run: () => Promise<void>): Promise<DiagnosticEventPayload[]> {
+  const events: DiagnosticEventPayload[] = [];
+  const stop = onInternalDiagnosticEvent((evt) => {
+    if (evt.type === "skill.used") {
+      events.push(evt);
+    }
+  });
+  try {
+    await run();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    return events;
+  } finally {
+    stop();
+  }
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
@@ -694,6 +714,98 @@ describe("handleInlineActions", () => {
       skillName: "matrix-profile",
     });
     expect(toolCall?.[2]).toBeUndefined();
+  });
+
+  it("emits skill usage diagnostics for inline command-dispatched skill tools", async () => {
+    const typing = createTypingController();
+    const toolExecute = vi.fn(async () => ({ text: "updated" }));
+    createOpenClawToolsMock.mockReturnValue([
+      {
+        name: "message",
+        execute: toolExecute,
+      },
+    ]);
+
+    const ctx = buildTestCtx({
+      Body: "/set_profile display name",
+      CommandBody: "/set_profile display name",
+    });
+    const skillCommands: SkillCommandSpec[] = [
+      {
+        name: "set_profile",
+        skillName: "matrix-profile",
+        description: "Set Matrix profile",
+        dispatch: {
+          kind: "tool",
+          toolName: "message",
+          argMode: "raw",
+        },
+        sourceFilePath: "/tmp/plugin/commands/set-profile.md",
+      },
+    ];
+
+    const events = await collectSkillEvents(async () => {
+      const result = await handleInlineActions(
+        createHandleInlineActionsInput({
+          ctx,
+          typing,
+          cleanedBody: "/set_profile display name",
+          command: {
+            isAuthorizedSender: true,
+            senderId: "sender-1",
+            senderIsOwner: true,
+            abortKey: "sender-1",
+            rawBodyNormalized: "/set_profile display name",
+            commandBodyNormalized: "/set_profile display name",
+          },
+          overrides: {
+            cfg: { commands: { text: true } },
+            allowTextCommands: true,
+            skillCommands,
+            sessionStore: {
+              "s:main": {
+                sessionId: "target-session",
+                updatedAt: 0,
+                skillsSnapshot: {
+                  prompt: "",
+                  skills: [{ name: "matrix-profile" }],
+                  resolvedSkills: [
+                    {
+                      name: "matrix-profile",
+                      description: "Set Matrix profile",
+                      filePath: "/tmp/.agents/skills/matrix-profile/SKILL.md",
+                      baseDir: "/tmp/.agents/skills/matrix-profile",
+                      source: "workspace",
+                      sourceInfo: {
+                        path: "/tmp/.agents/skills/matrix-profile",
+                        source: "workspace",
+                        scope: "project",
+                        origin: "top-level",
+                      },
+                      disableModelInvocation: false,
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        }),
+      );
+
+      expect(result).toEqual({ kind: "reply", reply: { text: "✅ Done." } });
+    });
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      type: "skill.used",
+      agentId: "main",
+      sessionKey: "s:main",
+      sessionId: "target-session",
+      skillName: "matrix-profile",
+      skillSource: "workspace",
+      activation: "command",
+      toolName: "message",
+    });
   });
 
   it("honors construction-time before-tool-call blocks for inline tool dispatch", async () => {
