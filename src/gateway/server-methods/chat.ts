@@ -15,7 +15,6 @@ import { stageSandboxMedia } from "../../auto-reply/reply/stage-sandbox-media.js
 import type { MsgContext, TemplateContext } from "../../auto-reply/templating.js";
 import { extractCanvasFromText } from "../../chat/canvas-render.js";
 import { resolveSessionFilePath } from "../../config/sessions.js";
-import { streamSessionTranscriptLines } from "../../config/sessions/transcript-stream.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import {
   measureDiagnosticsTimelineSpan,
@@ -136,6 +135,8 @@ type TranscriptAppendResult = {
   ok: boolean;
   messageId?: string;
   message?: Record<string, unknown>;
+  /** True when an existing entry with matching idempotencyKey was returned. */
+  deduped?: boolean;
   error?: string;
 };
 
@@ -1355,27 +1356,6 @@ function ensureTranscriptFile(params: { transcriptPath: string; sessionId: strin
   }
 }
 
-async function transcriptHasIdempotencyKey(
-  transcriptPath: string,
-  idempotencyKey: string,
-): Promise<boolean> {
-  try {
-    for await (const line of streamSessionTranscriptLines(transcriptPath)) {
-      try {
-        const parsed = JSON.parse(line) as { message?: { idempotencyKey?: unknown } };
-        if (parsed?.message?.idempotencyKey === idempotencyKey) {
-          return true;
-        }
-      } catch {
-        continue;
-      }
-    }
-    return false;
-  } catch {
-    return false;
-  }
-}
-
 async function appendAssistantTranscriptMessage(params: {
   message: string;
   label?: string;
@@ -1416,13 +1396,10 @@ async function appendAssistantTranscriptMessage(params: {
     }
   }
 
-  if (
-    params.idempotencyKey &&
-    (await transcriptHasIdempotencyKey(transcriptPath, params.idempotencyKey))
-  ) {
-    return { ok: true };
-  }
-
+  // NOTE: Idempotency dedupe is enforced atomically inside
+  // appendSessionTranscriptMessage (locked critical section). Performing the
+  // check here would re-introduce a TOCTOU race where two concurrent identical
+  // requests could both pass the precheck and write duplicates.
   return await appendInjectedAssistantMessageToTranscript({
     transcriptPath,
     message: params.message,
@@ -1468,13 +1445,7 @@ async function appendUserTranscriptMessage(params: {
     }
   }
 
-  if (
-    params.idempotencyKey &&
-    (await transcriptHasIdempotencyKey(transcriptPath, params.idempotencyKey))
-  ) {
-    return { ok: true };
-  }
-
+  // Idempotency is enforced atomically by appendSessionTranscriptMessage.
   return await appendInjectedUserMessageToTranscript({
     transcriptPath,
     message: params.message,
@@ -2932,6 +2903,14 @@ export const chatHandlers: GatewayRequestHandlers = {
     }
     if (!appended.messageId || !appended.message) {
       respond(true, { ok: true, deduped: true });
+      return;
+    }
+
+    if (appended.deduped) {
+      // Replay of a previously-persisted idempotent inject: skip broadcast to
+      // avoid duplicate UI events, but return the canonical messageId so the
+      // caller can correlate.
+      respond(true, { ok: true, deduped: true, messageId: appended.messageId });
       return;
     }
 

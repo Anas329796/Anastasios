@@ -156,4 +156,51 @@ describe("gateway chat.inject transcript writes", () => {
     }
   });
 
+  it("dedupes concurrent identical idempotent injects (race-safe)", async () => {
+    const { dir, transcriptPath } = createTranscriptFixtureSync({
+      prefix: "openclaw-chat-inject-race-",
+      sessionId: "sess-race",
+    });
+
+    try {
+      const idempotencyKey = "race-key-001";
+      const concurrency = 16;
+      const results = await Promise.all(
+        Array.from({ length: concurrency }, () =>
+          appendInjectedUserMessageToTranscript({
+            transcriptPath,
+            message: "concurrent hello",
+            idempotencyKey,
+          }),
+        ),
+      );
+
+      // Every call must succeed and return the same canonical messageId.
+      const messageIds = new Set<string>();
+      let dedupedCount = 0;
+      for (const r of results) {
+        expect(r.ok).toBe(true);
+        expect(r.messageId).toBeTypeOf("string");
+        messageIds.add(r.messageId as string);
+        if (r.deduped) dedupedCount += 1;
+      }
+      expect(messageIds.size).toBe(1);
+      // Exactly one call writes; the rest must be deduped.
+      expect(dedupedCount).toBe(concurrency - 1);
+
+      // Disk state must reflect a single persisted entry for the key.
+      const lines = readTranscriptLines(transcriptPath);
+      const matches = lines.filter((line) => {
+        try {
+          const parsed = JSON.parse(line) as { message?: { idempotencyKey?: unknown } };
+          return parsed?.message?.idempotencyKey === idempotencyKey;
+        } catch {
+          return false;
+        }
+      });
+      expect(matches).toHaveLength(1);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

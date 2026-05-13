@@ -16,6 +16,8 @@ export type GatewayInjectedTranscriptAppendResult = {
   ok: boolean;
   messageId?: string;
   message?: Record<string, unknown>;
+  /** True when an existing entry with matching idempotencyKey was returned. */
+  deduped?: boolean;
   error?: string;
 };
 
@@ -118,19 +120,34 @@ async function appendInjectedMessageToTranscript(params: {
         };
 
   try {
-    const { messageId, message: appendedMessage } = await appendSessionTranscriptMessage({
+    const {
+      messageId,
+      message: appendedMessage,
+      deduped,
+    } = await appendSessionTranscriptMessage({
       transcriptPath: params.transcriptPath,
       message: messageBody,
       now,
       useRawWhenLinear: true,
       config: params.config,
+      // Pass the idempotency key as a first-class param so the locked write
+      // path can dedupe atomically. The key is also embedded in the message
+      // body above for backward-compatible on-disk inspection.
+      ...(params.idempotencyKey ? { idempotencyKey: params.idempotencyKey } : {}),
     });
-    emitSessionTranscriptUpdate({
-      sessionFile: params.transcriptPath,
-      message: appendedMessage,
+    if (!deduped) {
+      emitSessionTranscriptUpdate({
+        sessionFile: params.transcriptPath,
+        message: appendedMessage,
+        messageId,
+      });
+    }
+    return {
+      ok: true,
       messageId,
-    });
-    return { ok: true, messageId, message: appendedMessage as unknown as Record<string, unknown> };
+      message: appendedMessage as unknown as Record<string, unknown>,
+      ...(deduped ? { deduped: true } : {}),
+    };
   } catch (err) {
     return { ok: false, error: formatErrorMessage(err) };
   }
