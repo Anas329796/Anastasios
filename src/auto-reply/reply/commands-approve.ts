@@ -29,8 +29,17 @@ const DECISION_ALIASES: Record<string, "allow-once" | "allow-always" | "deny"> =
   block: "deny",
 };
 
+type ApproveDecision = "allow-once" | "allow-always" | "deny";
+
+/** Result of parsing `/approve …`. The id field is a discriminated union:
+ *  `implicit` when the user typed a bare `/approve <decision>` (handler
+ *  resolves against the single outstanding pending approval — typing a
+ *  full uuid by hand on a phone is unrealistic UX), or `explicit` with
+ *  the literal id from the message. Modeled this way to avoid a sentinel
+ *  string colliding with a real approval id. */
 type ParsedApproveCommand =
-  | { ok: true; id: string; decision: "allow-once" | "allow-always" | "deny" }
+  | { ok: true; idKind: "explicit"; id: string; decision: ApproveDecision }
+  | { ok: true; idKind: "implicit"; decision: ApproveDecision }
   | { ok: false; error: string };
 
 const APPROVE_USAGE_TEXT =
@@ -50,7 +59,15 @@ function parseApproveCommand(raw: string): ParsedApproveCommand | null {
     return { ok: false, error: APPROVE_USAGE_TEXT };
   }
   const tokens = rest.split(/\s+/).filter(Boolean);
-  if (tokens.length < 2) {
+
+  if (tokens.length === 1) {
+    // Bare `/approve <decision>` — resolve against the single most recent
+    // pending approval at handler time. Better UX than forcing the user to
+    // copy a uuid by hand.
+    const only = normalizeLowercaseStringOrEmpty(tokens[0]);
+    if (DECISION_ALIASES[only]) {
+      return { ok: true, idKind: "implicit", decision: DECISION_ALIASES[only] };
+    }
     return { ok: false, error: APPROVE_USAGE_TEXT };
   }
 
@@ -60,6 +77,7 @@ function parseApproveCommand(raw: string): ParsedApproveCommand | null {
   if (DECISION_ALIASES[first]) {
     return {
       ok: true,
+      idKind: "explicit",
       decision: DECISION_ALIASES[first],
       id: tokens.slice(1).join(" ").trim(),
     };
@@ -67,6 +85,7 @@ function parseApproveCommand(raw: string): ParsedApproveCommand | null {
   if (DECISION_ALIASES[second]) {
     return {
       ok: true,
+      idKind: "explicit",
       decision: DECISION_ALIASES[second],
       id: tokens[0],
     };
@@ -123,6 +142,20 @@ function resolveApprovalAuthorizationError(params: {
   );
 }
 
+/**
+ * Trust property (defence in depth, see PR #78303 review thread):
+ * `/approve` commands are only honoured when they come through this
+ * handler from the auto-reply command dispatcher, which is invoked
+ * exclusively on inbound channel messages with a `senderId` that
+ * matches the channel's allowlist (`isAuthorizedSender`). Tool-emitted
+ * text and model output never reach this path because they have no
+ * verified `senderId`. Bundle-MCP consent envelopes additionally
+ * neutralise any `/approve` substring inside tool output before it
+ * is rendered into chat — see `sanitiseToolEmittedApprovalText` in
+ * `pi-bundle-mcp-consent.ts`. Combined, those two layers prevent a
+ * compromised MCP server from self-approving by poisoning the
+ * transcript or echoing approval commands through the bot.
+ */
 export const handleApproveCommand: CommandHandler = async (params, allowTextCommands) => {
   if (!allowTextCommands) {
     return null;
@@ -136,27 +169,13 @@ export const handleApproveCommand: CommandHandler = async (params, allowTextComm
     return { shouldContinue: false, reply: { text: parsed.error } };
   }
 
-  const isPluginId = parsed.id.startsWith("plugin:");
+  // Authorisation must precede any pending-list queries so unauthorized
+  // senders cannot probe approval state or harvest IDs from ambiguity replies.
   const effectiveAccountId = resolveChannelAccountId({
     cfg: params.cfg,
     ctx: params.ctx,
     command: params.command,
   });
-  const approvalCapability = resolveChannelApprovalCapability(
-    getChannelPlugin(params.command.channel),
-  );
-  const approveCommandBehavior = approvalCapability?.resolveApproveCommandBehavior?.({
-    cfg: params.cfg,
-    accountId: effectiveAccountId,
-    senderId: params.command.senderId,
-    approvalKind: isPluginId ? "plugin" : "exec",
-  });
-  if (approveCommandBehavior?.kind === "ignore") {
-    return { shouldContinue: false };
-  }
-  if (approveCommandBehavior?.kind === "reply") {
-    return { shouldContinue: false, reply: { text: approveCommandBehavior.text } };
-  }
   const execApprovalAuthorization = resolveApprovalCommandAuthorization({
     cfg: params.cfg,
     channel: params.command.channel,
@@ -190,11 +209,82 @@ export const handleApproveCommand: CommandHandler = async (params, allowTextComm
     return missingScope;
   }
 
+  // If the user typed `/approve <decision>` without an id, resolve to the
+  // single most-recent pending approval. Better UX than forcing a
+  // copy-paste of a uuid; refuses on ambiguity (multiple pending).
+  // Authorization has already been verified above before querying the list.
+  let approvalId: string;
+  if (parsed.idKind === "implicit") {
+    let pendingPlugin: Array<{ id: string }> = [];
+    try {
+      const r = await callGateway<Array<{ id: string }>>({
+        method: "plugin.approval.list",
+        params: {},
+        clientName: GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT,
+        clientDisplayName: "Chat approval",
+        mode: GATEWAY_CLIENT_MODES.BACKEND,
+      });
+      pendingPlugin = Array.isArray(r) ? r : [];
+    } catch {
+      pendingPlugin = [];
+    }
+    let pendingExec: Array<{ id: string }> = [];
+    try {
+      const r = await callGateway<Array<{ id: string }>>({
+        method: "exec.approval.list",
+        params: {},
+        clientName: GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT,
+        clientDisplayName: "Chat approval",
+        mode: GATEWAY_CLIENT_MODES.BACKEND,
+      });
+      pendingExec = Array.isArray(r) ? r : [];
+    } catch {
+      pendingExec = [];
+    }
+    const candidates = [...pendingPlugin, ...pendingExec].filter((r) => !!r?.id);
+    if (candidates.length === 0) {
+      return {
+        shouldContinue: false,
+        reply: { text: "❌ No pending approval to act on." },
+      };
+    }
+    if (candidates.length > 1) {
+      return {
+        shouldContinue: false,
+        reply: {
+          text:
+            `❌ Ambiguous /approve — ${candidates.length} pending approvals. ` +
+            `Reply with the explicit id from the approval prompt.`,
+        },
+      };
+    }
+    approvalId = candidates[0].id;
+  } else {
+    approvalId = parsed.id;
+  }
+
+  const isPluginId = approvalId.startsWith("plugin:");
+  const approvalCapability = resolveChannelApprovalCapability(
+    getChannelPlugin(params.command.channel),
+  );
+  const approveCommandBehavior = approvalCapability?.resolveApproveCommandBehavior?.({
+    cfg: params.cfg,
+    accountId: effectiveAccountId,
+    senderId: params.command.senderId,
+    approvalKind: isPluginId ? "plugin" : "exec",
+  });
+  if (approveCommandBehavior?.kind === "ignore") {
+    return { shouldContinue: false };
+  }
+  if (approveCommandBehavior?.kind === "reply") {
+    return { shouldContinue: false, reply: { text: approveCommandBehavior.text } };
+  }
+
   const resolvedBy = buildResolvedByLabel(params);
   const callApprovalMethod = async (method: string): Promise<void> => {
     await callGateway({
       method,
-      params: { id: parsed.id, decision: parsed.decision },
+      params: { id: approvalId, decision: parsed.decision },
       clientName: GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT,
       clientDisplayName: `Chat approval (${resolvedBy})`,
       mode: GATEWAY_CLIENT_MODES.BACKEND,
@@ -202,7 +292,7 @@ export const handleApproveCommand: CommandHandler = async (params, allowTextComm
   };
 
   const methods = resolveApprovalMethods({
-    approvalId: parsed.id,
+    approvalId,
     execAuthorization: execApprovalAuthorization,
     pluginAuthorization: pluginApprovalAuthorization,
   });
@@ -211,7 +301,7 @@ export const handleApproveCommand: CommandHandler = async (params, allowTextComm
       shouldContinue: false,
       reply: {
         text: resolveApprovalAuthorizationError({
-          approvalId: parsed.id,
+          approvalId,
           execAuthorization: execApprovalAuthorization,
           pluginAuthorization: pluginApprovalAuthorization,
         }),
@@ -246,6 +336,6 @@ export const handleApproveCommand: CommandHandler = async (params, allowTextComm
 
   return {
     shouldContinue: false,
-    reply: { text: `✅ Approval ${parsed.decision} submitted for ${parsed.id}.` },
+    reply: { text: `✅ Approval ${parsed.decision} submitted for ${approvalId}.` },
   };
 };

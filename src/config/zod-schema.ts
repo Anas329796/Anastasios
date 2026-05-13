@@ -321,6 +321,13 @@ const McpConfigSchema = z
   .object({
     servers: z.record(z.string(), McpServerSchema).optional(),
     sessionIdleTtlMs: z.number().finite().min(0).optional(),
+    approvals: z
+      .object({
+        enabled: z.boolean().optional(),
+        defaultTimeoutMs: z.number().finite().int().min(1000).max(600_000).optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .optional();
