@@ -1538,7 +1538,9 @@ function renderGroupedMessage(
                       )}
                       ${reasoningMarkdown
                         ? html`<div class="chat-thinking">
-                            ${unsafeHTML(toSanitizedMarkdownHtml(reasoningMarkdown))}
+                            ${opts.isStreaming
+                              ? reasoningMarkdown
+                              : unsafeHTML(toSanitizedMarkdownHtml(reasoningMarkdown))}
                           </div>`
                         : nothing}
                       ${jsonResult
@@ -1555,9 +1557,16 @@ function renderGroupedMessage(
                             <pre class="chat-json-content"><code>${jsonResult.pretty}</code></pre>
                           </details>`
                         : markdown
-                          ? html`<div class="chat-text" dir="${detectTextDirection(markdown)}">
-                              ${unsafeHTML(toSanitizedMarkdownHtml(markdown))}
-                            </div>`
+                          ? opts.isStreaming
+                            ? html`<div
+                                class="chat-text chat-text--streaming"
+                                dir="${detectTextDirection(markdown)}"
+                              >
+                                ${markdown}
+                              </div>`
+                            : html`<div class="chat-text" dir="${detectTextDirection(markdown)}">
+                                ${unsafeHTML(toSanitizedMarkdownHtml(markdown))}
+                              </div>`
                           : nothing}
                       ${hasToolCards
                         ? singleToolCard && !markdown && !hasImages
@@ -1594,7 +1603,9 @@ function renderGroupedMessage(
             )}
             ${reasoningMarkdown
               ? html`<div class="chat-thinking">
-                  ${unsafeHTML(toSanitizedMarkdownHtml(reasoningMarkdown))}
+                  ${opts.isStreaming
+                    ? reasoningMarkdown
+                    : unsafeHTML(toSanitizedMarkdownHtml(reasoningMarkdown))}
                 </div>`
               : nothing}
             ${normalizedRole === "assistant" && assistantViewBlocks.length > 0
@@ -1617,9 +1628,16 @@ function renderGroupedMessage(
                   <pre class="chat-json-content"><code>${jsonResult.pretty}</code></pre>
                 </details>`
               : markdown
-                ? html`<div class="chat-text" dir="${detectTextDirection(markdown)}">
-                    ${unsafeHTML(toSanitizedMarkdownHtml(markdown))}
-                  </div>`
+                ? opts.isStreaming
+                  ? html`<div
+                      class="chat-text chat-text--streaming"
+                      dir="${detectTextDirection(markdown)}"
+                    >
+                      ${markdown}
+                    </div>`
+                  : html`<div class="chat-text" dir="${detectTextDirection(markdown)}">
+                      ${unsafeHTML(toSanitizedMarkdownHtml(markdown))}
+                    </div>`
                 : nothing}
             ${hasToolCards
               ? renderInlineToolCards(toolCards, {
