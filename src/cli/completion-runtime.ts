@@ -126,33 +126,89 @@ function updateCompletionProfile(
   return { next, changed: next !== content, hadExisting };
 }
 
-function getShellProfilePath(shell: CompletionShell): string {
-  const home = process.env.HOME || os.homedir();
+/**
+ * Resolve the shell profile path candidates that openclaw completion should
+ * install into, in priority order.
+ *
+ * Each entry corresponds to a file the shell is known to source on login or
+ * interactive startup. Honors `$ZDOTDIR` for zsh and `$XDG_CONFIG_HOME` for
+ * fish so completion writes land in the file the shell actually reads when
+ * those environment variables move the shell config out of `$HOME` (#63069).
+ *
+ * Order:
+ *   - zsh:        `$ZDOTDIR/.zshrc` (when set), then `$HOME/.zshrc`.
+ *   - bash:       `$HOME/.bashrc`, then `$HOME/.bash_profile` (macOS users
+ *                 commonly only have the latter; check/install must agree).
+ *   - fish:       `$XDG_CONFIG_HOME/fish/config.fish` (when set), then
+ *                 `$HOME/.config/fish/config.fish`.
+ *   - powershell: per-platform default (unchanged).
+ */
+export function resolveShellProfilePathCandidates(
+  shell: CompletionShell,
+  env: NodeJS.ProcessEnv = process.env,
+  homeDir: () => string = os.homedir,
+): string[] {
+  const home = env.HOME || homeDir();
   if (shell === "zsh") {
-    return path.join(home, ".zshrc");
+    const zdotdir = normalizeOptionalString(env.ZDOTDIR);
+    const candidates: string[] = [];
+    if (zdotdir) {
+      candidates.push(path.join(zdotdir, ".zshrc"));
+    }
+    candidates.push(path.join(home, ".zshrc"));
+    return candidates;
   }
   if (shell === "bash") {
-    return path.join(home, ".bashrc");
+    return [path.join(home, ".bashrc"), path.join(home, ".bash_profile")];
   }
   if (shell === "fish") {
-    return path.join(home, ".config", "fish", "config.fish");
+    const xdgConfigHome = normalizeOptionalString(env.XDG_CONFIG_HOME);
+    const candidates: string[] = [];
+    if (xdgConfigHome) {
+      candidates.push(path.join(xdgConfigHome, "fish", "config.fish"));
+    }
+    candidates.push(path.join(home, ".config", "fish", "config.fish"));
+    return candidates;
   }
   if (process.platform === "win32") {
-    return path.join(
-      process.env.USERPROFILE || home,
-      "Documents",
-      "PowerShell",
-      "Microsoft.PowerShell_profile.ps1",
-    );
+    return [
+      path.join(
+        env.USERPROFILE || home,
+        "Documents",
+        "PowerShell",
+        "Microsoft.PowerShell_profile.ps1",
+      ),
+    ];
   }
-  return path.join(home, ".config", "powershell", "Microsoft.PowerShell_profile.ps1");
+  return [path.join(home, ".config", "powershell", "Microsoft.PowerShell_profile.ps1")];
+}
+
+/**
+ * Resolve the preferred shell profile path for the given shell. Returns the
+ * first candidate that already exists; if none exist, returns the first
+ * candidate (the canonical install target). Both check and install paths
+ * go through this single resolver so `.bashrc` vs `.bash_profile` and
+ * `$ZDOTDIR`/`$XDG_CONFIG_HOME` stay consistent (#63069).
+ */
+async function getShellProfilePath(
+  shell: CompletionShell,
+  env: NodeJS.ProcessEnv = process.env,
+  homeDir: () => string = os.homedir,
+): Promise<string> {
+  const candidates = resolveShellProfilePathCandidates(shell, env, homeDir);
+  for (const candidate of candidates) {
+    if (await pathExists(candidate)) {
+      return candidate;
+    }
+  }
+  return candidates[0]!;
 }
 
 export async function isCompletionInstalled(
   shell: CompletionShell,
   binName = "openclaw",
 ): Promise<boolean> {
-  const profilePath = getShellProfilePath(shell);
+  const profilePath = await getShellProfilePath(shell);
 
   if (!(await pathExists(profilePath))) {
     return false;
@@ -174,7 +230,7 @@ export async function usesSlowDynamicCompletion(
   shell: CompletionShell,
   binName = "openclaw",
 ): Promise<boolean> {
-  const profilePath = getShellProfilePath(shell);
+  const profilePath = await getShellProfilePath(shell);
 
   if (!(await pathExists(profilePath))) {
     return false;
@@ -193,12 +249,13 @@ export async function usesSlowDynamicCompletion(
 }
 
 export async function installCompletion(shell: string, yes: boolean, binName = "openclaw") {
-  const home = process.env.HOME || os.homedir();
-  let profilePath = "";
-  let sourceLine = "";
-
   const isShellSupported = isCompletionShell(shell);
   if (!isShellSupported) {
+    console.error(`Automated installation not supported for ${shell} yet.`);
+    return;
+  }
+
+  if (shell === "powershell") {
     console.error(`Automated installation not supported for ${shell} yet.`);
     return;
   }
@@ -212,24 +269,12 @@ export async function installCompletion(shell: string, yes: boolean, binName = "
     return;
   }
 
-  if (shell === "zsh") {
-    profilePath = path.join(home, ".zshrc");
-    sourceLine = formatCompletionSourceLine("zsh", binName, cachePath);
-  } else if (shell === "bash") {
-    profilePath = path.join(home, ".bashrc");
-    try {
-      await fs.access(profilePath);
-    } catch {
-      profilePath = path.join(home, ".bash_profile");
-    }
-    sourceLine = formatCompletionSourceLine("bash", binName, cachePath);
-  } else if (shell === "fish") {
-    profilePath = path.join(home, ".config", "fish", "config.fish");
-    sourceLine = formatCompletionSourceLine("fish", binName, cachePath);
-  } else {
-    console.error(`Automated installation not supported for ${shell} yet.`);
-    return;
-  }
+  // Single resolver shared with isCompletionInstalled() so check and install
+  // always agree on the profile path. Honors `$ZDOTDIR` (zsh) and
+  // `$XDG_CONFIG_HOME` (fish), and falls bash through to `.bash_profile`
+  // when `.bashrc` is absent (#63069).
+  const profilePath = await getShellProfilePath(shell);
+  const sourceLine = formatCompletionSourceLine(shell, binName, cachePath);
 
   try {
     try {
