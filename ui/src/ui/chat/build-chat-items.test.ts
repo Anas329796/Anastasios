@@ -45,6 +45,24 @@ function messageRecord(group: MessageGroup, index = 0): Record<string, unknown> 
 }
 
 describe("buildChatItems", () => {
+  it("shows a reading indicator while a run is active before stream text exists", () => {
+    const items = buildChatItems(
+      createProps({
+        messages: [
+          {
+            role: "user",
+            content: "status?",
+            timestamp: 1000,
+          },
+        ],
+        stream: null,
+        isRunning: true,
+      }),
+    );
+
+    expect(items.some((item) => item.kind === "reading-indicator")).toBe(true);
+  });
+
   it("keeps consecutive user messages from different senders in separate groups", () => {
     const groups = messageGroups({
       messages: [
