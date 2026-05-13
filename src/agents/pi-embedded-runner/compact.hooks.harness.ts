@@ -121,6 +121,7 @@ function createCompactHooksRuntimePlan(params: BuildAgentRuntimePlanParams): Age
     preserveSignatures: false,
     sanitizeThinkingSignatures: false,
     dropThinkingBlocks: false,
+    dropAllThinkingBlocks: false,
     applyGoogleTurnOrdering: false,
     validateGeminiTurns: false,
     validateAnthropicTurns: false,
