@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { resolvePreferredOpenClawTmpDir } from "openclaw/plugin-sdk/temp-path";
 import { afterAll, beforeAll } from "vitest";
+import { assertPathIsSafe } from "./lab-safety.js";
 
 export function createMemoryCoreTestHarness() {
   let fixtureRoot = "";
@@ -22,6 +23,7 @@ export function createMemoryCoreTestHarness() {
 
   async function createTempWorkspace(prefix: string): Promise<string> {
     const workspaceDir = path.join(fixtureRoot, `${prefix}${caseId++}`);
+    assertPathIsSafe(workspaceDir);
     await fs.mkdir(workspaceDir, { recursive: true });
     return workspaceDir;
   }

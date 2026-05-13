@@ -162,8 +162,10 @@ const bundledPluginFile = (pluginId: string, relativePath: string) =>
   `${bundledPluginRoot(pluginId)}/${relativePath}`;
 const explicitNeverBundleDependencies = [
   "@discordjs/voice",
+  "age-encryption",
   "@lancedb/lancedb",
   "@larksuiteoapi/node-sdk",
+  "libsodium-wrappers-sumo",
   "@matrix-org/matrix-sdk-crypto-nodejs",
   "@vitest/expect",
   "matrix-js-sdk",
