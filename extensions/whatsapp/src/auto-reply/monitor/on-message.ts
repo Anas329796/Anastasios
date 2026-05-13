@@ -35,7 +35,12 @@ export function createWebOnMessageHandler(params: {
   replyResolver: typeof getReplyFromConfig;
   replyLogger: ReturnType<(typeof import("openclaw/plugin-sdk/runtime-env"))["getChildLogger"]>;
   baseMentionConfig: MentionConfig;
-  account: { authDir?: string; accountId?: string; selfChatMode?: boolean };
+  account: {
+    authDir?: string;
+    accountId?: string;
+    selfChatMode?: boolean;
+    mentionPatterns?: Parameters<typeof applyGroupGating>[0]["providerMentionPatterns"];
+  };
 }) {
   const processForRoute = async (
     cfg: OpenClawConfig,
@@ -226,6 +231,7 @@ export function createWebOnMessageHandler(params: {
         agentId: route.agentId,
         sessionKey: route.sessionKey,
         baseMentionConfig,
+        providerMentionPatterns: account.mentionPatterns,
         authDir: account.authDir,
         selfChatMode: account.selfChatMode,
         groupHistories: params.groupHistories,
@@ -251,6 +257,7 @@ export function createWebOnMessageHandler(params: {
           agentId: route.agentId,
           sessionKey: route.sessionKey,
           baseMentionConfig,
+          providerMentionPatterns: account.mentionPatterns,
           authDir: account.authDir,
           selfChatMode: account.selfChatMode,
           groupHistories: params.groupHistories,

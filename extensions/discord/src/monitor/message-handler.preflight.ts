@@ -4,6 +4,7 @@ import {
   buildMentionRegexes,
   logInboundDrop,
   resolveInboundMentionDecision,
+  resolveMentionPatternsEnabled,
 } from "openclaw/plugin-sdk/channel-inbound";
 import { hasControlCommand } from "openclaw/plugin-sdk/command-detection";
 import { shouldHandleTextCommands } from "openclaw/plugin-sdk/command-surface";
@@ -301,7 +302,16 @@ export async function preflightDiscordMessage(
     logVerbose(`discord: drop bound-thread bot system message ${message.id}`);
     return null;
   }
-  const mentionRegexes = buildMentionRegexes(params.cfg, effectiveRoute.agentId);
+  const mentionPatternsEnabled = resolveMentionPatternsEnabled({
+    cfg: params.cfg,
+    provider: "discord",
+    conversationId: messageChannelId,
+    providerPolicy: params.discordConfig?.mentionPatterns,
+    agentId: effectiveRoute.agentId,
+  });
+  const mentionRegexes = mentionPatternsEnabled
+    ? buildMentionRegexes(params.cfg, effectiveRoute.agentId)
+    : [];
   const explicitlyMentioned = Boolean(
     botId && message.mentionedUsers?.some((user: User) => user.id === botId),
   );

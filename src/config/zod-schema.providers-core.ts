@@ -22,6 +22,7 @@ import {
   GroupPolicySchema,
   HexColorSchema,
   MarkdownConfigSchema,
+  MentionPatternsPolicySchema,
   MSTeamsReplyStyleSchema,
   ProviderCommandsSchema,
   SecretRefSchema,
@@ -259,6 +260,7 @@ export const TelegramAccountSchemaBase = z
     replyToMode: ReplyToModeSchema.optional(),
     dm: TelegramDmSchema.optional(),
     groups: z.record(z.string(), TelegramGroupSchema.optional()).optional(),
+    mentionPatterns: MentionPatternsPolicySchema.optional(),
     allowFrom: z.array(z.union([z.string(), z.number()])).optional(),
     defaultTo: z.union([z.string(), z.number()]).optional(),
     groupAllowFrom: z.array(z.union([z.string(), z.number()])).optional(),
@@ -634,6 +636,7 @@ export const DiscordAccountSchema = z
     streaming: ChannelPreviewStreamingConfigSchema.optional(),
     maxLinesPerMessage: z.number().int().positive().optional(),
     mediaMaxMb: z.number().positive().optional(),
+    mentionPatterns: MentionPatternsPolicySchema.optional(),
     retry: RetryConfigSchema,
     actions: z
       .object({
@@ -1044,6 +1047,7 @@ export const SlackAccountSchema = z
     unfurlMedia: z.boolean().optional(),
     streaming: SlackStreamingConfigSchema.optional(),
     mediaMaxMb: z.number().positive().optional(),
+    mentionPatterns: MentionPatternsPolicySchema.optional(),
     reactionNotifications: z.enum(["off", "own", "all", "allowlist"]).optional(),
     reactionAllowlist: z.array(z.union([z.string(), z.number()])).optional(),
     replyToMode: ReplyToModeSchema.optional(),
@@ -1197,6 +1201,7 @@ export const SignalAccountSchemaBase = z
     groupPolicy: GroupPolicySchema.optional().default("allowlist"),
     contextVisibility: ContextVisibilityModeSchema.optional(),
     groups: SignalGroupsSchema,
+    mentionPatterns: MentionPatternsPolicySchema.optional(),
     historyLimit: z.number().int().min(0).optional(),
     dmHistoryLimit: z.number().int().min(0).optional(),
     dms: z.record(z.string(), DmConfigSchema.optional()).optional(),
@@ -1322,6 +1327,7 @@ export const IrcAccountSchemaBase = z
     contextVisibility: ContextVisibilityModeSchema.optional(),
     groups: z.record(z.string(), IrcGroupSchema.optional()).optional(),
     mentionPatterns: z.array(z.string()).optional(),
+    mentionPatternPolicy: MentionPatternsPolicySchema.optional(),
     historyLimit: z.number().int().min(0).optional(),
     dmHistoryLimit: z.number().int().min(0).optional(),
     dms: z.record(z.string(), DmConfigSchema.optional()).optional(),
@@ -1461,6 +1467,7 @@ export const IMessageAccountSchemaBase = z
       .optional(),
     mediaMaxMb: z.number().int().positive().optional(),
     probeTimeoutMs: z.number().int().positive().optional(),
+    mentionPatterns: MentionPatternsPolicySchema.optional(),
     textChunkLimit: z.number().int().positive().optional(),
     chunkMode: z.enum(["length", "newline"]).optional(),
     blockStreaming: z.boolean().optional(),
@@ -1551,6 +1558,7 @@ export const IMessageConfigSchema = IMessageAccountSchemaBase.extend({
     });
   }
 });
+
 
 export const MSTeamsChannelSchema = z
   .object({

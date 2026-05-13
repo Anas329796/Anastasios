@@ -164,8 +164,6 @@ function applyResolvedTransportFallback(params: {
     config: params.cfg,
     workspaceDir: params.workspaceDir,
     context: {
-      config: params.cfg,
-      workspaceDir: params.workspaceDir,
       provider: params.provider,
       api: params.model.api,
       baseUrl: params.model.baseUrl,
@@ -314,8 +312,6 @@ function resolveProviderTransport(params: {
     config: params.cfg,
     workspaceDir: params.workspaceDir,
     context: {
-      config: params.cfg,
-      workspaceDir: params.workspaceDir,
       provider: params.provider,
       api: params.api,
       baseUrl: params.baseUrl,

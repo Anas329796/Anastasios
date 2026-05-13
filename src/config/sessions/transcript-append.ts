@@ -284,9 +284,7 @@ async function appendSessionTranscriptMessageLocked<TMessage>(
     const hasLinearEntries = !leafInfo.hasParentLinkedEntries && leafInfo.nonSessionEntryCount > 0;
     const allowRawWhenLinear = params.useRawWhenLinear !== false;
     const shouldRawAppend =
-      allowRawWhenLinear &&
-      hasLinearEntries &&
-      (stat?.size ?? 0) > SESSION_MANAGER_APPEND_MAX_BYTES;
+      allowRawWhenLinear && hasLinearEntries && (stat?.size ?? 0) > SESSION_MANAGER_APPEND_MAX_BYTES;
     if (hasLinearEntries && !shouldRawAppend) {
       const migrated = await migrateLinearTranscriptToParentLinked(params.transcriptPath);
       leafInfo = {
