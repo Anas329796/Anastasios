@@ -276,8 +276,18 @@ function buildFetchSchema() {
     limit: Type.Optional(Type.Number()),
     pageSize: Type.Optional(Type.Number()),
     pageToken: Type.Optional(Type.String()),
-    before: Type.Optional(Type.String()),
-    after: Type.Optional(Type.String()),
+    before: Type.Optional(
+      Type.String({
+        description:
+          "Read messages before this bound. Providers may accept native message timestamps, Unix epoch seconds, or ISO 8601 timestamps with timezone.",
+      }),
+    ),
+    after: Type.Optional(
+      Type.String({
+        description:
+          "Read messages after this bound. Providers may accept native message timestamps, Unix epoch seconds, or ISO 8601 timestamps with timezone.",
+      }),
+    ),
     around: Type.Optional(Type.String()),
     fromMe: Type.Optional(Type.Boolean()),
     includeArchived: Type.Optional(Type.Boolean()),
