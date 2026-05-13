@@ -1235,6 +1235,7 @@ export function createExecTool(
   const defaultPathPrepend = normalizePathPrepend(defaults?.pathPrepend);
   const {
     safeBins,
+    safeBuiltins,
     safeBinProfiles,
     trustedSafeBinDirs,
     unprofiledSafeBins,
@@ -1242,6 +1243,7 @@ export function createExecTool(
   } = resolveExecSafeBinRuntimePolicy({
     local: {
       safeBins: defaults?.safeBins,
+      safeBuiltins: defaults?.safeBuiltins,
       safeBinTrustedDirs: defaults?.safeBinTrustedDirs,
       safeBinProfiles: defaults?.safeBinProfiles,
     },
@@ -1567,6 +1569,7 @@ export function createExecTool(
           security,
           ask,
           safeBins,
+          safeBuiltins,
           safeBinProfiles,
           strictInlineEval: defaults?.strictInlineEval,
           commandHighlighting: defaults?.commandHighlighting,

@@ -34,6 +34,7 @@ import {
   validateSafeBinArgv,
 } from "./exec-safe-bin-policy.js";
 import { isTrustedSafeBinPath } from "./exec-safe-bin-trust.js";
+import { isSafeBuiltinSegment } from "./exec-safe-builtins.js";
 import {
   extractBindableShellWrapperInlineCommand,
   isShellWrapperExecutable,
@@ -131,6 +132,7 @@ export type ExecAllowlistEvaluation = {
 export type ExecSegmentSatisfiedBy =
   | "allowlist"
   | "safeBins"
+  | "safeBuiltins"
   | "inlineChain"
   | "skills"
   | "skillPrelude"
@@ -142,6 +144,7 @@ export type SkillBinTrustEntry = {
 type ExecAllowlistContext = {
   allowlist: ExecAllowlistEntry[];
   safeBins: Set<string>;
+  safeBuiltins?: ReadonlySet<string>;
   safeBinProfiles?: Readonly<Record<string, SafeBinProfile>>;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
@@ -155,6 +158,7 @@ function pickExecAllowlistContext(params: ExecAllowlistContext): ExecAllowlistCo
   return {
     allowlist: params.allowlist,
     safeBins: params.safeBins,
+    safeBuiltins: params.safeBuiltins,
     safeBinProfiles: params.safeBinProfiles,
     cwd: params.cwd,
     env: params.env,
@@ -636,6 +640,18 @@ function resolveSegmentSatisfaction(params: {
   });
   if (safe) {
     return "safeBins";
+  }
+  // Shell builtins (cd, pwd, export, ...) have no resolvable filesystem path so they fall
+  // through allowlist + safeBins matching. When opted in, auto-allow the conservative set.
+  if (
+    params.context.safeBuiltins &&
+    isSafeBuiltinSegment({
+      segment: params.segment,
+      safeBuiltins: params.context.safeBuiltins,
+      platform: params.context.platform,
+    })
+  ) {
+    return "safeBuiltins";
   }
   const skillAllow = isSkillAutoAllowedSegment({
     segment: params.segment,

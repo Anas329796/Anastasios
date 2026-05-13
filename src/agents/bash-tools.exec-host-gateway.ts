@@ -58,6 +58,7 @@ export type ProcessGatewayAllowlistParams = {
   security: ExecSecurity;
   ask: ExecAsk;
   safeBins: Set<string>;
+  safeBuiltins?: ReadonlySet<string>;
   safeBinProfiles: Readonly<Record<string, SafeBinProfile>>;
   strictInlineEval?: boolean;
   commandHighlighting?: boolean;
@@ -276,6 +277,7 @@ export async function processGatewayAllowlist(
     command: params.command,
     allowlist: approvals.allowlist,
     safeBins: params.safeBins,
+    safeBuiltins: params.safeBuiltins,
     safeBinProfiles: params.safeBinProfiles,
     cwd: params.workdir,
     env: params.env,
