@@ -422,7 +422,7 @@ describe("cron view", () => {
     );
     expect(details).toEqual([
       { label: "Prompt", value: "do it" },
-      { label: "Delivery", value: "webhook (https://example.invalid/cron)" },
+      { label: "Delivery", value: "Webhook POST (https://example.invalid/cron)" },
     ]);
   });
 
