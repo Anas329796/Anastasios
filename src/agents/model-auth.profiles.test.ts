@@ -1326,3 +1326,220 @@ describe("getApiKeyForModel", () => {
     expect(resolved?.source).toBe("gcloud adc");
   });
 });
+
+describe("resolveApiKeyForProvider — per-entry apiKey as profile ID reference", () => {
+  it("resolves actual credential when per-entry apiKey matches a profile ID in the store", async () => {
+    // Scenario from #67423: openrouter-minimax.apiKey = "openrouter:key-b"
+    // should resolve the actual key from that profile, not use the string literally.
+    const resolved = await resolveApiKeyForProvider({
+      provider: "openrouter-minimax",
+      cfg: {
+        models: {
+          providers: {
+            "openrouter-minimax": {
+              api: "openai-completions" as const,
+              baseUrl: "https://openrouter.ai/api/v1",
+              apiKey: "openrouter:key-b",
+              models: [],
+            },
+          },
+        },
+      },
+      store: {
+        version: 1,
+        profiles: {
+          "openrouter:key-b": {
+            type: "api_key",
+            provider: "openrouter",
+            key: "sk-or-actual-key-b",
+          },
+        },
+      },
+    });
+
+    expect(resolved.apiKey).toBe("sk-or-actual-key-b");
+    expect(resolved.profileId).toBe("openrouter:key-b");
+    expect(resolved.source).toBe("profile:openrouter:key-b");
+    expect(resolved.mode).toBe("api-key");
+  });
+
+  it("does not treat a literal API key as a profile ID when no matching profile exists", async () => {
+    const resolved = await resolveApiKeyForProvider({
+      provider: "openrouter-minimax",
+      cfg: {
+        models: {
+          providers: {
+            "openrouter-minimax": {
+              api: "openai-completions" as const,
+              baseUrl: "https://openrouter.ai/api/v1",
+              apiKey: "sk-or-literal-key",
+              models: [],
+            },
+          },
+        },
+      },
+      store: {
+        version: 1,
+        profiles: {},
+      },
+    });
+
+    expect(resolved.apiKey).toBe("sk-or-literal-key");
+    expect(resolved.profileId).toBeUndefined();
+    expect(resolved.source).toBe("models.json");
+  });
+
+  it("does not bleed auth.order canonical provider profiles into a per-entry provider", async () => {
+    // auth.order.openrouter should not be selected when resolving openrouter-minimax
+    // that has its own per-entry apiKey = "openrouter:key-b" profile reference.
+    const resolved = await resolveApiKeyForProvider({
+      provider: "openrouter-minimax",
+      cfg: {
+        models: {
+          providers: {
+            "openrouter-minimax": {
+              api: "openai-completions" as const,
+              baseUrl: "https://openrouter.ai/api/v1",
+              apiKey: "openrouter:key-b",
+              models: [],
+            },
+          },
+        },
+        auth: {
+          order: {
+            openrouter: ["openrouter:key-a", "openrouter:key-b", "openrouter:key-c"],
+          },
+        },
+      },
+      store: {
+        version: 1,
+        profiles: {
+          "openrouter:key-a": {
+            type: "api_key",
+            provider: "openrouter",
+            key: "sk-or-key-a",
+          },
+          "openrouter:key-b": {
+            type: "api_key",
+            provider: "openrouter",
+            key: "sk-or-actual-key-b",
+          },
+          "openrouter:key-c": {
+            type: "api_key",
+            provider: "openrouter",
+            key: "sk-or-key-c",
+          },
+        },
+      },
+    });
+
+    // Should select key-b (from per-entry apiKey reference), not key-a (first in auth.order)
+    expect(resolved.apiKey).toBe("sk-or-actual-key-b");
+    expect(resolved.profileId).toBe("openrouter:key-b");
+    expect(resolved.source).toBe("profile:openrouter:key-b");
+  });
+
+  it("resolves profile reference even when provider sets auth: api-key explicitly (regression for clawsweeper P3)", async () => {
+    // Before the fix the explicit `auth: "api-key"` early-return short-circuited
+    // resolveUsableCustomProviderApiKey and sent "openrouter:key-b" as a literal bearer
+    // before the profile-ref logic could run. Verify the profile-ref lookup wins.
+    const resolved = await resolveApiKeyForProvider({
+      provider: "openrouter-minimax",
+      cfg: {
+        models: {
+          providers: {
+            "openrouter-minimax": {
+              api: "openai-completions" as const,
+              baseUrl: "https://openrouter.ai/api/v1",
+              apiKey: "openrouter:key-b",
+              auth: "api-key" as const,
+              models: [],
+            },
+          },
+        },
+      },
+      store: {
+        version: 1,
+        profiles: {
+          "openrouter:key-b": {
+            type: "api_key",
+            provider: "openrouter",
+            key: "sk-or-actual-key-b",
+          },
+        },
+      },
+    });
+
+    expect(resolved.apiKey).toBe("sk-or-actual-key-b");
+    expect(resolved.profileId).toBe("openrouter:key-b");
+    expect(resolved.source).toBe("profile:openrouter:key-b");
+  });
+
+  it("throws when matched profile is an OAuth credential routed to an api-key provider (clawsweeper P1)", async () => {
+    await expect(
+      resolveApiKeyForProvider({
+        provider: "openrouter-minimax",
+        cfg: {
+          models: {
+            providers: {
+              "openrouter-minimax": {
+                api: "openai-completions" as const,
+                baseUrl: "https://openrouter.ai/api/v1",
+                apiKey: "google:oauth-a",
+                models: [],
+              },
+            },
+          },
+        },
+        store: {
+          version: 1,
+          profiles: {
+            "google:oauth-a": {
+              type: "oauth",
+              provider: "google",
+              access: "oauth-access",
+              refresh: "oauth-refresh",
+              expires: 0,
+            },
+          },
+        },
+      }),
+    ).rejects.toThrow(
+      /references a "oauth" credential for provider "google", which is not a bearer-style auth class/,
+    );
+  });
+
+  it("throws (does not fall through to literal bearer) when matched profile resolution fails (clawsweeper P2)", async () => {
+    // Profile is matched on ID but its credential has no usable api key material
+    // (no `key` and no `keyRef`). Pre-fix, this would fall through to the late
+    // `resolveUsableCustomProviderApiKey` and send "openrouter:key-b" itself as the
+    // literal bearer — the original #67423 failure mode. Verify it throws instead.
+    await expect(
+      resolveApiKeyForProvider({
+        provider: "openrouter-minimax",
+        cfg: {
+          models: {
+            providers: {
+              "openrouter-minimax": {
+                api: "openai-completions" as const,
+                baseUrl: "https://openrouter.ai/api/v1",
+                apiKey: "openrouter:key-b",
+                models: [],
+              },
+            },
+          },
+        },
+        store: {
+          version: 1,
+          profiles: {
+            "openrouter:key-b": {
+              type: "api_key",
+              provider: "openrouter",
+              // no `key` and no `keyRef` -> resolveApiKeyForProfile returns null
+            },
+          },
+        },
+      }),
+    ).rejects.toThrow(/matched a stored profile but failed to resolve/);
+  });
+});
