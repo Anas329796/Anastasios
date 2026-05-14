@@ -628,6 +628,29 @@ describe("resolveCommandAuthorization", () => {
       expect(auth.isAuthorizedSender).toBe(true);
     });
 
+    it("does not fall back to channel allowFrom when command fallback is disabled", () => {
+      const entry = createAllowFromPlugin("nofallback", () => ["user:1"]);
+      registerAllowFromPlugins({
+        ...entry,
+        plugin: {
+          ...entry.plugin,
+          doctor: { commandAllowFromFallbackToAllowFrom: false },
+        },
+      });
+      const auth = resolveCommandAuthorization({
+        ctx: {
+          Provider: "nofallback",
+          Surface: "nofallback",
+          From: "nofallback:user:1",
+          SenderId: "user:1",
+        } as MsgContext,
+        cfg: { channels: { nofallback: { allowFrom: ["user:1"] } } } as OpenClawConfig,
+        commandAuthorized: true,
+      });
+
+      expect(auth.isAuthorizedSender).toBe(false);
+    });
+
     it("allows all senders when commands.allowFrom includes wildcard", () => {
       const cfg = {
         commands: {

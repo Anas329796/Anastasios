@@ -1,7 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../config/config.js";
 import type { MsgContext } from "../templating.js";
 import { resolveElevatedPermissions } from "./reply-elevated.js";
+
+const channelPluginLookup = vi.hoisted(() => vi.fn());
+const normalizeChannelIdMock = vi.hoisted(() => vi.fn());
+
+vi.mock("../../channels/plugins/index.js", () => ({
+  getChannelPlugin: channelPluginLookup,
+  normalizeChannelId: normalizeChannelIdMock,
+}));
 
 function buildConfig(allowFrom: string[]): OpenClawConfig {
   return {
@@ -55,11 +63,46 @@ function expectAllowFromDecision(params: {
 }
 
 describe("resolveElevatedPermissions", () => {
+  beforeEach(() => {
+    normalizeChannelIdMock.mockImplementation(
+      (raw?: string | null) => raw?.trim().toLowerCase() || null,
+    );
+  });
+
+  afterEach(() => {
+    channelPluginLookup.mockReset();
+    normalizeChannelIdMock.mockReset();
+  });
+
   it("authorizes when sender matches allowFrom", () => {
     expectAllowFromDecision({
       allowFrom: ["+15550001111"],
       allowed: true,
     });
+  });
+
+  it("uses bundled channel formatting when no plugin registry is loaded", () => {
+    channelPluginLookup.mockReturnValue({
+      config: {
+        formatAllowFrom: ({ allowFrom }: { allowFrom: Array<string | number> }) =>
+          allowFrom.flatMap((entry) => {
+            const digits = String(entry).replace(/\D/g, "");
+            return digits ? [digits] : [];
+          }),
+      },
+    });
+
+    expectAllowFromDecision({
+      allowFrom: ["15550001111"],
+      ctx: {
+        SenderId: "+1 (555) 000-1111",
+        From: undefined,
+        SenderE164: undefined,
+      },
+      allowed: true,
+    });
+
+    expect(channelPluginLookup).toHaveBeenCalledWith("whatsapp");
   });
 
   it("does not authorize when only recipient matches allowFrom", () => {
@@ -89,5 +132,80 @@ describe("resolveElevatedPermissions", () => {
         SenderUsername: "owner_username",
       },
     });
+  });
+
+  it("does not use elevated allowFrom fallback when the channel disables it", () => {
+    channelPluginLookup.mockReturnValue({
+      doctor: { elevatedAllowFromFallbackToAllowFrom: false },
+      elevated: {
+        allowFromFallback: () => ["user:1"],
+      },
+    });
+
+    const result = resolveElevatedPermissions({
+      cfg: { tools: { elevated: {} } } as OpenClawConfig,
+      agentId: "main",
+      provider: "nofallback",
+      ctx: buildContext({ Provider: "nofallback", Surface: "nofallback", SenderId: "user:1" }),
+    });
+
+    expect(result.allowed).toBe(false);
+  });
+
+  it("uses elevated allowFrom fallback when the channel keeps it enabled", () => {
+    channelPluginLookup.mockReturnValue({
+      elevated: {
+        allowFromFallback: () => ["user:1"],
+      },
+    });
+
+    const result = resolveElevatedPermissions({
+      cfg: { tools: { elevated: {} } } as OpenClawConfig,
+      agentId: "main",
+      provider: "fallback",
+      ctx: buildContext({
+        Provider: "fallback",
+        Surface: "fallback",
+        SenderId: "user:1",
+        From: undefined,
+        SenderE164: undefined,
+      }),
+    });
+
+    expect(result.allowed).toBe(true);
+  });
+
+  it("falls back to the raw provider key when registry normalization is unavailable", () => {
+    normalizeChannelIdMock.mockReturnValueOnce(null);
+    channelPluginLookup.mockReturnValue({
+      config: {
+        formatAllowFrom: ({ allowFrom }: { allowFrom: Array<string | number> }) =>
+          allowFrom.map(String),
+      },
+    });
+
+    const result = resolveElevatedPermissions({
+      cfg: {
+        tools: {
+          elevated: {
+            allowFrom: {
+              unregistered: ["sender"],
+            },
+          },
+        },
+      } as OpenClawConfig,
+      agentId: "main",
+      provider: "unregistered",
+      ctx: buildContext({
+        Provider: "unregistered",
+        Surface: "unregistered",
+        SenderId: "sender",
+        From: undefined,
+        SenderE164: undefined,
+      }),
+    });
+
+    expect(result.allowed).toBe(true);
+    expect(channelPluginLookup).toHaveBeenCalledWith("unregistered");
   });
 });
