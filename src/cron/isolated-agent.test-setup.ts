@@ -89,8 +89,19 @@ function resolveTestSender(
   return sender;
 }
 
+function renderTelegramMarkdownLinksForTest(text: string): string {
+  return text.replace(
+    /\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g,
+    (_match, label: string, href: string) => `<a href="${href}">${label}</a>`,
+  );
+}
+
 const telegramOutboundForTest: ChannelOutboundAdapter = {
   deliveryMode: "direct",
+  chunker: (text) => [renderTelegramMarkdownLinksForTest(text)],
+  chunkerMode: "markdown",
+  chunkedTextFormatting: { parseMode: "HTML" },
+  textChunkLimit: 4000,
   preferFinalAssistantVisibleText: true,
   sendText: async () => ({ channel: "telegram", messageId: "telegram-msg" }),
   resolveTarget: ({ to }) => {
@@ -115,13 +126,24 @@ const signalOutboundForTest: ChannelOutboundAdapter = {
   resolveTarget: ({ to }) => resolveRequiredTarget("Signal", to),
 };
 
-telegramOutboundForTest.sendText = async ({ cfg, to, text, accountId, deps, threadId }) =>
+telegramOutboundForTest.sendText = async ({
+  cfg,
+  to,
+  text,
+  accountId,
+  deps,
+  threadId,
+  formatting,
+  plainText,
+}) =>
   withRequiredMessageId(
     "telegram",
     await resolveTestSender("telegram", deps)(to, text, {
       cfg,
       accountId: accountId ?? undefined,
       messageThreadId: threadId ?? undefined,
+      ...(formatting?.parseMode === "HTML" ? { textMode: "html" } : {}),
+      ...(plainText ? { plainText } : {}),
     }),
   );
 
@@ -135,6 +157,8 @@ telegramOutboundForTest.sendMedia = async ({
   accountId,
   deps,
   threadId,
+  formatting,
+  plainText,
 }) =>
   withRequiredMessageId(
     "telegram",
@@ -145,6 +169,8 @@ telegramOutboundForTest.sendMedia = async ({
       mediaReadFile,
       accountId: accountId ?? undefined,
       messageThreadId: threadId ?? undefined,
+      ...(formatting?.parseMode === "HTML" ? { textMode: "html" } : {}),
+      ...(plainText ? { plainText } : {}),
     }),
   );
 

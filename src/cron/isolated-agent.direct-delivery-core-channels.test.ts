@@ -432,6 +432,18 @@ describe("runCronIsolatedAgentTurn telegram forum-topic direct delivery", () => 
     });
   });
 
+  it("delivers telegram markdown links as pre-rendered HTML chunks", async () => {
+    await expectTelegramAnnounceDelivery({
+      to: "123",
+      payloads: [{ text: "Done: [Task](https://example.com/task)" }],
+      expected: {
+        chatId: "123",
+        text: 'Done: <a href="https://example.com/task">Task</a>',
+        textMode: "html",
+      },
+    });
+  });
+
   it("delivers only the final assistant-visible text to plain telegram targets", async () => {
     await expectTelegramAnnounceDelivery({
       to: "123",

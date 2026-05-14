@@ -29,6 +29,8 @@ export type ChannelOutboundContext = {
   replyToIdSource?: "explicit" | "implicit";
   replyToMode?: ReplyToMode;
   formatting?: OutboundDeliveryFormattingOptions;
+  /** Plain-text fallback for channels that deliver rendered/parse-mode text. */
+  plainText?: string;
   threadId?: string | number | null;
   accountId?: string | null;
   identity?: OutboundIdentity;
