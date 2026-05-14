@@ -2,7 +2,12 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { detectMarkerLineWithGateway, findExtraGatewayServices } from "./inspect.js";
+import {
+  detectMarkerLineWithGateway,
+  findExtraGatewayServices,
+  findMacAppLaunchAgentOwnership,
+  findMacAppProgramPathInLaunchAgentPlist,
+} from "./inspect.js";
 
 const { execSchtasksMock } = vi.hoisted(() => ({
   execSchtasksMock: vi.fn(),
@@ -295,6 +300,41 @@ describe("findExtraGatewayServices (darwin / scanLaunchdDir) — real filesystem
     } finally {
       await fs.rm(tmpHome, { recursive: true, force: true });
     }
+  });
+
+  it("detects OpenClaw.app ownership only from the app LaunchAgent binary", async () => {
+    const tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-test-"));
+    const launchdDir = path.join(tmpHome, "Library", "LaunchAgents");
+    const plistPath = path.join(launchdDir, "ai.openclaw.mac.plist");
+    try {
+      await fs.mkdir(launchdDir, { recursive: true });
+      await fs.writeFile(
+        plistPath,
+        `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>Label</key><string>ai.openclaw.mac</string>
+<key>ProgramArguments</key><array><string>/Applications/OpenClaw.app/Contents/MacOS/OpenClaw</string></array>
+</dict></plist>`,
+      );
+
+      await expect(findMacAppLaunchAgentOwnership({ HOME: tmpHome })).resolves.toEqual({
+        label: "ai.openclaw.mac",
+        plistPath,
+        programPath: "/Applications/OpenClaw.app/Contents/MacOS/OpenClaw",
+      });
+    } finally {
+      await fs.rm(tmpHome, { recursive: true, force: true });
+    }
+  });
+
+  it("does not treat a CLI profile named mac as OpenClaw.app ownership", () => {
+    expect(
+      findMacAppProgramPathInLaunchAgentPlist(`<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>Label</key><string>ai.openclaw.mac</string>
+<key>ProgramArguments</key><array><string>/usr/local/bin/openclaw</string><string>gateway</string></array>
+</dict></plist>`),
+    ).toBeNull();
   });
 });
 

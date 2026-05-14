@@ -6,7 +6,11 @@ import {
   resolveNodeLaunchAgentLabel,
 } from "../daemon/constants.js";
 import { readLastGatewayErrorLine } from "../daemon/diagnostics.js";
-import { findSystemGatewayServices, type ExtraGatewayService } from "../daemon/inspect.js";
+import {
+  findMacAppLaunchAgentOwnership,
+  findSystemGatewayServices,
+  type ExtraGatewayService,
+} from "../daemon/inspect.js";
 import {
   isLaunchAgentLoaded,
   launchAgentPlistExists,
@@ -40,6 +44,7 @@ import {
   confirmDoctorServiceRepair,
   EXTERNAL_SERVICE_REPAIR_NOTE,
   isServiceRepairExternallyManaged,
+  renderMacAppLaunchAgentRepairSkip,
   resolveServiceRepairPolicy,
   SERVICE_REPAIR_POLICY_ENV,
 } from "./doctor-service-repair-policy.js";
@@ -125,6 +130,13 @@ export async function maybeRepairGatewayDaemon(params: {
 
   const serviceRepairPolicy = resolveServiceRepairPolicy();
   const serviceRepairExternal = isServiceRepairExternallyManaged(serviceRepairPolicy);
+  const macAppOwnership =
+    process.platform === "darwin" &&
+    params.cfg.gateway?.mode !== "remote" &&
+    resolveGatewayLaunchAgentLabel(process.env.OPENCLAW_PROFILE) ===
+      resolveGatewayLaunchAgentLabel()
+      ? await findMacAppLaunchAgentOwnership(process.env)
+      : null;
   const service = resolveGatewayService();
   // systemd can throw in containers/WSL; treat as "not loaded" and fall back to hints.
   let loaded = false;
@@ -220,6 +232,10 @@ export async function maybeRepairGatewayDaemon(params: {
         note(EXTERNAL_SERVICE_REPAIR_NOTE, "Gateway");
         return;
       }
+      if (macAppOwnership) {
+        note(renderMacAppLaunchAgentRepairSkip(macAppOwnership), "Gateway");
+        return;
+      }
       const install = await confirmDoctorServiceRepair(
         params.prompter,
         {
@@ -308,6 +324,10 @@ export async function maybeRepairGatewayDaemon(params: {
       note(EXTERNAL_SERVICE_REPAIR_NOTE, "Gateway");
       return;
     }
+    if (macAppOwnership) {
+      note(renderMacAppLaunchAgentRepairSkip(macAppOwnership), "Gateway");
+      return;
+    }
     const start = await confirmDoctorServiceRepair(
       params.prompter,
       {
@@ -341,6 +361,10 @@ export async function maybeRepairGatewayDaemon(params: {
   if (serviceRuntime?.status === "running") {
     if (serviceRepairExternal) {
       note(EXTERNAL_SERVICE_REPAIR_NOTE, "Gateway");
+      return;
+    }
+    if (macAppOwnership) {
+      note(renderMacAppLaunchAgentRepairSkip(macAppOwnership), "Gateway");
       return;
     }
     const restart = await confirmDoctorServiceRepair(

@@ -4,6 +4,7 @@ import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import {
   GATEWAY_SERVICE_KIND,
   GATEWAY_SERVICE_MARKER,
+  MAC_APP_LAUNCH_AGENT_LABEL,
   resolveGatewayLaunchAgentLabel,
   resolveGatewaySystemdServiceName,
   resolveGatewayWindowsTaskName,
@@ -23,6 +24,12 @@ export type ExtraGatewayService = {
 
 export type FindExtraGatewayServicesOptions = {
   deep?: boolean;
+};
+
+export type MacAppLaunchAgentOwnership = {
+  label: typeof MAC_APP_LAUNCH_AGENT_LABEL;
+  plistPath: string;
+  programPath: string;
 };
 
 const EXTRA_MARKERS = ["openclaw", "clawdbot"] as const;
@@ -219,6 +226,51 @@ function tryExtractPlistLabel(contents: string): string | null {
     return null;
   }
   return match[1]?.trim() || null;
+}
+
+function isOpenClawAppProgramPath(value: string): boolean {
+  const normalized = value.trim();
+  return (
+    path.basename(normalized) === "OpenClaw" &&
+    normalized.endsWith("/OpenClaw.app/Contents/MacOS/OpenClaw")
+  );
+}
+
+export function findMacAppProgramPathInLaunchAgentPlist(contents: string): string | null {
+  const label = tryExtractPlistLabel(contents);
+  if (label !== MAC_APP_LAUNCH_AGENT_LABEL) {
+    return null;
+  }
+  const program = extractPlistStringValues(contents, "Program", "string");
+  const programArguments = extractPlistStringValues(contents, "ProgramArguments", "array");
+  return [...program, ...programArguments].find(isOpenClawAppProgramPath) ?? null;
+}
+
+export async function findMacAppLaunchAgentOwnership(
+  env: Record<string, string | undefined> = process.env as Record<string, string | undefined>,
+): Promise<MacAppLaunchAgentOwnership | null> {
+  if (process.platform !== "darwin") {
+    return null;
+  }
+  const plistPath = path.join(
+    resolveHomeDir(env),
+    "Library",
+    "LaunchAgents",
+    `${MAC_APP_LAUNCH_AGENT_LABEL}.plist`,
+  );
+  const contents = await readUtf8File(plistPath);
+  if (contents === null) {
+    return null;
+  }
+  const programPath = findMacAppProgramPathInLaunchAgentPlist(contents);
+  if (!programPath) {
+    return null;
+  }
+  return {
+    label: MAC_APP_LAUNCH_AGENT_LABEL,
+    plistPath,
+    programPath,
+  };
 }
 
 function isIgnoredLaunchdLabel(label: string): boolean {

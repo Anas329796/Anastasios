@@ -14,6 +14,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- macOS/Gateway: skip CLI doctor service install/start/restart repairs when OpenClaw.app owns the default local LaunchAgent, while preserving named profile services such as `OPENCLAW_PROFILE=mac`. Fixes #67631. Thanks @BunsDev.
 - Security/sandbox: include Windows `USERPROFILE` in the sandbox blocked home roots so credential-bearing binds (such as `.codex`, `.openclaw`, or `.ssh` under the Windows user profile) are denied even when `HOME` points at a different shell home. (#63074) Thanks @luoyanglang.
 - Models config/auth: stop inferring provider env-var markers from broad `^[A-Z_][A-Z0-9_]*$` strings, and resolve config-backed provider `apiKey` values only through structured env SecretRefs (`secrets.providers[id]` / `secrets.defaults`), so unrelated env vars cannot accidentally become provider credentials. Thanks @sallyom.
 - Media fetch: skip allocating and buffering the response body for bodyless media responses (HEAD probes and 204-style empty bodies), avoiding wasted heap on streams that carry no payload. Thanks @shakkernerd.

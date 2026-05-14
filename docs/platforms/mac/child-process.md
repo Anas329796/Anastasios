@@ -20,6 +20,9 @@ If you need tighter coupling to the UI, run the Gateway manually in a terminal.
   (or `ai.openclaw.<profile>` when using `--profile`/`OPENCLAW_PROFILE`; legacy `com.openclaw.*` is supported).
 - When Local mode is enabled, the app ensures the LaunchAgent is loaded and
   starts the Gateway if needed.
+- Terminal `openclaw doctor --fix` does not install or repair the default
+  Gateway LaunchAgent when it detects OpenClaw.app owns local mode through the
+  `ai.openclaw.mac` app LaunchAgent.
 - Logs are written to the launchd gateway log path (visible in Debug Settings).
 
 Common commands:

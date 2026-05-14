@@ -39,6 +39,10 @@ Manager:
 
 - The macOS app owns LaunchAgent install/update in Local mode.
 - The CLI can also install it: `openclaw gateway install`.
+- When OpenClaw.app's login LaunchAgent (`ai.openclaw.mac`) is installed and
+  points at `OpenClaw.app/Contents/MacOS/OpenClaw`, terminal
+  `openclaw doctor --fix` treats the app as the owner and does not install a
+  second default Gateway LaunchAgent.
 
 Behavior:
 

@@ -36,6 +36,10 @@ const mocks = vi.hoisted(() => ({
   resolveGatewayAuthTokenForService: vi.fn(),
   resolveGatewayPort: vi.fn(() => 18789),
   resolveIsNixMode: vi.fn(() => false),
+  resolveGatewayLaunchAgentLabel: vi.fn((profile?: string) =>
+    profile?.trim() ? `ai.openclaw.${profile.trim()}` : "ai.openclaw.gateway",
+  ),
+  findMacAppLaunchAgentOwnership: vi.fn().mockResolvedValue(null),
   findExtraGatewayServices: vi.fn().mockResolvedValue([]),
   renderGatewayServiceCleanupHints: vi.fn().mockReturnValue([]),
   needsNodeRuntimeMigration: vi.fn(() => false),
@@ -60,8 +64,13 @@ vi.mock("../config/config.js", async () => {
 });
 
 vi.mock("../daemon/inspect.js", () => ({
+  findMacAppLaunchAgentOwnership: mocks.findMacAppLaunchAgentOwnership,
   findExtraGatewayServices: mocks.findExtraGatewayServices,
   renderGatewayServiceCleanupHints: mocks.renderGatewayServiceCleanupHints,
+}));
+
+vi.mock("../daemon/constants.js", () => ({
+  resolveGatewayLaunchAgentLabel: mocks.resolveGatewayLaunchAgentLabel,
 }));
 
 vi.mock("../daemon/runtime-paths.js", () => ({
@@ -322,6 +331,10 @@ describe("maybeRepairGatewayServiceConfig", () => {
     vi.clearAllMocks();
     fsMocks.realpath.mockImplementation(async (value: string) => value);
     mocks.resolveGatewayPort.mockReturnValue(18789);
+    mocks.resolveGatewayLaunchAgentLabel.mockImplementation((profile?: string) =>
+      profile?.trim() ? `ai.openclaw.${profile.trim()}` : "ai.openclaw.gateway",
+    );
+    mocks.findMacAppLaunchAgentOwnership.mockResolvedValue(null);
     mocks.needsNodeRuntimeMigration.mockReturnValue(false);
     mocks.renderSystemNodeWarning.mockReturnValue(undefined);
     mocks.resolveSystemNodeInfo.mockResolvedValue(null);
@@ -365,6 +378,37 @@ describe("maybeRepairGatewayServiceConfig", () => {
     expectCallConfigGatewayAuthToken(mocks.buildGatewayInstallPlan, "config-token");
     expect(mocks.replaceConfigFile).not.toHaveBeenCalled();
     expect(mocks.stage).not.toHaveBeenCalled();
+    expect(mocks.install).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips default gateway service rewrite when OpenClaw.app owns launchd", async () => {
+    mockProcessPlatform("darwin");
+    setupGatewayTokenRepairScenario();
+    mocks.findMacAppLaunchAgentOwnership.mockResolvedValue({
+      label: "ai.openclaw.mac",
+      plistPath: "/Users/test/Library/LaunchAgents/ai.openclaw.mac.plist",
+      programPath: "/Applications/OpenClaw.app/Contents/MacOS/OpenClaw",
+    });
+
+    await runRepair({ gateway: {} });
+
+    expect(mocks.install).not.toHaveBeenCalled();
+    expect(mocks.stage).not.toHaveBeenCalled();
+    expectNoteContaining(
+      "OpenClaw.app owns the local Gateway LaunchAgent",
+      "Gateway service config",
+    );
+  });
+
+  it("does not skip profile service rewrites for OPENCLAW_PROFILE=mac", async () => {
+    mockProcessPlatform("darwin");
+    setupGatewayTokenRepairScenario();
+
+    await withEnvAsync({ OPENCLAW_PROFILE: "mac" }, async () => {
+      await runRepair({ gateway: {} });
+    });
+
+    expect(mocks.findMacAppLaunchAgentOwnership).not.toHaveBeenCalled();
     expect(mocks.install).toHaveBeenCalledTimes(1);
   });
 

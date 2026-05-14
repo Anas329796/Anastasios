@@ -1,3 +1,4 @@
+import type { MacAppLaunchAgentOwnership } from "../daemon/inspect.js";
 import type { DoctorPrompter } from "./doctor-prompter.js";
 
 type ServiceRepairPolicy = "auto" | "external";
@@ -6,6 +7,15 @@ export const SERVICE_REPAIR_POLICY_ENV = "OPENCLAW_SERVICE_REPAIR_POLICY";
 
 export const EXTERNAL_SERVICE_REPAIR_NOTE =
   "Gateway service is managed externally; skipped service install/start repair. Start or repair the gateway through your supervisor.";
+
+export function renderMacAppLaunchAgentRepairSkip(ownership: MacAppLaunchAgentOwnership): string {
+  return [
+    "OpenClaw.app owns the local Gateway LaunchAgent; skipped CLI service install/start/restart repair.",
+    `App LaunchAgent: ${ownership.label}`,
+    `App binary: ${ownership.programPath}`,
+    "Use OpenClaw.app local mode or launch the app with --attach-only/--no-launchd if the CLI should own the Gateway instead.",
+  ].join("\n");
+}
 
 export function resolveServiceRepairPolicy(
   env: NodeJS.ProcessEnv = process.env,
