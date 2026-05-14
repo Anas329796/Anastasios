@@ -503,6 +503,29 @@ export async function tryDispatchAcpReply(params: {
       requestId: resolveAcpRequestId(params.ctx),
       ...(params.abortSignal ? { signal: params.abortSignal } : {}),
       onEvent: async (event) => await projector.onEvent(event),
+      onBeforeTurnEndHook: async (completion) => {
+        await projector.flush(true);
+        if (!completion.success || params.abortSignal?.aborted) {
+          return;
+        }
+        try {
+          const { persistAcpDispatchTranscript } = await loadDispatchAcpTranscriptRuntime();
+          await persistAcpDispatchTranscript({
+            cfg: params.cfg,
+            sessionKey: canonicalSessionKey,
+            promptText,
+            finalText: delivery.getAccumulatedFinalText() || delivery.getAccumulatedBlockText(),
+            meta: acpResolution.meta,
+            threadId: params.ctx.MessageThreadId,
+          });
+        } catch (error) {
+          logVerbose(
+            `dispatch-acp: transcript persistence failed for ${canonicalSessionKey}: ${formatErrorMessage(
+              error,
+            )}`,
+          );
+        }
+      },
     });
 
     await projector.flush(true);
@@ -512,23 +535,6 @@ export async function tryDispatchAcpReply(params: {
       params.recordProcessed("completed", { reason: "acp_aborted" });
       params.markIdle("message_aborted");
       return { queuedFinal, counts };
-    }
-    try {
-      const { persistAcpDispatchTranscript } = await loadDispatchAcpTranscriptRuntime();
-      await persistAcpDispatchTranscript({
-        cfg: params.cfg,
-        sessionKey: canonicalSessionKey,
-        promptText,
-        finalText: delivery.getAccumulatedFinalText() || delivery.getAccumulatedBlockText(),
-        meta: acpResolution.meta,
-        threadId: params.ctx.MessageThreadId,
-      });
-    } catch (error) {
-      logVerbose(
-        `dispatch-acp: transcript persistence failed for ${canonicalSessionKey}: ${formatErrorMessage(
-          error,
-        )}`,
-      );
     }
     queuedFinal =
       (await finalizeAcpTurnOutput({

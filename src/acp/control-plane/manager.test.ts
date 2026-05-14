@@ -3,6 +3,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../config/config.js";
 import type { AcpSessionRuntimeOptions, SessionAcpMeta } from "../../config/sessions/types.js";
+import { clearInternalHooks, registerInternalHook } from "../../hooks/internal-hooks.js";
 import { resetHeartbeatWakeStateForTests } from "../../infra/heartbeat-wake.js";
 import { withTempDir } from "../../test-helpers/temp-dir.js";
 import type { AcpRuntime, AcpRuntimeCapabilities } from "../runtime/types.js";
@@ -274,6 +275,7 @@ function extractRuntimeOptionsFromUpserts(): Array<AcpSessionRuntimeOptions | un
 describe("AcpSessionManager", () => {
   beforeEach(() => {
     resetAcpSessionManagerForTests();
+    clearInternalHooks();
     vi.useRealTimers();
     hoisted.listAcpSessionEntriesMock.mockReset().mockResolvedValue([]);
     hoisted.readAcpSessionEntryMock.mockReset();
@@ -289,6 +291,7 @@ describe("AcpSessionManager", () => {
   });
 
   afterEach(() => {
+    clearInternalHooks();
     if (ORIGINAL_STATE_DIR === undefined) {
       delete process.env.OPENCLAW_STATE_DIR;
     } else {
@@ -539,6 +542,139 @@ describe("AcpSessionManager", () => {
       });
     });
   }, 300_000);
+
+  it("emits agent:turn:end after a successful ACP turn", async () => {
+    const runtimeState = createRuntime();
+    hoisted.requireAcpRuntimeBackendMock.mockReturnValue({
+      id: "acpx",
+      runtime: runtimeState.runtime,
+    });
+    hoisted.readAcpSessionEntryMock.mockReturnValue({
+      sessionKey: "agent:codex:acp:session-1",
+      storeSessionKey: "agent:codex:acp:session-1",
+      acp: readySessionMeta(),
+    });
+
+    const handler = vi.fn();
+    registerInternalHook("agent:turn:end", handler);
+
+    const manager = new AcpSessionManager();
+    await manager.runTurn({
+      cfg: baseCfg,
+      sessionKey: "agent:codex:acp:session-1",
+      text: "hello",
+      mode: "prompt",
+      requestId: "turn-end-success",
+    });
+
+    await vi.waitFor(() => {
+      expect(handler).toHaveBeenCalledTimes(1);
+    });
+
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "agent",
+        action: "turn:end",
+        sessionKey: "agent:codex:acp:session-1",
+        context: expect.objectContaining({
+          sessionKey: "agent:codex:acp:session-1",
+          success: true,
+          durationMs: expect.any(Number),
+        }),
+      }),
+    );
+  });
+
+  it("emits agent:turn:end after terminal ACP events are delivered", async () => {
+    const runtimeState = createRuntime();
+    runtimeState.runTurn.mockImplementation(async function* () {
+      yield { type: "text_delta" as const, text: "remember this", stream: "content" as const };
+      yield { type: "done" as const };
+    });
+    hoisted.requireAcpRuntimeBackendMock.mockReturnValue({
+      id: "acpx",
+      runtime: runtimeState.runtime,
+    });
+    hoisted.readAcpSessionEntryMock.mockReturnValue({
+      sessionKey: "agent:codex:acp:session-1",
+      storeSessionKey: "agent:codex:acp:session-1",
+      acp: readySessionMeta(),
+    });
+
+    const order: string[] = [];
+    registerInternalHook("agent:turn:end", () => {
+      order.push("hook");
+    });
+
+    const manager = new AcpSessionManager();
+    await manager.runTurn({
+      cfg: baseCfg,
+      sessionKey: "agent:codex:acp:session-1",
+      text: "hello",
+      mode: "prompt",
+      requestId: "turn-end-after-events",
+      onEvent: async (event) => {
+        order.push(`event:${event.type}`);
+        await Promise.resolve();
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(order).toContain("hook");
+    });
+
+    expect(order).toEqual(["event:text_delta", "event:done", "hook"]);
+  });
+
+  it("emits agent:turn:end after a failed ACP turn", async () => {
+    const runtimeState = createRuntime();
+    runtimeState.runTurn.mockImplementation(async function* () {
+      yield { type: "error" as const, message: "boom", code: "ACP_TURN_FAILED" };
+    });
+    hoisted.requireAcpRuntimeBackendMock.mockReturnValue({
+      id: "acpx",
+      runtime: runtimeState.runtime,
+    });
+    hoisted.readAcpSessionEntryMock.mockReturnValue({
+      sessionKey: "agent:codex:acp:session-1",
+      storeSessionKey: "agent:codex:acp:session-1",
+      acp: readySessionMeta(),
+    });
+
+    const handler = vi.fn();
+    registerInternalHook("agent:turn:end", handler);
+
+    const manager = new AcpSessionManager();
+    await expect(
+      manager.runTurn({
+        cfg: baseCfg,
+        sessionKey: "agent:codex:acp:session-1",
+        text: "hello",
+        mode: "prompt",
+        requestId: "turn-end-failure",
+      }),
+    ).rejects.toMatchObject({
+      code: "ACP_TURN_FAILED",
+    });
+
+    await vi.waitFor(() => {
+      expect(handler).toHaveBeenCalledTimes(1);
+    });
+
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "agent",
+        action: "turn:end",
+        sessionKey: "agent:codex:acp:session-1",
+        context: expect.objectContaining({
+          sessionKey: "agent:codex:acp:session-1",
+          success: false,
+          durationMs: expect.any(Number),
+          errorCode: "ACP_TURN_FAILED",
+        }),
+      }),
+    );
+  });
 
   it("serializes concurrent turns for the same ACP session", async () => {
     const runtimeState = createRuntime();
@@ -1566,10 +1702,12 @@ describe("AcpSessionManager", () => {
     expect(runtimeState.runTurn).toHaveBeenCalledTimes(1);
   });
 
-  function setupFailoverBackends(params: {
-    initialBackend?: "primary-backend" | "fallback-backend";
-    primaryUnavailableError?: Error;
-  } = {}) {
+  function setupFailoverBackends(
+    params: {
+      initialBackend?: "primary-backend" | "fallback-backend";
+      primaryUnavailableError?: Error;
+    } = {},
+  ) {
     const primaryRuntime = createRuntime();
     const fallbackRuntime = createRuntime();
     const sessionKey = "agent:codex:acp:session-1";

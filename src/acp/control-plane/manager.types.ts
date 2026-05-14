@@ -54,6 +54,13 @@ export type AcpTurnAttachment = {
   data: string;
 };
 
+export type AcpTurnEndHookContext = {
+  sessionKey: string;
+  success: boolean;
+  durationMs: number;
+  errorCode?: AcpRuntimeError["code"];
+};
+
 export type AcpRunTurnInput = {
   cfg: OpenClawConfig;
   sessionKey: string;
@@ -63,6 +70,7 @@ export type AcpRunTurnInput = {
   requestId: string;
   signal?: AbortSignal;
   onEvent?: (event: AcpRuntimeEvent) => Promise<void> | void;
+  onBeforeTurnEndHook?: (context: AcpTurnEndHookContext) => Promise<void> | void;
 };
 
 export type AcpCloseSessionInput = {

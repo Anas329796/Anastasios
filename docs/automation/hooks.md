@@ -43,6 +43,7 @@ openclaw hooks info session-memory
 | `session:compact:after`  | After compaction completes                                 |
 | `session:patch`          | When session properties are modified                       |
 | `agent:bootstrap`        | Before workspace bootstrap files are injected              |
+| `agent:turn:end`         | After an ACP agent turn completes or fails                 |
 | `gateway:startup`        | After channels start and hooks are loaded                  |
 | `gateway:shutdown`       | When gateway shutdown begins                               |
 | `gateway:pre-restart`    | Before an expected gateway restart                         |
@@ -117,6 +118,8 @@ Each event includes: `type`, `action`, `sessionKey`, `timestamp`, `messages` (pu
 **Message events** (`message:received`): `context.from`, `context.content`, `context.channelId`, `context.metadata` (provider-specific data including `senderId`, `senderName`, `guildId`). `context.content` prefers a nonblank command body for command-like messages, then falls back to the raw inbound body and generic body; it does not include agent-only enrichment such as thread history or link summaries.
 
 **Message events** (`message:sent`): `context.to`, `context.content`, `context.success`, `context.channelId`.
+
+**Agent events** (`agent:turn:end`): `context.sessionKey`, `context.success`, `context.durationMs`, and `context.errorCode` when the turn failed. For ACP turns, this fires after the runtime emits the terminal turn event and the manager has awaited event delivery callbacks, but before the ACP session state is switched back to `idle`/`error` and before post-turn runtime cleanup. When OpenClaw dispatch mirrors an ACP turn into the session transcript, that transcript write is flushed before the hook fires, so memory hooks can use `context.sessionKey` to load the completed turn from persisted state. The event does not embed transcript text.
 
 **Message events** (`message:transcribed`): `context.transcript`, `context.from`, `context.channelId`, `context.mediaPath`.
 
