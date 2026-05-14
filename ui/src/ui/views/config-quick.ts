@@ -6,6 +6,7 @@
  */
 
 import { html, nothing, type TemplateResult } from "lit";
+import { t } from "../../i18n/index.ts";
 import { icons } from "../icons.ts";
 import type { BorderRadiusStop, TextScaleStop } from "../storage.ts";
 import { normalizeOptionalString } from "../string-coerce.ts";
@@ -126,19 +127,19 @@ export type QuickSettingsProps = {
 
 // ── Theme options ──
 
-type ThemeOption = { id: ThemeName; label: string };
+type ThemeOption = { id: ThemeName; label?: string; labelKey?: string };
 const BUILTIN_THEME_OPTIONS: ThemeOption[] = [
-  { id: "claw", label: t("config.quick.theme.claw") },
-  { id: "knot", label: t("config.quick.theme.knot") },
-  { id: "dash", label: t("config.quick.theme.dash") },
+  { id: "claw", labelKey: "config.quick.theme.claw" },
+  { id: "knot", labelKey: "config.quick.theme.knot" },
+  { id: "dash", labelKey: "config.quick.theme.dash" },
 ];
 
-const BORDER_RADIUS_STOPS: Array<{ value: BorderRadiusStop; label: string }> = [
-  { value: 0, label: t("config.quick.roundness.none") },
-  { value: 25, label: t("config.quick.roundness.slight") },
-  { value: 50, label: t("config.quick.roundness.default") },
-  { value: 75, label: t("config.quick.roundness.round") },
-  { value: 100, label: t("config.quick.roundness.full") },
+const BORDER_RADIUS_STOPS: Array<{ value: BorderRadiusStop; labelKey: string }> = [
+  { value: 0, labelKey: "config.quick.roundness.none" },
+  { value: 25, labelKey: "config.quick.roundness.slight" },
+  { value: 50, labelKey: "config.quick.roundness.default" },
+  { value: 75, labelKey: "config.quick.roundness.round" },
+  { value: 100, labelKey: "config.quick.roundness.full" },
 ];
 
 const TEXT_SCALE_OPTIONS: Array<{ value: TextScaleStop; label: string }> = [
@@ -631,7 +632,7 @@ function renderAppearanceCard(props: QuickSettingsProps) {
                     }
                   }}
                 >
-                  ${opt.label}
+                  ${opt.labelKey ? t(opt.labelKey) : opt.label}
                 </button>
               `,
             )}
@@ -661,7 +662,7 @@ function renderAppearanceCard(props: QuickSettingsProps) {
           </div>
         </div>
         <div class="qs-row">
-          <span class="qs-row__label">${t("config.quick.roundness")}</span>
+          <span class="qs-row__label">${t("config.quick.roundnessLabel")}</span>
           <div class="qs-segmented">
             ${BORDER_RADIUS_STOPS.map(
               (stop) => html`
@@ -672,7 +673,7 @@ function renderAppearanceCard(props: QuickSettingsProps) {
                     : ""}"
                   @click=${() => props.setBorderRadius(stop.value)}
                 >
-                  ${stop.label}
+                  ${t(stop.labelKey)}
                 </button>
               `,
             )}

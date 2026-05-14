@@ -308,7 +308,7 @@ export const en: TranslationMap = {
       toolProfile: "Tool profile",
       deviceAuth: "Device auth",
       appearanceCard: "Appearance",
-      roundness: "Roundness",
+      roundnessLabel: "Roundness",
       personalCard: "Personal",
       userIdentity: "Your local chat identity",
       user: "User",
