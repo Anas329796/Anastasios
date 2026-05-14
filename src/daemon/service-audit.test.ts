@@ -462,6 +462,67 @@ describe("auditGatewayServiceConfig", () => {
   });
 });
 
+describe("auditGatewayServiceConfig launchd policy", () => {
+  async function withLaunchdPlist(
+    contents: string,
+    run: (params: { env: Record<string, string>; plistPath: string }) => Promise<void>,
+  ) {
+    const tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-launchd-audit-"));
+    const launchdDir = path.join(tmpHome, "Library", "LaunchAgents");
+    const plistPath = path.join(launchdDir, "ai.openclaw.gateway.plist");
+    try {
+      await fs.mkdir(launchdDir, { recursive: true });
+      await fs.writeFile(plistPath, contents);
+      await run({ env: { HOME: tmpHome }, plistPath });
+    } finally {
+      await fs.rm(tmpHome, { recursive: true, force: true });
+    }
+  }
+
+  it("accepts the canonical clean-exit KeepAlive dictionary", async () => {
+    await withLaunchdPlist(
+      `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>RunAtLoad</key><true/>
+<key>KeepAlive</key><dict><key>SuccessfulExit</key><true/></dict>
+</dict></plist>`,
+      async ({ env }) => {
+        const audit = await auditGatewayServiceConfig({
+          env,
+          platform: "darwin",
+          command: {
+            programArguments: ["/usr/bin/node", "gateway"],
+            environment: { PATH: "/usr/bin:/bin" },
+          },
+        });
+
+        expect(hasIssue(audit, SERVICE_AUDIT_CODES.launchdKeepAlive)).toBe(false);
+      },
+    );
+  });
+
+  it("flags launchd plists without the canonical KeepAlive policy", async () => {
+    await withLaunchdPlist(
+      `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>RunAtLoad</key><true/>
+</dict></plist>`,
+      async ({ env }) => {
+        const audit = await auditGatewayServiceConfig({
+          env,
+          platform: "darwin",
+          command: {
+            programArguments: ["/usr/bin/node", "gateway"],
+            environment: { PATH: "/usr/bin:/bin" },
+          },
+        });
+
+        expect(hasIssue(audit, SERVICE_AUDIT_CODES.launchdKeepAlive)).toBe(true);
+      },
+    );
+  });
+});
+
 describe("checkTokenDrift", () => {
   it("returns null when both tokens are undefined", () => {
     const result = checkTokenDrift({ serviceToken: undefined, configToken: undefined });

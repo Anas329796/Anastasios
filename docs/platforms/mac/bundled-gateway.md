@@ -46,6 +46,9 @@ Behavior:
 - App quit does **not** stop the gateway (launchd keeps it alive).
 - If a Gateway is already running on the configured port, the app attaches to
   it instead of starting a new one.
+- Launchd relaunches clean Gateway exits used by update/restart handoffs, but
+  non-zero startup failures remain stopped so logs stay inspectable instead of
+  looping indefinitely.
 
 Logging:
 
