@@ -86,6 +86,7 @@ Tool policies (global, agent, sandbox) support `group:*` entries that expand to 
 
 Available groups:
 
+- `group:core`: all built-in core tools (excludes provider plugins)
 - `group:runtime`: `exec`, `process`, `code_execution` (`bash` is accepted as
   an alias for `exec`)
 - `group:fs`: `read`, `write`, `edit`, `apply_patch`
@@ -99,7 +100,7 @@ Available groups:
 - `group:nodes`: `nodes`
 - `group:agents`: `agents_list`, `update_plan`
 - `group:media`: `image`, `image_generate`, `music_generate`, `video_generate`, `tts`
-- `group:openclaw`: all built-in OpenClaw tools (excludes provider plugins)
+- `group:openclaw`: curated OpenClaw integration tools (excludes filesystem, shell runtime, and provider plugins)
 
 ## Elevated: exec-only "run on host"
 

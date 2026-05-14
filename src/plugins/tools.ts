@@ -1,5 +1,6 @@
 import { compileGlobPatterns, matchesAnyGlobPattern } from "../agents/glob-pattern.js";
 import { DEFAULT_PLUGIN_TOOLS_ALLOWLIST_ENTRY, normalizeToolName } from "../agents/tool-policy.js";
+import { expandToolGroups } from "../agents/tool-policy-shared.js";
 import type { AnyAgentTool } from "../agents/tools/common.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { getLoadedRuntimePluginRegistry } from "./active-runtime-registry.js";
@@ -84,7 +85,11 @@ export function buildPluginToolMetadataKey(pluginId: string, toolName: string): 
 }
 
 function normalizeAllowlist(list?: string[]) {
-  return new Set((list ?? []).map(normalizeToolName).filter(Boolean));
+  return new Set(
+    expandToolGroups([...(list ?? [])])
+      .map(normalizeToolName)
+      .filter(Boolean),
+  );
 }
 
 function normalizeDenylist(list?: string[]) {
