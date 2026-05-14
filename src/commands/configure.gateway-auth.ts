@@ -179,6 +179,26 @@ export async function promptAuthConfig(
   let next = cfg;
   let authChoice: string = "skip";
   let preferredProvider: string | undefined;
+  const promptPrimaryModel = async (includeProviderPluginSetups: boolean): Promise<void> => {
+    const modelSelection = await promptDefaultModel({
+      config: next,
+      prompter,
+      allowKeep: true,
+      ignoreAllowlist: true,
+      includeProviderPluginSetups,
+      loadCatalog: includeProviderPluginSetups,
+      preferredProvider,
+      workspaceDir: resolveDefaultAgentWorkspaceDir(),
+      runtime,
+    });
+    if (modelSelection.config) {
+      next = modelSelection.config;
+    }
+    if (modelSelection.model) {
+      next = applyPrimaryModel(next, modelSelection.model);
+    }
+  };
+
   while (true) {
     authChoice = await promptAuthChoiceGrouped({
       prompter,
@@ -204,23 +224,7 @@ export async function promptAuthConfig(
     }
 
     if (authChoice === "skip") {
-      const modelSelection = await promptDefaultModel({
-        config: next,
-        prompter,
-        allowKeep: true,
-        ignoreAllowlist: true,
-        includeProviderPluginSetups: false,
-        loadCatalog: false,
-        preferredProvider,
-        workspaceDir: resolveDefaultAgentWorkspaceDir(),
-        runtime,
-      });
-      if (modelSelection.config) {
-        next = modelSelection.config;
-      }
-      if (modelSelection.model) {
-        next = applyPrimaryModel(next, modelSelection.model);
-      }
+      await promptPrimaryModel(false);
       break;
     }
 
@@ -242,6 +246,7 @@ export async function promptAuthConfig(
     if (applied.retrySelection) {
       continue;
     }
+    await promptPrimaryModel(true);
     break;
   }
 
