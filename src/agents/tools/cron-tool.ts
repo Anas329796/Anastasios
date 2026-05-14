@@ -24,6 +24,10 @@ import { CRON_TOOL_DISPLAY_SUMMARY } from "../tool-description-presets.js";
 import { type AnyAgentTool, jsonResult, readStringParam } from "./common.js";
 import { callGatewayTool, readGatewayCallOptions, type GatewayCallOptions } from "./gateway.js";
 import { isOpenClawOwnerOnlyCoreToolName } from "./owner-only-tools.js";
+import {
+  readRuntimeExecutionPacket,
+  validateRuntimeExecutionPacket,
+} from "./runtime-packet-lint.js";
 import { resolveInternalSessionKey, resolveMainSessionAlias } from "./sessions-helpers.js";
 
 // We spell out job/patch properties so that LLMs know what fields to send.
@@ -138,6 +142,52 @@ function hasCronCreateSignal(value: Record<string, unknown>): boolean {
   );
 }
 
+function runtimeExecutionPacketSchema() {
+  return Type.Optional(
+    Type.Object(
+      {
+        foundationRefs: Type.Optional(Type.Object({}, { additionalProperties: true })),
+        taskDoctrineRefs: Type.Optional(Type.Object({}, { additionalProperties: true })),
+        domainMethodologyRefs: Type.Optional(Type.Object({}, { additionalProperties: true })),
+        foundationConflictRule: Type.Optional(Type.String()),
+        confidenceLoop: Type.Optional(Type.Object({}, { additionalProperties: true })),
+      },
+      {
+        additionalProperties: true,
+        description:
+          "Bounded execution packet for side-effectful agentTurn jobs. Required when the scheduled agent task edits, writes, builds, patches, restarts, deploys, or otherwise mutates state.",
+      },
+    ),
+  );
+}
+
+function lintCronAgentTurnExecutionPacket(params: {
+  action: string;
+  value: Record<string, unknown>;
+  fallbackPacket?: unknown;
+}): void {
+  const payloadValue = params.value.payload;
+  const payload = isRecord(payloadValue) ? payloadValue : undefined;
+  if (payload?.kind !== "agentTurn") {
+    return;
+  }
+  const message = typeof payload.message === "string" ? payload.message : "";
+  const executionPacket =
+    readRuntimeExecutionPacket(params.value) ??
+    readRuntimeExecutionPacket(payload) ??
+    params.fallbackPacket;
+  const lint = validateRuntimeExecutionPacket({
+    action: params.action,
+    taskText: message,
+    executionPacket,
+  });
+  if (!lint.ok) {
+    throw new Error(lint.error);
+  }
+  delete params.value.executionPacket;
+  delete payload.executionPacket;
+}
+
 function nullableStringSchema(description: string) {
   return Type.Optional(Type.String({ description }));
 }
@@ -159,6 +209,7 @@ function cronPayloadObjectSchema(params: { toolsAllow: TSchema }) {
       allowUnsafeExternalContent: Type.Optional(Type.Boolean()),
       fallbacks: Type.Optional(Type.Array(Type.String(), { description: "Fallback model ids" })),
       toolsAllow: params.toolsAllow,
+      executionPacket: runtimeExecutionPacketSchema(),
     },
     { additionalProperties: true },
   );
@@ -317,6 +368,7 @@ export const CronToolSchema = Type.Object(
     contextMessages: Type.Optional(
       Type.Number({ minimum: 0, maximum: REMINDER_CONTEXT_MESSAGES_MAX }),
     ),
+    executionPacket: runtimeExecutionPacketSchema(),
     agentId: Type.Optional(Type.String({ description: "Filter by agent id (list action)" })),
   },
   { additionalProperties: true },
@@ -815,6 +867,12 @@ Use jobId as the canonical identifier; id is accepted for compatibility. Use con
             }
           }
 
+          lintCronAgentTurnExecutionPacket({
+            action: "cron.add",
+            value: job as Record<string, unknown>,
+            fallbackPacket: readRuntimeExecutionPacket(params),
+          });
+
           if (
             (opts?.agentSessionKey || opts?.currentDeliveryContext) &&
             job &&
@@ -904,6 +962,11 @@ Use jobId as the canonical identifier; id is accepted for compatibility. Use con
             throw new Error("patch required");
           }
           const patch = normalizeCronJobPatch(params.patch) ?? params.patch;
+          lintCronAgentTurnExecutionPacket({
+            action: "cron.update",
+            value: patch as Record<string, unknown>,
+            fallbackPacket: readRuntimeExecutionPacket(params),
+          });
           if (
             recoveredFlatPatch &&
             typeof patch === "object" &&
