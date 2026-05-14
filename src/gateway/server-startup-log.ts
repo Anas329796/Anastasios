@@ -11,6 +11,8 @@ import {
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { getResolvedLoggerSettings } from "../logging.js";
 import { collectEnabledInsecureOrDangerousFlags } from "../security/dangerous-config-flags.js";
+import type { ResolvedGatewayAuthMode } from "./auth.js";
+import { isLoopbackHost } from "./net.js";
 
 type StartupThinkLevel =
   | "off"
@@ -30,6 +32,8 @@ export function logGatewayStartup(params: {
   loadedPluginIds: readonly string[];
   startupStartedAt?: number;
   tlsEnabled?: boolean;
+  controlUiEnabled?: boolean;
+  authMode?: ResolvedGatewayAuthMode;
   log: { info: (msg: string, meta?: Record<string, unknown>) => void; warn: (msg: string) => void };
   isNixMode: boolean;
 }) {
@@ -57,6 +61,18 @@ export function logGatewayStartup(params: {
   params.log.info(`log file: ${getResolvedLoggerSettings().file}`);
   if (params.isNixMode) {
     params.log.info("gateway: running in Nix mode (config managed externally)");
+  }
+
+  const controlUiSecureContextWarning = resolveControlUiSecureContextWarning({
+    cfg: params.cfg,
+    bindHost: params.bindHost,
+    bindHosts: params.bindHosts,
+    tlsEnabled: params.tlsEnabled,
+    controlUiEnabled: params.controlUiEnabled,
+    authMode: params.authMode,
+  });
+  if (controlUiSecureContextWarning) {
+    params.log.warn(controlUiSecureContextWarning);
   }
 
   const enabledDangerousFlags = collectEnabledInsecureOrDangerousFlags(params.cfg);
@@ -127,6 +143,35 @@ export function formatAgentModelStartupDetails(params: {
   });
 
   return `thinking=${thinking}, fast=${fast.enabled ? "on" : "off"}`;
+}
+
+function resolveControlUiSecureContextWarning(params: {
+  cfg: OpenClawConfig;
+  bindHost: string;
+  bindHosts?: string[];
+  tlsEnabled?: boolean;
+  controlUiEnabled?: boolean;
+  authMode?: ResolvedGatewayAuthMode;
+}): string | null {
+  const controlUiConfig = params.cfg.gateway?.controlUi;
+  const controlUiEnabled = params.controlUiEnabled ?? controlUiConfig?.enabled ?? true;
+  if (!controlUiEnabled || controlUiConfig?.dangerouslyDisableDeviceAuth === true) {
+    return null;
+  }
+  const authMode = params.authMode ?? params.cfg.gateway?.auth?.mode;
+  if (params.tlsEnabled === true || authMode === "trusted-proxy") {
+    return null;
+  }
+  const listenHosts = params.bindHosts?.length ? params.bindHosts : [params.bindHost];
+  if (listenHosts.every((host) => isLoopbackHost(host))) {
+    return null;
+  }
+  return (
+    "⚠️  Control UI requires a secure browser context (HTTPS or localhost). " +
+    "Direct non-localhost HTTP connections will be rejected with DEVICE_IDENTITY_REQUIRED. " +
+    "Use HTTPS/Tailscale Serve, access via localhost or an SSH tunnel, configure an HTTPS reverse proxy, " +
+    "or set gateway.controlUi.dangerouslyDisableDeviceAuth=true as a break-glass option."
+  );
 }
 
 function formatReadyDetails(
