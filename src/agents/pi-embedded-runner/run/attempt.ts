@@ -25,6 +25,7 @@ import { isEmbeddedMode } from "../../../infra/embedded-mode.js";
 import { formatErrorMessage } from "../../../infra/errors.js";
 import { resolveHeartbeatSummaryForAgent } from "../../../infra/heartbeat-summary.js";
 import { getMachineDisplayName } from "../../../infra/machine-name.js";
+import { markDiagnosticSessionProgress } from "../../../logging/diagnostic.js";
 import { MAX_IMAGE_BYTES } from "../../../media/constants.js";
 import { listRegisteredPluginAgentPromptGuidance } from "../../../plugins/command-registry-state.js";
 import { getCurrentPluginMetadataSnapshot } from "../../../plugins/current-plugin-metadata-snapshot.js";
@@ -2839,6 +2840,12 @@ export async function runEmbeddedAttempt(
       };
       scheduleAbortTimer(params.timeoutMs, "initial");
 
+      const markSessionProgress = () =>
+        markDiagnosticSessionProgress({
+          sessionId: params.sessionId,
+          sessionKey: params.sessionKey,
+        });
+
       let messagesSnapshot: AgentMessage[] = [];
       let sessionIdUsed = activeSession.sessionId;
       let sessionFileUsed: string | undefined = params.sessionFile;
@@ -3529,6 +3536,7 @@ export async function runEmbeddedAttempt(
               messages: btwSnapshotMessages,
               inFlightPrompt: promptForModel,
             });
+            markSessionProgress();
             if (promptSubmission.runtimeOnly) {
               await promptActiveSession(promptForModel);
             } else {
@@ -3618,6 +3626,7 @@ export async function runEmbeddedAttempt(
                 abortable,
                 aggregateTimeoutMs: COMPACTION_RETRY_AGGREGATE_TIMEOUT_MS,
                 isCompactionStillInFlight: isCompactionInFlight,
+                onHeartbeat: markSessionProgress,
               });
           if (compactionRetryWait.timedOut) {
             timedOutDuringCompaction = true;
