@@ -6,6 +6,7 @@ import { createSubsystemLogger } from "../logging/subsystem.js";
 import { buildAgentHookContextChannelFields } from "../plugins/hook-agent-context.js";
 import { resolveBlockMessage } from "../plugins/hook-decision-types.js";
 import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
+import { cliBackendLog, formatCliBackendOutputDigest } from "./cli-runner/log.js";
 import { loadCliSessionHistoryMessages } from "./cli-runner/session-history.js";
 import type { PreparedCliRunContext, RunCliAgentParams } from "./cli-runner/types.js";
 import { FailoverError, isFailoverError, resolveFailoverStatus } from "./failover-error.js";
@@ -95,6 +96,10 @@ export async function runCliAgent(params: RunCliAgentParams): Promise<EmbeddedPi
         hookContext,
       );
       if (hookResult?.handled) {
+        const finalText = hookResult.reply?.text ?? SILENT_REPLY_TOKEN;
+        cliBackendLog.info(
+          `cli synthetic turn: provider=${params.provider} model=<synthetic> requestedModel=${params.model ?? ""} durationMs=${Date.now() - startedAt} ${formatCliBackendOutputDigest(finalText)}`,
+        );
         return {
           payloads: buildHandledReplyPayloads(hookResult.reply),
           meta: {
@@ -104,8 +109,8 @@ export async function runCliAgent(params: RunCliAgentParams): Promise<EmbeddedPi
               provider: params.provider,
               model: params.model ?? "",
             },
-            finalAssistantVisibleText: hookResult.reply?.text ?? SILENT_REPLY_TOKEN,
-            finalAssistantRawText: hookResult.reply?.text ?? SILENT_REPLY_TOKEN,
+            finalAssistantVisibleText: finalText,
+            finalAssistantRawText: finalText,
           },
         };
       }
