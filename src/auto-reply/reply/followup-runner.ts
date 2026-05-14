@@ -9,13 +9,14 @@ import {
   buildAgentRuntimeDeliveryPlan,
   buildAgentRuntimeOutcomePlan,
 } from "../../agents/runtime-plan/build.js";
-import type { SessionEntry } from "../../config/sessions.js";
+import { type SessionEntry, updateSessionStoreEntry } from "../../config/sessions.js";
 import type { TypingMode } from "../../config/types.js";
 import { logVerbose } from "../../globals.js";
 import { registerAgentRunContext } from "../../infra/agent-events.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { defaultRuntime } from "../../runtime.js";
 import { isInternalMessageChannel } from "../../utils/message-channel.js";
+import { resolveFallbackTransition } from "../fallback-state.js";
 import type { GetReplyOptions, ReplyPayload } from "../types.js";
 import { runPreflightCompactionIfNeeded } from "./agent-runner-memory.js";
 import {
@@ -29,11 +30,159 @@ import { resolveOriginMessageProvider } from "./origin-routing.js";
 import { refreshQueuedFollowupSession, type FollowupRun } from "./queue.js";
 import { createReplyOperation } from "./reply-run-registry.js";
 import { isRoutableChannel, routeReply } from "./route-reply.js";
-import { incrementRunCompactionCount, persistRunSessionUsage } from "./session-run-accounting.js";
+import {
+  incrementRunCompactionCount,
+  persistRunSessionUsage,
+  resolveRunSessionModelPersistence,
+} from "./session-run-accounting.js";
 import { createTypingSignaler } from "./typing-mode.js";
 import type { TypingController } from "./typing.js";
 
 type EmbeddedAgentRunResult = Awaited<ReturnType<typeof runEmbeddedPiAgent>>;
+
+type AutoFallbackSelectionSnapshot = Pick<
+  SessionEntry,
+  | "providerOverride"
+  | "modelOverride"
+  | "modelOverrideSource"
+  | "modelOverrideFallbackOriginProvider"
+  | "modelOverrideFallbackOriginModel"
+>;
+
+function snapshotAutoFallbackSelection(
+  entry?: SessionEntry,
+): AutoFallbackSelectionSnapshot | undefined {
+  if (entry?.modelOverrideSource !== "auto") {
+    return undefined;
+  }
+  return {
+    providerOverride: entry.providerOverride,
+    modelOverride: entry.modelOverride,
+    modelOverrideSource: entry.modelOverrideSource,
+    modelOverrideFallbackOriginProvider: entry.modelOverrideFallbackOriginProvider,
+    modelOverrideFallbackOriginModel: entry.modelOverrideFallbackOriginModel,
+  };
+}
+
+function matchesAutoFallbackSelectionSnapshot(
+  entry: SessionEntry,
+  snapshot: AutoFallbackSelectionSnapshot,
+): boolean {
+  return (
+    entry.providerOverride === snapshot.providerOverride &&
+    entry.modelOverride === snapshot.modelOverride &&
+    entry.modelOverrideSource === snapshot.modelOverrideSource &&
+    entry.modelOverrideFallbackOriginProvider === snapshot.modelOverrideFallbackOriginProvider &&
+    entry.modelOverrideFallbackOriginModel === snapshot.modelOverrideFallbackOriginModel
+  );
+}
+
+function hasUserAuthProfileOverride(entry: SessionEntry): boolean {
+  if (!entry.authProfileOverride?.trim()) {
+    return false;
+  }
+  return (
+    entry.authProfileOverrideSource === "user" ||
+    (entry.authProfileOverrideSource === undefined &&
+      typeof entry.authProfileOverrideCompactionCount !== "number")
+  );
+}
+
+function clearAutoFallbackSelectionAfterAccounting(
+  entry: SessionEntry,
+  expected: AutoFallbackSelectionSnapshot,
+): boolean {
+  if (!matchesAutoFallbackSelectionSnapshot(entry, expected)) {
+    return false;
+  }
+  let updated = false;
+  const clear = (key: keyof SessionEntry) => {
+    if (Object.hasOwn(entry, key)) {
+      delete entry[key];
+      updated = true;
+    }
+  };
+  clear("providerOverride");
+  clear("modelOverride");
+  clear("modelOverrideSource");
+  clear("modelOverrideFallbackOriginProvider");
+  clear("modelOverrideFallbackOriginModel");
+  if (!hasUserAuthProfileOverride(entry)) {
+    clear("authProfileOverride");
+    clear("authProfileOverrideSource");
+    clear("authProfileOverrideCompactionCount");
+  }
+  if (updated) {
+    entry.updatedAt = Date.now();
+  }
+  return updated;
+}
+
+async function clearPersistedAutoFallbackSelectionAfterAccounting(params: {
+  storePath: string;
+  sessionKey: string;
+  expected: AutoFallbackSelectionSnapshot;
+}): Promise<void> {
+  const persist = async () => {
+    await updateSessionStoreEntry({
+      storePath: params.storePath,
+      sessionKey: params.sessionKey,
+      update: async (entry) => {
+        if (!matchesAutoFallbackSelectionSnapshot(entry, params.expected)) {
+          return null;
+        }
+        const preserveUserAuthProfile = hasUserAuthProfileOverride(entry);
+        return {
+          providerOverride: undefined,
+          modelOverride: undefined,
+          modelOverrideSource: undefined,
+          modelOverrideFallbackOriginProvider: undefined,
+          modelOverrideFallbackOriginModel: undefined,
+          authProfileOverride: preserveUserAuthProfile ? entry.authProfileOverride : undefined,
+          authProfileOverrideSource: preserveUserAuthProfile
+            ? entry.authProfileOverrideSource
+            : undefined,
+          authProfileOverrideCompactionCount: preserveUserAuthProfile
+            ? entry.authProfileOverrideCompactionCount
+            : undefined,
+        };
+      },
+    });
+  };
+
+  try {
+    await persist();
+    return;
+  } catch (err) {
+    logVerbose(`failed to persist followup fallback selection cleanup (non-fatal): ${String(err)}`);
+  }
+
+  try {
+    await persist();
+  } catch (err) {
+    logVerbose(
+      `retry failed to persist followup fallback selection cleanup (non-fatal): ${String(err)}`,
+    );
+  }
+}
+
+function resolveQueuedSelectedModel(params: {
+  run: FollowupRun["run"];
+  fallbackStateEntry?: SessionEntry;
+}): { provider: string; model: string } {
+  const entry = params.fallbackStateEntry;
+  if (entry?.modelOverrideSource === "auto") {
+    const originProvider = entry.modelOverrideFallbackOriginProvider?.trim();
+    const originModel = entry.modelOverrideFallbackOriginModel?.trim();
+    if (originProvider && originModel) {
+      return { provider: originProvider, model: originModel };
+    }
+  }
+  return {
+    provider: params.run.provider,
+    model: params.run.model,
+  };
+}
 
 export function createFollowupRunner(params: {
   opts?: GetReplyOptions;
@@ -236,6 +385,7 @@ export function createFollowupRunner(params: {
       let runResult: Awaited<ReturnType<typeof runEmbeddedPiAgent>>;
       let fallbackProvider = run.provider;
       let fallbackModel = run.model;
+      let fallbackAttempts: Parameters<typeof resolveFallbackTransition>[0]["attempts"] = [];
       let activeSessionEntry =
         (sessionKey ? sessionStore?.[sessionKey] : undefined) ?? sessionEntry;
       activeSessionEntry = await runPreflightCompactionIfNeeded({
@@ -355,6 +505,7 @@ export function createFollowupRunner(params: {
         runResult = fallbackResult.result;
         fallbackProvider = fallbackResult.provider;
         fallbackModel = fallbackResult.model;
+        fallbackAttempts = fallbackResult.attempts ?? [];
       } catch (err) {
         const message = formatErrorMessage(err);
         replyOperation.fail("run_failed", err);
@@ -367,6 +518,27 @@ export function createFollowupRunner(params: {
       const modelUsed = runResult.meta?.agentMeta?.model ?? fallbackModel ?? defaultModel;
       const providerUsed =
         runResult.meta?.agentMeta?.provider ?? fallbackProvider ?? queued.run.provider;
+      const fallbackStateEntry =
+        (sessionKey ? sessionStore?.[sessionKey] : undefined) ?? sessionEntry;
+      const autoFallbackSelectionToClear = snapshotAutoFallbackSelection(fallbackStateEntry);
+      const selectedModel = resolveQueuedSelectedModel({
+        run: queued.run,
+        fallbackStateEntry,
+      });
+      const sessionModelPersistence = resolveRunSessionModelPersistence({
+        selectedProvider: selectedModel.provider,
+        selectedModel: selectedModel.model,
+        providerUsed,
+        modelUsed,
+      });
+      const fallbackTransition = resolveFallbackTransition({
+        selectedProvider: selectedModel.provider,
+        selectedModel: selectedModel.model,
+        activeProvider: providerUsed,
+        activeModel: modelUsed,
+        attempts: fallbackAttempts,
+        state: fallbackStateEntry,
+      });
       const contextTokensUsed =
         resolveContextTokensForModel({
           cfg: queued.run.config,
@@ -377,8 +549,36 @@ export function createFollowupRunner(params: {
           allowAsyncLoad: false,
         }) ?? DEFAULT_CONTEXT_TOKENS;
 
+      if (fallbackTransition.stateChanged) {
+        if (fallbackStateEntry) {
+          fallbackStateEntry.fallbackNoticeSelectedModel =
+            fallbackTransition.nextState.selectedModel;
+          fallbackStateEntry.fallbackNoticeActiveModel = fallbackTransition.nextState.activeModel;
+          fallbackStateEntry.fallbackNoticeReason = fallbackTransition.nextState.reason;
+          fallbackStateEntry.updatedAt = Date.now();
+          if (sessionKey && sessionStore) {
+            sessionStore[sessionKey] = fallbackStateEntry;
+          }
+        }
+        if (storePath && sessionKey) {
+          try {
+            await updateSessionStoreEntry({
+              storePath,
+              sessionKey,
+              update: async () => ({
+                fallbackNoticeSelectedModel: fallbackTransition.nextState.selectedModel,
+                fallbackNoticeActiveModel: fallbackTransition.nextState.activeModel,
+                fallbackNoticeReason: fallbackTransition.nextState.reason,
+              }),
+            });
+          } catch (err) {
+            logVerbose(`failed to persist followup fallback notice (non-fatal): ${String(err)}`);
+          }
+        }
+      }
+
       if (storePath && sessionKey) {
-        await persistRunSessionUsage({
+        const didPersistRunSessionUsage = await persistRunSessionUsage({
           storePath,
           sessionKey,
           cfg: runtimeConfig,
@@ -387,11 +587,32 @@ export function createFollowupRunner(params: {
           promptTokens,
           modelUsed,
           providerUsed,
+          ...sessionModelPersistence,
           contextTokensUsed,
           systemPromptReport: runResult.meta?.systemPromptReport,
           cliSessionBinding: runResult.meta?.agentMeta?.cliSessionBinding,
           logLabel: "followup",
         });
+        if (autoFallbackSelectionToClear && didPersistRunSessionUsage) {
+          const currentFallbackStateEntry =
+            (sessionKey ? sessionStore?.[sessionKey] : undefined) ?? fallbackStateEntry;
+          if (
+            currentFallbackStateEntry &&
+            clearAutoFallbackSelectionAfterAccounting(
+              currentFallbackStateEntry,
+              autoFallbackSelectionToClear,
+            )
+          ) {
+            if (sessionKey && sessionStore) {
+              sessionStore[sessionKey] = currentFallbackStateEntry;
+            }
+          }
+          await clearPersistedAutoFallbackSelectionAfterAccounting({
+            storePath,
+            sessionKey,
+            expected: autoFallbackSelectionToClear,
+          });
+        }
       }
 
       const payloadArray = runResult.payloads ?? [];

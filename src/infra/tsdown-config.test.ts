@@ -207,6 +207,37 @@ describe("tsdown config", () => {
     }
     const externalize = external;
     expect(externalize("qrcode-terminal/lib/main.js", undefined, false)).toBe(true);
+    expect(
+      externalize(
+        "../../../../../node_modules/undici-types/index.d.ts",
+        "node_modules/@anthropic-ai/vertex-sdk/internal/types.d.ts",
+        false,
+      ),
+    ).toBe(true);
+    expect(externalize("../../node_modules/node-fetch/@types/index.d.ts", undefined, true)).toBe(
+      true,
+    );
+    expect(
+      externalize(
+        "../../../node_modules/node-fetch",
+        "node_modules/@anthropic-ai/sdk/internal/types.d.mts",
+        false,
+      ),
+    ).toBe(true);
+    expect(
+      externalize(
+        "../../../node_modules/node-fetch",
+        "node_modules/grammy/out/types.node.js",
+        false,
+      ),
+    ).toBe(false);
+    expect(externalize("../../node_modules/node-fetch/src/index.js", undefined, true)).toBe(false);
+    expect(externalize("axios", "node_modules/@slack/web-api/dist/WebClient.d.ts", false)).toBe(
+      true,
+    );
+    expect(externalize("axios", "node_modules/@slack/web-api/dist/WebClient.js", false)).toBe(
+      false,
+    );
   });
 
   it("suppresses unresolved imports from extension source", () => {

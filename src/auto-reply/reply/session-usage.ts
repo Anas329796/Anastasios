@@ -82,6 +82,8 @@ export async function persistSessionUsageUpdate(params: {
   lastCallUsage?: NormalizedUsage;
   modelUsed?: string;
   providerUsed?: string;
+  sessionModel?: string;
+  sessionModelProvider?: string;
   contextTokensUsed?: number;
   promptTokens?: number;
   usageIsContextSnapshot?: boolean;
@@ -89,10 +91,10 @@ export async function persistSessionUsageUpdate(params: {
   cliSessionId?: string;
   cliSessionBinding?: import("../../config/sessions.js").CliSessionBinding;
   logLabel?: string;
-}): Promise<void> {
+}): Promise<boolean> {
   const { storePath, sessionKey } = params;
   if (!storePath || !sessionKey) {
-    return;
+    return false;
   }
 
   const label = params.logLabel ? `${params.logLabel} ` : "";
@@ -107,7 +109,7 @@ export async function persistSessionUsageUpdate(params: {
 
   if (hasUsage || hasFreshContextSnapshot) {
     try {
-      await updateSessionStoreEntry({
+      const updatedEntry = await updateSessionStoreEntry({
         storePath,
         sessionKey,
         update: async (entry) => {
@@ -132,9 +134,11 @@ export async function persistSessionUsageUpdate(params: {
             providerUsed: params.providerUsed ?? entry.modelProvider,
             modelUsed: params.modelUsed ?? entry.model,
           });
+          const sessionModelProvider = params.sessionModelProvider ?? params.providerUsed;
+          const sessionModel = params.sessionModel ?? params.modelUsed;
           const patch: Partial<SessionEntry> = {
-            modelProvider: params.providerUsed ?? entry.modelProvider,
-            model: params.modelUsed ?? entry.model,
+            modelProvider: sessionModelProvider ?? entry.modelProvider,
+            model: sessionModel ?? entry.model,
             contextTokens: resolvedContextTokens,
             systemPromptReport: params.systemPromptReport ?? entry.systemPromptReport,
             updatedAt: Date.now(),
@@ -161,21 +165,29 @@ export async function persistSessionUsageUpdate(params: {
           return applyCliSessionIdToSessionPatch(params, entry, patch);
         },
       });
+      return updatedEntry !== null;
     } catch (err) {
       logVerbose(`failed to persist ${label}usage update: ${String(err)}`);
+      return false;
     }
-    return;
   }
 
-  if (params.modelUsed || params.contextTokensUsed) {
+  if (
+    params.modelUsed ||
+    params.contextTokensUsed ||
+    params.sessionModel ||
+    params.sessionModelProvider
+  ) {
     try {
-      await updateSessionStoreEntry({
+      const updatedEntry = await updateSessionStoreEntry({
         storePath,
         sessionKey,
         update: async (entry) => {
+          const sessionModelProvider = params.sessionModelProvider ?? params.providerUsed;
+          const sessionModel = params.sessionModel ?? params.modelUsed;
           const patch: Partial<SessionEntry> = {
-            modelProvider: params.providerUsed ?? entry.modelProvider,
-            model: params.modelUsed ?? entry.model,
+            modelProvider: sessionModelProvider ?? entry.modelProvider,
+            model: sessionModel ?? entry.model,
             contextTokens: params.contextTokensUsed ?? entry.contextTokens,
             systemPromptReport: params.systemPromptReport ?? entry.systemPromptReport,
             updatedAt: Date.now(),
@@ -183,8 +195,11 @@ export async function persistSessionUsageUpdate(params: {
           return applyCliSessionIdToSessionPatch(params, entry, patch);
         },
       });
+      return updatedEntry !== null;
     } catch (err) {
       logVerbose(`failed to persist ${label}model/context update: ${String(err)}`);
+      return false;
     }
   }
+  return false;
 }

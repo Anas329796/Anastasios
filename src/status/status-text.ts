@@ -11,12 +11,16 @@ import { resolveContextTokensForModel } from "../agents/context.js";
 import { resolveFastModeState } from "../agents/fast-mode.js";
 import { resolveModelAuthLabel } from "../agents/model-auth-label.js";
 import { areRuntimeModelRefsEquivalent } from "../agents/model-runtime-aliases.js";
+import { resolveModelRefFromString } from "../agents/model-selection.js";
 import {
   resolveInternalSessionKey,
   resolveMainSessionAlias,
 } from "../agents/tools/sessions-helpers.js";
 import { normalizeGroupActivation } from "../auto-reply/group-activation.js";
-import { resolveSelectedAndActiveModel } from "../auto-reply/model-runtime.js";
+import {
+  formatProviderModelRef,
+  resolveSelectedAndActiveModel,
+} from "../auto-reply/model-runtime.js";
 import type { ThinkLevel } from "../auto-reply/thinking.js";
 import { toAgentModelListLike } from "../config/model-input.js";
 import type { SessionEntry } from "../config/sessions.js";
@@ -168,6 +172,36 @@ function resolveStatusRuntimeProvider(params: {
   return params.provider;
 }
 
+function resolveFallbackNoticeActiveModelRef(params: {
+  sessionEntry?: SessionEntry;
+  selectedModelRef: string;
+  defaultProvider: string;
+}): { provider: string; model: string; label: string } | undefined {
+  const noticeSelectedModel = params.sessionEntry?.fallbackNoticeSelectedModel?.trim();
+  const noticeActiveModel = params.sessionEntry?.fallbackNoticeActiveModel?.trim();
+  if (
+    !noticeSelectedModel ||
+    !noticeActiveModel ||
+    !areRuntimeModelRefsEquivalent(noticeSelectedModel, params.selectedModelRef) ||
+    areRuntimeModelRefsEquivalent(noticeSelectedModel, noticeActiveModel)
+  ) {
+    return undefined;
+  }
+  const active = resolveModelRefFromString({
+    raw: noticeActiveModel,
+    defaultProvider: params.defaultProvider,
+    allowPluginNormalization: false,
+  })?.ref;
+  if (!active) {
+    return undefined;
+  }
+  return {
+    provider: active.provider,
+    model: active.model,
+    label: formatProviderModelRef(active.provider, active.model),
+  };
+}
+
 function formatAgentTaskCountsLine(agentId: string): string | undefined {
   const snapshot = buildTaskStatusSnapshot(listTasksForAgentIdForStatus(agentId));
   if (snapshot.totalCount === 0) {
@@ -220,6 +254,15 @@ export async function buildStatusText(params: BuildStatusTextParams): Promise<st
     selectedModel: model,
     sessionEntry,
   });
+  const fallbackNoticeActiveModelRef = resolveFallbackNoticeActiveModelRef({
+    sessionEntry,
+    selectedModelRef: modelRefs.selected.label,
+    defaultProvider: provider,
+  });
+  const fallbackNoticeOverridesRuntimeModel = Boolean(
+    fallbackNoticeActiveModelRef &&
+    !areRuntimeModelRefsEquivalent(modelRefs.active.label, fallbackNoticeActiveModelRef.label),
+  );
   const effectiveHarness =
     params.resolvedHarness ??
     (await resolveStatusHarnessId({
@@ -234,7 +277,10 @@ export async function buildStatusText(params: BuildStatusTextParams): Promise<st
     provider,
     effectiveHarness,
   });
-  const activeProvider = modelRefs.active.provider || provider;
+  const activeProvider =
+    fallbackNoticeActiveModelRef?.provider ?? modelRefs.active.provider ?? provider;
+  const activeModel = fallbackNoticeActiveModelRef?.model ?? modelRefs.active.model ?? model;
+  const activeModelDiffers = modelRefs.activeDiffers || fallbackNoticeOverridesRuntimeModel;
   const activeStatusProvider = resolveStatusRuntimeProvider({
     provider: activeProvider,
     effectiveHarness,
@@ -251,7 +297,7 @@ export async function buildStatusText(params: BuildStatusTextParams): Promise<st
       });
   const activeModelAuth = Object.hasOwn(params, "activeModelAuthOverride")
     ? params.activeModelAuthOverride
-    : modelRefs.activeDiffers
+    : activeModelDiffers
       ? resolveModelAuthLabel({
           provider: activeStatusProvider,
           cfg,
@@ -273,7 +319,7 @@ export async function buildStatusText(params: BuildStatusTextParams): Promise<st
   ) {
     selectedModelAuth = activeModelAuth;
   }
-  const usageAuthLabel = modelRefs.activeDiffers ? activeModelAuth : selectedModelAuth;
+  const usageAuthLabel = activeModelDiffers ? activeModelAuth : selectedModelAuth;
   const currentUsageProvider =
     resolveUsageProviderId(activeStatusProvider) ?? resolveUsageProviderId(activeProvider);
   let usageLine: string | null = null;
@@ -374,7 +420,7 @@ export async function buildStatusText(params: BuildStatusTextParams): Promise<st
   const runtimeContextTokens = resolveStatusRuntimeContextTokens({
     cfg,
     provider: activeStatusProvider,
-    model: modelRefs.active.model || model,
+    model: activeModel,
   });
   return buildStatusMessage({
     config: cfg,
