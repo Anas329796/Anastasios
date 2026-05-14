@@ -4,6 +4,10 @@ Docs: https://docs.openclaw.ai
 
 ## Unreleased
 
+### Fixes
+
+- CLI/TUI: handle deleted working directory (uv_cwd ENOENT) during startup — dotenv probing, PATH bootstrap, TUI workspace inference, autocomplete setup, and local auth spawn no longer crash when cwd is removed; falls back to `os.tmpdir()` as a last resort. (#73676) Thanks @sumaiazaman.
+
 ### Changes
 
 - ACP: add `acp.fallbacks` so ACP turns can try configured backup runtime backends when the primary backend is unavailable before any output is emitted. (#69542) Thanks @kaseonedge.
