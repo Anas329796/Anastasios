@@ -18,6 +18,7 @@ import {
   type ExecCommandSegment,
   type ExecSecurity,
 } from "../infra/exec-approvals.js";
+import type { CommandAuthorizationPlan } from "../infra/command-authorization/index.js";
 import type { ExecHostRequest, ExecHostResponse, ExecHostRunResult } from "../infra/exec-host.js";
 import { resolveExecSafeBinRuntimePolicy } from "../infra/exec-safe-bin-runtime-policy.js";
 import {
@@ -113,6 +114,7 @@ type SystemRunPolicyPhase = SystemRunParsePhase & {
   allowlistSatisfied: boolean;
   segments: ExecCommandSegment[];
   segmentSatisfiedBy: import("../infra/exec-approvals.js").ExecSegmentSatisfiedBy[];
+  authorizationPlan?: CommandAuthorizationPlan;
   plannedAllowlistArgv: string[] | undefined;
   isWindows: boolean;
   approvedCwdSnapshot: ApprovedCwdSnapshot | undefined;
@@ -397,7 +399,8 @@ async function evaluateSystemRunPolicyPhase(
     segments,
     segmentAllowlistEntries,
     segmentSatisfiedBy,
-  } = evaluateSystemRunAllowlist({
+    authorizationPlan,
+  } = await evaluateSystemRunAllowlist({
     shellCommand: parsed.shellPayload,
     argv: parsed.argv,
     approvals,
@@ -525,6 +528,7 @@ async function evaluateSystemRunPolicyPhase(
     allowlistSatisfied,
     segments,
     segmentSatisfiedBy,
+    authorizationPlan,
     plannedAllowlistArgv: plannedAllowlistArgv ?? undefined,
     isWindows,
     approvedCwdSnapshot,
@@ -594,6 +598,7 @@ async function executeSystemRunPhase(
     shellCommand: phase.shellPayload,
     segments: phase.segments,
     segmentSatisfiedBy: phase.segmentSatisfiedBy,
+    authorizationPlan: phase.authorizationPlan,
     cwd: phase.cwd,
     env: phase.env,
   });
@@ -647,9 +652,11 @@ async function executeSystemRunPhase(
 
   if (phase.policy.approvalDecision === "allow-always" && phase.inlineEvalHit === null) {
     const patterns = phase.policy.analysisOk
-      ? persistAllowAlwaysPatterns({
+      ? await persistAllowAlwaysPatterns({
           approvals: phase.approvals.file,
           agentId: phase.agentId,
+          analysisOk: phase.policy.analysisOk,
+          commandText: phase.commandText,
           segments: phase.segments,
           cwd: phase.cwd,
           env: phase.env,

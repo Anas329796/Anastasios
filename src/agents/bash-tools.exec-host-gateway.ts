@@ -1,6 +1,7 @@
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { describeInterpreterInlineEval } from "../infra/command-analysis/inline-eval.js";
 import { detectPolicyInlineEval } from "../infra/command-analysis/policy.js";
+import { renderAuthorizationShellCommand } from "../infra/command-authorization/index.js";
 import {
   addDurableCommandApproval,
   type ExecAsk,
@@ -272,7 +273,7 @@ export async function processGatewayAllowlist(
     ask: params.ask,
     host: "gateway",
   });
-  const allowlistEval = evaluateShellAllowlist({
+  const allowlistEval = await evaluateShellAllowlist({
     command: params.command,
     allowlist: approvals.allowlist,
     safeBins: params.safeBins,
@@ -304,11 +305,18 @@ export async function processGatewayAllowlist(
   let enforcedCommand: string | undefined;
   let allowlistPlanUnavailableReason: string | null = null;
   if (hostSecurity === "allowlist" && analysisOk && allowlistSatisfied) {
-    const enforced = buildEnforcedShellCommand({
-      command: params.command,
-      segments: allowlistEval.segments,
-      platform: process.platform,
-    });
+    const enforced = allowlistEval.authorizationPlan
+      ? renderAuthorizationShellCommand({
+          plan: allowlistEval.authorizationPlan,
+          segments: allowlistEval.segments,
+          platform: process.platform,
+          mode: "enforced",
+        })
+      : buildEnforcedShellCommand({
+          command: params.command,
+          segments: allowlistEval.segments,
+          platform: process.platform,
+        });
     if (!enforced.ok || !enforced.command) {
       allowlistPlanUnavailableReason = enforced.reason ?? "unsupported platform";
     } else {
@@ -493,9 +501,11 @@ export async function processGatewayAllowlist(
       } else if (decision === "allow-always") {
         approvedByAsk = true;
         if (!requiresInlineEvalApproval) {
-          const patterns = persistAllowAlwaysPatterns({
+          const patterns = await persistAllowAlwaysPatterns({
             approvals: approvals.file,
             agentId: params.agentId,
+            analysisOk,
+            commandText: params.command,
             segments: allowlistEval.segments,
             cwd: params.workdir,
             env: params.env,
