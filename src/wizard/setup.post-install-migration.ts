@@ -37,6 +37,10 @@ async function resolveCandidates(params: {
   config: OpenClawConfig;
   runtime: RuntimeEnv;
   installedPluginIds: readonly string[];
+  // When present, wrap each `provider.detect` call in a wizard spinner so the
+  // terminal does not appear frozen during the (potentially multi-second)
+  // codex app-server probe in `detect()`.
+  prompter?: WizardPrompter;
 }): Promise<ResolvedProviderCandidate[]> {
   if (params.installedPluginIds.length === 0) {
     return [];
@@ -72,6 +76,7 @@ async function resolveCandidates(params: {
     if (!ownership.pluginIds.some((pluginId) => installedIds.has(pluginId))) {
       continue;
     }
+    const spin = params.prompter?.progress(`Checking ${provider.label} state…`);
     try {
       const detection = await provider.detect({
         config: params.config,
@@ -79,13 +84,16 @@ async function resolveCandidates(params: {
         logger,
       });
       if (!detection.found || detection.confidence === "low") {
+        spin?.stop(`No ${provider.label} state to migrate.`);
         continue;
       }
+      spin?.stop(`Found ${provider.label} state.`);
       candidates.push({
         provider,
         ...(detection.source ? { source: detection.source } : {}),
       });
     } catch (error) {
+      spin?.stop(`${provider.label} detection failed.`);
       logger.debug?.(
         `Post-install migration detect for ${provider.id} failed: ${formatErrorMessage(error)}`,
       );
@@ -155,6 +163,12 @@ export async function offerPostInstallMigrations(
     config: params.config,
     runtime: params.runtime,
     installedPluginIds: params.installedPluginIds,
+    // Only pass the prompter when we are actually going to drive an
+    // interactive prompt below; in non-interactive / non-TTY mode the
+    // spinner has no UX value and `runtime.log` already covers feedback.
+    ...(params.nonInteractive !== true && process.stdin.isTTY && params.prompter !== undefined
+      ? { prompter: params.prompter }
+      : {}),
   });
   if (candidates.length === 0) {
     return { config: params.config };

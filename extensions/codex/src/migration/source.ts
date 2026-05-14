@@ -265,7 +265,10 @@ async function requestSourceCodexAppServerJson<T>(
   return await requestCodexAppServerJson<T>({
     method: params.method,
     requestParams: params.requestParams,
-    timeoutMs: 60_000,
+    // 30s is enough on a normal install; the previous 60s value let an
+    // unauth'd or stalled `codex app-server` freeze the post-install
+    // migration prompt for a full minute with no UI activity.
+    timeoutMs: 30_000,
     startOptions: options.startOptions,
     authProfileId: null,
     isolated: true,
