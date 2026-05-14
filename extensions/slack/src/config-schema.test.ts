@@ -37,6 +37,27 @@ describe("slack config schema", () => {
     }
   });
 
+  it("accepts group sender metadata prefix controls at root and account level", () => {
+    const res = SlackConfigSchema.safeParse({
+      groupSenderMetadataPrefix: true,
+      accounts: { ops: { groupSenderMetadataPrefix: false } },
+    });
+
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data.groupSenderMetadataPrefix).toBe(true);
+      expect(res.data.accounts?.ops?.groupSenderMetadataPrefix).toBe(false);
+    }
+  });
+
+  it("rejects invalid group sender metadata prefix control types", () => {
+    expectSlackConfigIssue({ groupSenderMetadataPrefix: "true" }, "groupSenderMetadataPrefix");
+    expectSlackConfigIssue(
+      { accounts: { ops: { groupSenderMetadataPrefix: "false" } } },
+      "accounts.ops.groupSenderMetadataPrefix",
+    );
+  });
+
   it("accepts unfurl controls at root and account level", () => {
     const res = SlackConfigSchema.safeParse({
       unfurlLinks: false,
