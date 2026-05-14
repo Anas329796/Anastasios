@@ -5,6 +5,7 @@ Docs: https://docs.openclaw.ai
 ## Unreleased
 
 ### Changes
+- Sessions: recover store from backup and tmp artifacts. Thanks @wAngByg.
 
 - Control UI/i18n: add a `pnpm ui:i18n:report` baseline report for hardcoded-copy focus areas and locale fallback metadata. (#81320) Thanks @samzong.
 - Maintainer tooling: add a repo-local `codex-review` skill for Codex closeout reviews, including local dirty-work and PR-branch review helpers that rerun until no accepted/actionable findings remain and avoid unsupported inline prompts with `--base`.
