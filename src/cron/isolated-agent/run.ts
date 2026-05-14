@@ -8,6 +8,12 @@ import type { ThinkLevel } from "../../auto-reply/thinking.js";
 import type { CliDeps } from "../../cli/outbound-send-deps.js";
 import type { AgentDefaultsConfig } from "../../config/types.agent-defaults.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { isDiagnosticsEnabled } from "../../infra/diagnostic-events.js";
+import {
+  logMessageProcessed,
+  logMessageQueued,
+  logSessionStateChange,
+} from "../../logging/diagnostic.js";
 import { stringifyRouteThreadId } from "../../plugin-sdk/channel-route.js";
 import { isCommandLaneTaskTimeoutError } from "../../process/command-queue.js";
 import { CommandLane } from "../../process/lanes.js";
@@ -1113,6 +1119,24 @@ export async function runCronIsolatedAgentTurn(params: {
     });
   };
 
+  const turnStartedAtMs = Date.now();
+  const diagnosticsEnabled = isDiagnosticsEnabled(params.cfg);
+  if (diagnosticsEnabled) {
+    logMessageQueued({
+      sessionId: prepared.context.runSessionId,
+      sessionKey: prepared.context.runSessionKey,
+      channel: "cron",
+      source: "cron-isolated",
+    });
+    logSessionStateChange({
+      sessionId: prepared.context.runSessionId,
+      sessionKey: prepared.context.runSessionKey,
+      state: "processing",
+    });
+  }
+
+  let outcome: "completed" | "error" = "completed";
+  let outcomeError: string | undefined;
   try {
     const { executeCronRun } = await loadCronExecutorRuntime();
     const execution = await executeCronRun({
@@ -1150,21 +1174,30 @@ export async function runCronIsolatedAgentTurn(params: {
       senderIsOwner: prepared.context.senderIsOwner,
     });
     if (isAborted()) {
+      outcome = "error";
+      outcomeError = abortReason();
       return prepared.context.withRunSession({
         status: "error",
         error: abortReason(),
         diagnostics: createCronRunDiagnosticsFromError("cron-setup", abortReason()),
       });
     }
-    return await finalizeCronRun({
+    const finalized = await finalizeCronRun({
       prepared: prepared.context,
       execution,
       abortReason,
       isAborted,
     });
+    if (finalized.status === "error") {
+      outcome = "error";
+      outcomeError = finalized.error;
+    }
+    return finalized;
   } catch (err) {
     const isCronLaneTimeout = isAborted() || isCronNestedLaneTaskTimeoutError(err);
     const error = isCronLaneTimeout ? abortReason() : String(err);
+    outcome = "error";
+    outcomeError = error;
     return prepared.context.withRunSession({
       status: "error",
       error,
@@ -1173,5 +1206,21 @@ export async function runCronIsolatedAgentTurn(params: {
         isCronLaneTimeout ? error : err,
       ),
     });
+  } finally {
+    if (diagnosticsEnabled) {
+      logSessionStateChange({
+        sessionId: prepared.context.runSessionId,
+        sessionKey: prepared.context.runSessionKey,
+        state: "idle",
+      });
+      logMessageProcessed({
+        channel: "cron",
+        sessionId: prepared.context.runSessionId,
+        sessionKey: prepared.context.runSessionKey,
+        durationMs: Date.now() - turnStartedAtMs,
+        outcome,
+        error: outcomeError,
+      });
+    }
   }
 }
