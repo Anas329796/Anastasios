@@ -27,6 +27,7 @@ import { stripReasoningTagsFromText } from "../../shared/text/reasoning-tags.js"
 import { normalizeMessageChannel } from "../../utils/message-channel.js";
 import { resolveSessionAgentId } from "../agent-scope.js";
 import { listAllChannelSupportedActions, listChannelSupportedActions } from "../channel-tools.js";
+import type { ExplicitMessageSendTracker } from "../command/types.js";
 import { channelTargetSchema, channelTargetsSchema, stringEnum } from "../schema/typebox.js";
 import type { AnyAgentTool } from "./common.js";
 import { jsonResult, readNumberParam, readStringParam } from "./common.js";
@@ -543,6 +544,7 @@ type MessageToolOptions = {
   currentMessageId?: string | number;
   replyToMode?: "off" | "first" | "all" | "batched";
   hasRepliedRef?: { value: boolean };
+  explicitMessageSends?: ExplicitMessageSendTracker;
   sandboxRoot?: string;
   requireExplicitTarget?: boolean;
   sourceReplyDeliveryMode?: SourceReplyDeliveryMode;
@@ -735,6 +737,52 @@ function buildMessageToolDescription(options?: {
   );
 }
 
+function normalizeRoutePart(value: unknown): string | undefined {
+  if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
+    return undefined;
+  }
+  const text = String(value).trim();
+  return text ? text : undefined;
+}
+
+function recordCurrentChannelExplicitSend(params: {
+  result: Awaited<ReturnType<typeof runMessageAction>>;
+  actionParams: Record<string, unknown>;
+  currentChannelProvider?: string;
+  currentChannelId?: string;
+  currentThreadTs?: string;
+  accountId?: string;
+  explicitMessageSends?: ExplicitMessageSendTracker;
+}) {
+  const tracker = params.explicitMessageSends;
+  if (!tracker || params.result.kind !== "send" || params.result.dryRun) {
+    return;
+  }
+  const currentChannel = normalizeMessageChannel(params.currentChannelProvider);
+  if (!currentChannel || params.result.channel !== currentChannel) {
+    return;
+  }
+  const currentTarget = normalizeRoutePart(params.currentChannelId);
+  if (!currentTarget || normalizeRoutePart(params.result.to) !== currentTarget) {
+    return;
+  }
+  const text =
+    normalizeRoutePart(params.actionParams.message) ??
+    normalizeRoutePart(params.actionParams.caption) ??
+    undefined;
+  const threadId = normalizeRoutePart(params.actionParams.threadId) ?? params.currentThreadTs;
+  tracker.entries.push({
+    channel: params.result.channel,
+    to: params.result.to,
+    ...(params.accountId ? { accountId: params.accountId } : {}),
+    ...(threadId !== undefined ? { threadId } : {}),
+    ...(text !== undefined ? { text } : {}),
+  });
+  if (tracker.entries.length > 20) {
+    tracker.entries.splice(0, tracker.entries.length - 20);
+  }
+}
+
 function appendMessageToolVisibleReplyHint(
   description: string,
   sourceReplyDeliveryMode?: SourceReplyDeliveryMode,
@@ -818,7 +866,7 @@ export function createMessageTool(options?: MessageToolOptions): AnyAgentTool {
     displaySummary: "Send and manage messages across configured channels.",
     description,
     parameters: schema,
-    execute: async (_toolCallId, args, signal) => {
+    execute: async (toolCallId, args, signal) => {
       // Check if already aborted before doing any work
       if (signal?.aborted) {
         const err = new Error("Message send aborted");
@@ -827,6 +875,24 @@ export function createMessageTool(options?: MessageToolOptions): AnyAgentTool {
       }
       // Shallow-copy so we don't mutate the original event args (used for logging/dedup).
       const params = { ...(args as Record<string, unknown>) };
+      if (typeof params.idempotencyKey !== "string" || !params.idempotencyKey.trim()) {
+        const toolCallKey = typeof toolCallId === "string" ? toolCallId.trim() : "";
+        if (toolCallKey) {
+          const scope = [
+            options?.agentSessionKey,
+            options?.sessionId,
+            options?.currentChannelProvider,
+            options?.currentChannelId,
+            currentThreadTs,
+            options?.currentMessageId == null ? undefined : String(options.currentMessageId),
+          ]
+            .filter(
+              (value): value is string => typeof value === "string" && value.trim().length > 0,
+            )
+            .join(":");
+          params.idempotencyKey = `tool:${scope || "global"}:${toolCallKey}`;
+        }
+      }
 
       // Strip reasoning tags from text fields — models may include <think>…</think>
       // in tool arguments, and the messaging tool send path has no other tag filtering.
@@ -936,6 +1002,16 @@ export function createMessageTool(options?: MessageToolOptions): AnyAgentTool {
         agentId: resolvedAgentId,
         sandboxRoot: options?.sandboxRoot,
         abortSignal: signal,
+      });
+
+      recordCurrentChannelExplicitSend({
+        result,
+        actionParams: params,
+        currentChannelProvider: options?.currentChannelProvider,
+        currentChannelId: options?.currentChannelId,
+        currentThreadTs,
+        accountId: accountId ?? undefined,
+        explicitMessageSends: options?.explicitMessageSends,
       });
 
       const toolResult = getToolResult(result);

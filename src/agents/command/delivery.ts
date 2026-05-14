@@ -28,7 +28,11 @@ import { type RuntimeEnv, writeRuntimeJson } from "../../runtime.js";
 import { isInternalMessageChannel } from "../../utils/message-channel.js";
 import { isNestedAgentLane } from "../lanes.js";
 import type { EmbeddedPiRunMeta } from "../pi-embedded-runner/types.js";
-import type { AgentCommandOpts, AgentCommandResultMetaOverrides } from "./types.js";
+import type {
+  AgentCommandOpts,
+  AgentCommandResultMetaOverrides,
+  ExplicitMessageSendRecord,
+} from "./types.js";
 
 type RunResult = Awaited<ReturnType<(typeof import("../pi-embedded.js"))["runEmbeddedPiAgent"]>>;
 type DurableSendResult = Awaited<ReturnType<typeof sendDurableMessageBatch>>;
@@ -225,6 +229,113 @@ function noVisiblePayloadStatus(): AgentCommandDeliveryStatus {
     reason: "no_visible_payload",
     resultCount: 0,
   };
+}
+
+function duplicateExplicitMessageSendStatus(): AgentCommandDeliveryStatus {
+  return {
+    requested: true,
+    attempted: false,
+    status: "suppressed",
+    succeeded: true,
+    reason: "duplicate_explicit_message_send",
+    resultCount: 0,
+  };
+}
+
+function normalizeRoutePart(value: unknown): string | undefined {
+  if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
+    return undefined;
+  }
+  const text = String(value).trim();
+  return text ? text : undefined;
+}
+
+function normalizeDuplicateVisibleText(value: string): string {
+  return value
+    .replace(/\r\n?/gu, "\n")
+    .replace(/[\t ]+\n/gu, "\n")
+    .replace(/[\t ]+/gu, " ")
+    .replace(/\n{3,}/gu, "\n\n")
+    .trim();
+}
+
+function isDuplicateVisibleText(
+  candidate: string | undefined,
+  sentText: string | undefined,
+): boolean {
+  if (!candidate || !sentText) {
+    return false;
+  }
+  const left = normalizeDuplicateVisibleText(candidate);
+  const right = normalizeDuplicateVisibleText(sentText);
+  return Boolean(left && right && left === right);
+}
+
+function routeMatchesExplicitMessageSend(params: {
+  send: ExplicitMessageSendRecord;
+  channel?: string;
+  to?: string;
+  accountId?: string;
+  threadId?: string | number | null;
+}): boolean {
+  if (normalizeRoutePart(params.send.channel) !== normalizeRoutePart(params.channel)) {
+    return false;
+  }
+  if (normalizeRoutePart(params.send.to) !== normalizeRoutePart(params.to)) {
+    return false;
+  }
+  const sendAccountId = normalizeRoutePart(params.send.accountId);
+  const accountId = normalizeRoutePart(params.accountId);
+  if (sendAccountId && accountId && sendAccountId !== accountId) {
+    return false;
+  }
+  const sendThreadId = normalizeRoutePart(params.send.threadId);
+  const threadId = normalizeRoutePart(params.threadId);
+  if (sendThreadId && threadId && sendThreadId !== threadId) {
+    return false;
+  }
+  return true;
+}
+
+function shouldSuppressDuplicateExplicitMessageDelivery(params: {
+  explicitSends: ExplicitMessageSendRecord[] | undefined;
+  deliveryChannel?: string;
+  deliveryTarget?: string;
+  accountId?: string;
+  threadId?: string | number | null;
+  deliveryPayloads: NormalizedOutboundPayload[];
+}): boolean {
+  if (!params.explicitSends?.length || !params.deliveryPayloads.length) {
+    return false;
+  }
+  const hasNonTextPayload = params.deliveryPayloads.some(
+    (payload) =>
+      payload.mediaUrls.length > 0 ||
+      payload.audioAsVoice === true ||
+      payload.presentation !== undefined ||
+      payload.interactive !== undefined ||
+      payload.channelData !== undefined,
+  );
+  if (hasNonTextPayload) {
+    return false;
+  }
+  const finalText = params.deliveryPayloads
+    .map((payload) => payload.text.trim())
+    .filter(Boolean)
+    .join("\n\n");
+  if (!finalText) {
+    return false;
+  }
+  return params.explicitSends.some(
+    (send) =>
+      routeMatchesExplicitMessageSend({
+        send,
+        channel: params.deliveryChannel,
+        to: params.deliveryTarget,
+        accountId: params.accountId,
+        threadId: params.threadId,
+      }) && isDuplicateVisibleText(finalText, send.text),
+  );
 }
 
 async function normalizeReplyMediaPathsForDelivery(params: {
@@ -504,6 +615,27 @@ export async function deliverAgentCommandResult(params: {
   }
 
   const deliveryPayloads = projectOutboundPayloadPlanForOutbound(outboundPayloadPlan);
+  if (
+    deliver &&
+    !deliveryStatus &&
+    shouldSuppressDuplicateExplicitMessageDelivery({
+      explicitSends: opts.runContext?.explicitMessageSends?.entries,
+      deliveryChannel,
+      deliveryTarget,
+      accountId: resolvedAccountId,
+      threadId: resolvedThreadTarget ?? resolvedThreadId,
+      deliveryPayloads,
+    })
+  ) {
+    deliveryStatus = duplicateExplicitMessageSendStatus();
+    emitJsonEnvelope(deliveryStatus);
+    return {
+      payloads: normalizedPayloads,
+      meta: resultMeta,
+      deliverySucceeded: true,
+      deliveryStatus,
+    };
+  }
   if (deliveryPayloads.length === 0) {
     deliveryStatus = deliver ? (deliveryStatus ?? noVisiblePayloadStatus()) : undefined;
     const deliverySucceeded = deliveryStatus?.succeeded === true ? true : undefined;

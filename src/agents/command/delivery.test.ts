@@ -63,6 +63,23 @@ const slackRegistry = createTestRegistry([
   },
 ]);
 
+const discordRegistry = createTestRegistry([
+  {
+    pluginId: "discord",
+    source: "test",
+    plugin: createOutboundTestPlugin({
+      id: "discord",
+      outbound: {
+        deliveryMode: "direct",
+        sendText: async ({ to, text }) => ({
+          channel: "discord",
+          messageId: `${to}:${text}`,
+        }),
+      },
+    }),
+  },
+]);
+
 function createResult(overrides: Partial<RunResult> = {}): RunResult {
   return {
     meta: {
@@ -717,6 +734,274 @@ describe("normalizeAgentCommandReplyPayloads", () => {
     });
     expectRuntimeErrorIncludes(runtime, "Unknown channel");
     expect(deliverOutboundPayloadsMock).not.toHaveBeenCalled();
+  });
+
+  it("suppresses duplicate Discord final delivery after same-turn current-channel message.send", async () => {
+    setActivePluginRegistry(discordRegistry);
+    deliverOutboundPayloadsMock.mockResolvedValue([{ channel: "discord", messageId: "normal" }]);
+    const explicitMessageSends = {
+      entries: [
+        {
+          channel: "discord",
+          to: "1503167027337236501",
+          accountId: "bot-main",
+          threadId: "1503167027337236501",
+          text: "Final synthesis\n\n- one\n- two\n- three",
+        },
+      ],
+    };
+
+    const delivered = await deliverAgentCommandResult({
+      cfg: {} as OpenClawConfig,
+      deps: {} as CliDeps,
+      runtime: { log: vi.fn(), error: vi.fn() } as never,
+      opts: {
+        message: "go",
+        deliver: true,
+        replyChannel: "discord",
+        replyTo: "1503167027337236501",
+        replyAccountId: "bot-main",
+        threadId: "1503167027337236501",
+        runContext: { explicitMessageSends },
+      } as AgentCommandOpts,
+      outboundSession: undefined,
+      sessionEntry: undefined,
+      payloads: [{ text: "Final synthesis\n\n- one\n- two\n- three" }],
+      result: createResult(),
+    });
+
+    expect(delivered.deliverySucceeded).toBe(true);
+    expectDeliveryStatusFields(delivered, {
+      requested: true,
+      attempted: false,
+      status: "suppressed",
+      succeeded: true,
+      reason: "duplicate_explicit_message_send",
+    });
+    expect(delivered.payloads).toEqual([
+      { text: "Final synthesis\n\n- one\n- two\n- three", mediaUrl: null },
+    ]);
+    expect(deliverOutboundPayloadsMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps Discord final delivery when same-turn message.send text is different", async () => {
+    setActivePluginRegistry(discordRegistry);
+    deliverOutboundPayloadsMock.mockResolvedValue([{ channel: "discord", messageId: "normal" }]);
+    const explicitMessageSends = {
+      entries: [
+        {
+          channel: "discord",
+          to: "1503167027337236501",
+          text: "I sent a short progress update.",
+        },
+      ],
+    };
+
+    const delivered = await deliverAgentCommandResult({
+      cfg: {} as OpenClawConfig,
+      deps: {} as CliDeps,
+      runtime: { log: vi.fn(), error: vi.fn() } as never,
+      opts: {
+        message: "go",
+        deliver: true,
+        replyChannel: "discord",
+        replyTo: "1503167027337236501",
+        runContext: { explicitMessageSends },
+      } as AgentCommandOpts,
+      outboundSession: undefined,
+      sessionEntry: undefined,
+      payloads: [{ text: "This is the distinct final answer that should still be delivered." }],
+      result: createResult(),
+    });
+
+    expect(delivered.deliverySucceeded).toBe(true);
+    expectDeliveryStatusFields(delivered, {
+      requested: true,
+      attempted: true,
+      status: "sent",
+      succeeded: true,
+      resultCount: 1,
+    });
+    expect(deliverOutboundPayloadsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps Discord final delivery when it adds a warning to a prior message.send", async () => {
+    setActivePluginRegistry(discordRegistry);
+    deliverOutboundPayloadsMock.mockResolvedValue([{ channel: "discord", messageId: "normal" }]);
+    const priorText = [
+      "Finished the maintenance pass with these findings:",
+      "- checked the open pull requests and refreshed each status",
+      "- found one branch needing a focused duplicate-delivery fix",
+      "- validated the exact duplicate path in an isolated checkout",
+      "- left unrelated upstream failures out of this branch",
+      "- prepared a concise follow-up note for reviewer handoff",
+    ].join("\n");
+    const finalText = `${priorText}\n\nWarning: the shared upstream CI queue is still pending, so broad rebase work should wait.`;
+    const explicitMessageSends = {
+      entries: [
+        {
+          channel: "discord",
+          to: "channel-main",
+          text: priorText,
+        },
+      ],
+    };
+
+    const delivered = await deliverAgentCommandResult({
+      cfg: {} as OpenClawConfig,
+      deps: {} as CliDeps,
+      runtime: { log: vi.fn(), error: vi.fn() } as never,
+      opts: {
+        message: "go",
+        deliver: true,
+        replyChannel: "discord",
+        replyTo: "channel-main",
+        runContext: { explicitMessageSends },
+      } as AgentCommandOpts,
+      outboundSession: undefined,
+      sessionEntry: undefined,
+      payloads: [{ text: finalText }],
+      result: createResult(),
+    });
+
+    expect(delivered.deliverySucceeded).toBe(true);
+    expectDeliveryStatusFields(delivered, {
+      requested: true,
+      attempted: true,
+      status: "sent",
+      succeeded: true,
+      resultCount: 1,
+    });
+    expect(deliverOutboundPayloadsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps Discord final delivery when duplicate message.send targeted a different channel", async () => {
+    setActivePluginRegistry(discordRegistry);
+    deliverOutboundPayloadsMock.mockResolvedValue([{ channel: "discord", messageId: "normal" }]);
+    const explicitMessageSends = {
+      entries: [
+        {
+          channel: "discord",
+          to: "other-channel",
+          text: "Final synthesis",
+        },
+      ],
+    };
+
+    const delivered = await deliverAgentCommandResult({
+      cfg: {} as OpenClawConfig,
+      deps: {} as CliDeps,
+      runtime: { log: vi.fn(), error: vi.fn() } as never,
+      opts: {
+        message: "go",
+        deliver: true,
+        replyChannel: "discord",
+        replyTo: "1503167027337236501",
+        runContext: { explicitMessageSends },
+      } as AgentCommandOpts,
+      outboundSession: undefined,
+      sessionEntry: undefined,
+      payloads: [{ text: "Final synthesis" }],
+      result: createResult(),
+    });
+
+    expect(delivered.deliverySucceeded).toBe(true);
+    expectDeliveryStatusFields(delivered, {
+      requested: true,
+      attempted: true,
+      status: "sent",
+      succeeded: true,
+      resultCount: 1,
+    });
+    expect(deliverOutboundPayloadsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps Discord media final delivery even when text duplicates an explicit send", async () => {
+    setActivePluginRegistry(discordRegistry);
+    deliverOutboundPayloadsMock.mockResolvedValue([{ channel: "discord", messageId: "normal" }]);
+    const explicitMessageSends = {
+      entries: [
+        {
+          channel: "discord",
+          to: "1503167027337236501",
+          text: "Here is the rendered chart.",
+        },
+      ],
+    };
+
+    const delivered = await deliverAgentCommandResult({
+      cfg: {
+        agents: {
+          list: [{ id: "tester", workspace: "/tmp/agent-workspace" }],
+        },
+      } as OpenClawConfig,
+      deps: {} as CliDeps,
+      runtime: { log: vi.fn(), error: vi.fn() } as never,
+      opts: {
+        message: "go",
+        deliver: true,
+        replyChannel: "discord",
+        replyTo: "1503167027337236501",
+        runContext: { explicitMessageSends },
+      } as AgentCommandOpts,
+      outboundSession: { agentId: "tester" } as never,
+      sessionEntry: undefined,
+      payloads: [{ text: "Here is the rendered chart.", mediaUrls: ["./chart.png"] }],
+      result: createResult(),
+    });
+
+    expect(delivered.deliverySucceeded).toBe(true);
+    expectDeliveryStatusFields(delivered, {
+      requested: true,
+      attempted: true,
+      status: "sent",
+      succeeded: true,
+      resultCount: 1,
+    });
+    expect(deliverOutboundPayloadsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps Discord final delivery when duplicate message.send used a different thread", async () => {
+    setActivePluginRegistry(discordRegistry);
+    deliverOutboundPayloadsMock.mockResolvedValue([{ channel: "discord", messageId: "normal" }]);
+    const explicitMessageSends = {
+      entries: [
+        {
+          channel: "discord",
+          to: "1503167027337236501",
+          threadId: "thread-a",
+          text: "Final synthesis",
+        },
+      ],
+    };
+
+    const delivered = await deliverAgentCommandResult({
+      cfg: {} as OpenClawConfig,
+      deps: {} as CliDeps,
+      runtime: { log: vi.fn(), error: vi.fn() } as never,
+      opts: {
+        message: "go",
+        deliver: true,
+        replyChannel: "discord",
+        replyTo: "1503167027337236501",
+        threadId: "thread-b",
+        runContext: { explicitMessageSends },
+      } as AgentCommandOpts,
+      outboundSession: undefined,
+      sessionEntry: undefined,
+      payloads: [{ text: "Final synthesis" }],
+      result: createResult(),
+    });
+
+    expect(delivered.deliverySucceeded).toBe(true);
+    expectDeliveryStatusFields(delivered, {
+      requested: true,
+      attempted: true,
+      status: "sent",
+      succeeded: true,
+      resultCount: 1,
+    });
+    expect(deliverOutboundPayloadsMock).toHaveBeenCalledTimes(1);
   });
 
   it("emits JSON deliveryStatus before strict delivery failures rethrow", async () => {
