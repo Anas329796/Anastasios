@@ -153,10 +153,14 @@ export function isPrivateNetworkAllowedByPolicy(policy?: SsrFPolicy): boolean {
 }
 
 function shouldSkipPrivateNetworkChecks(hostname: string, policy?: SsrFPolicy): boolean {
-  return (
-    isPrivateNetworkAllowedByPolicy(policy) ||
-    normalizeHostnameSet(policy?.allowedHostnames).has(hostname)
-  );
+  if (isPrivateNetworkAllowedByPolicy(policy)) {
+    return true;
+  }
+  const allowlist = normalizeHostnameAllowlist(policy?.hostnameAllowlist);
+  if (allowlist.length > 0 && matchesHostnameAllowlist(hostname, allowlist)) {
+    return true;
+  }
+  return normalizeHostnameSet(policy?.allowedHostnames).has(hostname);
 }
 
 function resolveIpv4SpecialUseBlockOptions(policy?: SsrFPolicy): Ipv4SpecialUseBlockOptions {
@@ -262,6 +266,11 @@ function isBlockedHostnameNormalized(normalized: string): boolean {
 export function isBlockedHostnameOrIp(hostname: string, policy?: SsrFPolicy): boolean {
   const normalized = normalizeHostname(hostname);
   if (!normalized) {
+    return false;
+  }
+  // Allowlist from SSRF policy should bypass hostname blocks (e.g. host.docker.internal)
+  const allowlist = normalizeHostnameAllowlist(policy?.hostnameAllowlist);
+  if (allowlist.length > 0 && matchesHostnameAllowlist(normalized, allowlist)) {
     return false;
   }
   return isBlockedHostnameNormalized(normalized) || isPrivateIpAddress(normalized, policy);
