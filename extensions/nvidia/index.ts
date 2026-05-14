@@ -1,11 +1,24 @@
 import { defineSingleProviderPluginEntry } from "openclaw/plugin-sdk/provider-entry";
 import { applyNvidiaConfig, NVIDIA_DEFAULT_MODEL_REF } from "./onboard.js";
-import { buildNvidiaProvider } from "./provider-catalog.js";
+import { buildLiveNvidiaProvider, buildNvidiaProvider } from "./provider-catalog.js";
 
 const PROVIDER_ID = "nvidia";
 
-function buildNvidiaCatalogModels() {
-  return buildNvidiaProvider().models.map((model) => ({
+function hasNvidiaApiToken(ctx: {
+  env: NodeJS.ProcessEnv;
+  resolveProviderApiKey?: (providerId?: string) => { apiKey: string | undefined };
+}) {
+  return Boolean(
+    ctx.resolveProviderApiKey?.(PROVIDER_ID).apiKey?.trim() || ctx.env.NVIDIA_API_KEY?.trim(),
+  );
+}
+
+async function buildNvidiaCatalogModels(ctx: {
+  env: NodeJS.ProcessEnv;
+  resolveProviderApiKey?: (providerId?: string) => { apiKey: string | undefined };
+}) {
+  const provider = hasNvidiaApiToken(ctx) ? await buildLiveNvidiaProvider() : buildNvidiaProvider();
+  return provider.models.map((model) => ({
     provider: PROVIDER_ID,
     id: model.id,
     name: model.name ?? model.id,
@@ -38,7 +51,8 @@ export default defineSingleProviderPluginEntry({
       },
     ],
     catalog: {
-      buildProvider: buildNvidiaProvider,
+      buildProvider: buildLiveNvidiaProvider,
+      buildStaticProvider: buildNvidiaProvider,
     },
     augmentModelCatalog: buildNvidiaCatalogModels,
     wizard: {
