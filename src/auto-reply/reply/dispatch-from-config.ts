@@ -80,6 +80,7 @@ import type { BlockReplyContext } from "../get-reply-options.types.js";
 import { getReplyPayloadMetadata, type ReplyPayload } from "../reply-payload.js";
 import type { FinalizedMsgContext } from "../templating.js";
 import { normalizeVerboseLevel } from "../thinking.js";
+import { isSilentReplyPayloadText } from "../tokens.js";
 import { resolveConversationBindingContextFromMessage } from "./conversation-binding-input.js";
 import {
   createInternalHookEvent,
@@ -1063,6 +1064,16 @@ export async function dispatchReplyFromConfig(
       };
     };
 
+    const shouldSuppressMessageToolSilentFinal = (reply: ReplyPayload): boolean => {
+      if (params.replyOptions?.hasRepliedRef?.value !== true) {
+        return false;
+      }
+      if (!isSilentReplyPayloadText(reply.text)) {
+        return false;
+      }
+      return !resolveSendableOutboundReplyParts({ ...reply, text: undefined }).hasContent;
+    };
+
     // Run before_dispatch hook — let plugins inspect or handle before model dispatch.
     if (hookRunner?.hasHooks("before_dispatch")) {
       const beforeDispatchResult = await traceReplyPhase("reply.before_dispatch_hooks", () =>
@@ -1605,6 +1616,9 @@ export async function dispatchReplyFromConfig(
       // Suppress reasoning payloads from channel delivery — channels using this
       // generic dispatch path do not have a dedicated reasoning lane.
       if (reply.isReasoning === true) {
+        continue;
+      }
+      if (shouldSuppressMessageToolSilentFinal(reply)) {
         continue;
       }
       if (suppressDelivery && !shouldDeliverDespiteSourceReplySuppression(reply)) {
