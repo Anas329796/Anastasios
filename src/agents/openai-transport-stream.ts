@@ -2175,7 +2175,6 @@ function getCompat(model: OpenAIModeModel): {
     visibleReasoningDetailTypes:
       compat.visibleReasoningDetailTypes ?? detected.visibleReasoningDetailTypes,
     requiresReasoningContentOnAssistantMessages:
-      compat.requiresReasoningContentOnAssistantMessages ??
       detected.requiresReasoningContentOnAssistantMessages,
   };
 }
