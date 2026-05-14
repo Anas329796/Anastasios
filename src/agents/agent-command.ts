@@ -1057,6 +1057,7 @@ async function agentCommandInternal(
               modelOverride,
               modelFallbacksOverride: effectiveFallbacksOverride,
               originalProvider: provider,
+              originalModel: model,
               cfg,
               sessionEntry: sessionEntryForAttempt,
               sessionId,
