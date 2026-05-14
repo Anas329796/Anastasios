@@ -33,6 +33,7 @@ import {
   stripHeartbeatToken,
   type HeartbeatTask,
 } from "../auto-reply/heartbeat.js";
+import { getReplyPayloadMetadata } from "../auto-reply/reply-payload.js";
 import { resolveDefaultModel } from "../auto-reply/reply/directive-handling.defaults.js";
 import { resolveResponsePrefixTemplate } from "../auto-reply/reply/response-prefix-template.js";
 import { HEARTBEAT_TOKEN } from "../auto-reply/tokens.js";
@@ -85,6 +86,7 @@ import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
 } from "../shared/string-coerce.js";
+import { sanitizeAssistantVisibleText } from "../shared/text/assistant-visible-text.js";
 import { escapeRegExp } from "../utils.js";
 import { MAX_SAFE_TIMEOUT_DELAY_MS, resolveSafeTimeoutDelayMs } from "../utils/timer-delay.js";
 import { loadOrCreateDeviceIdentity } from "./device-identity.js";
@@ -771,7 +773,9 @@ function normalizeHeartbeatReply(
   ackMaxChars: number,
 ) {
   const rawText = typeof payload.text === "string" ? payload.text : "";
-  const textForStrip = stripLeadingHeartbeatResponsePrefix(rawText, responsePrefix);
+  const textForStrip = sanitizeAssistantVisibleText(
+    stripLeadingHeartbeatResponsePrefix(rawText, responsePrefix),
+  );
   const stripped = stripHeartbeatToken(textForStrip, {
     mode: "heartbeat",
     maxAckChars: ackMaxChars,
@@ -784,7 +788,14 @@ function normalizeHeartbeatReply(
       hasMedia,
     };
   }
-  let finalText = stripped.text;
+  let finalText = sanitizeAssistantVisibleText(stripped.text);
+  if (!finalText && !hasMedia) {
+    return {
+      shouldSkip: true,
+      text: "",
+      hasMedia,
+    };
+  }
   if (responsePrefix && finalText && !finalText.startsWith(responsePrefix)) {
     finalText = `${responsePrefix} ${finalText}`;
   }
@@ -800,6 +811,16 @@ function normalizeHeartbeatToolNotification(
     finalText = `${responsePrefix} ${finalText}`;
   }
   return { shouldSkip: false, text: finalText, hasMedia: false };
+}
+
+function canDeliverHeartbeatPayloadWithoutTool(payload: ReplyPayload | undefined): boolean {
+  if (!payload) {
+    return false;
+  }
+  return (
+    payload.isError === true ||
+    getReplyPayloadMetadata(payload)?.deliverDespiteSourceReplySuppression === true
+  );
 }
 
 type HeartbeatWakePayloadFlags = {
@@ -1731,6 +1752,8 @@ export async function runHeartbeatOnce(opts: {
       : [];
     const ackMaxChars = resolveHeartbeatAckMaxChars(cfg, heartbeat);
     const responsePrefix = resolveHeartbeatResponsePrefix();
+    const canDeliverReplyPayload =
+      !usesHeartbeatResponseTool || canDeliverHeartbeatPayloadWithoutTool(replyPayload);
 
     if (heartbeatToolResponse && !heartbeatToolResponse.notify) {
       await restoreHeartbeatUpdatedAt({
@@ -1761,7 +1784,10 @@ export async function runHeartbeatOnce(opts: {
       return { status: "ran", durationMs: Date.now() - startedAt };
     }
 
-    if (!heartbeatToolResponse && (!replyPayload || !hasOutboundReplyContent(replyPayload))) {
+    if (
+      !heartbeatToolResponse &&
+      (!canDeliverReplyPayload || !replyPayload || !hasOutboundReplyContent(replyPayload))
+    ) {
       await restoreHeartbeatUpdatedAt({
         storePath,
         sessionKey,
@@ -1791,7 +1817,7 @@ export async function runHeartbeatOnce(opts: {
 
     const normalized = heartbeatToolResponse
       ? normalizeHeartbeatToolNotification(heartbeatToolResponse, responsePrefix)
-      : replyPayload
+      : canDeliverReplyPayload && replyPayload
         ? normalizeHeartbeatReply(replyPayload, responsePrefix, ackMaxChars)
         : { shouldSkip: true, text: "", hasMedia: false };
     // For exec completion events, don't skip even if the response looks like HEARTBEAT_OK.
@@ -1800,6 +1826,7 @@ export async function runHeartbeatOnce(opts: {
     // fall back to the original reply text.
     const execFallbackText =
       !heartbeatToolResponse &&
+      canDeliverReplyPayload &&
       hasRelayableExecCompletion &&
       !normalized.text.trim() &&
       replyPayload?.text?.trim()
