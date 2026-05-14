@@ -958,7 +958,6 @@ export function resolvePluginAutoEnableManifestRegistry(params: {
   const currentSnapshot = getCurrentPluginMetadataSnapshot({
     config: params.config,
     env: params.env,
-    allowWorkspaceScopedSnapshot: true,
   });
   const policyCompatibleCurrentSnapshot =
     currentSnapshot ??
@@ -968,7 +967,6 @@ export function resolvePluginAutoEnableManifestRegistry(params: {
       }
       const snapshot = getCurrentPluginMetadataSnapshot({
         env: params.env,
-        allowWorkspaceScopedSnapshot: true,
         requireDefaultDiscoveryContext: true,
       });
       return snapshot?.policyHash === resolveInstalledPluginIndexPolicyHash(params.config)
