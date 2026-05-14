@@ -838,11 +838,12 @@ Use jobId as the canonical identifier; id is accepted for compatibility. Use con
               }
             }
 
-            const hasTarget =
+            const hasTarget = Boolean(
               (typeof delivery?.channel === "string" && delivery.channel.trim()) ||
-              (typeof delivery?.to === "string" && delivery.to.trim());
+              (typeof delivery?.to === "string" && delivery.to.trim()),
+            );
             const shouldInfer =
-              (deliveryValue == null || delivery) &&
+              (deliveryValue == null || delivery !== undefined) &&
               (mode === "" || mode === "announce") &&
               !hasTarget;
             if (shouldInfer) {
@@ -850,10 +851,14 @@ Use jobId as the canonical identifier; id is accepted for compatibility. Use con
                 inferDeliveryFromContext(opts.currentDeliveryContext) ??
                 inferDeliveryFromSessionKey(opts.agentSessionKey);
               if (inferred) {
-                (job as { delivery?: unknown }).delivery = {
-                  ...inferred,
-                  ...delivery,
-                } satisfies CronDelivery;
+                const nextDelivery =
+                  delivery === undefined
+                    ? inferred
+                    : ({
+                        ...inferred,
+                        ...delivery,
+                      } satisfies CronDelivery);
+                (job as { delivery?: unknown }).delivery = nextDelivery;
               }
             }
           }
