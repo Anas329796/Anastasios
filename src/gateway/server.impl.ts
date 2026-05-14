@@ -390,6 +390,9 @@ function createGatewayStartupTrace() {
         last = now;
       }
     },
+    close() {
+      eventLoopDelay?.disable();
+    },
   };
 }
 
@@ -1551,6 +1554,7 @@ export async function startGatewayServer(
       startupTrace.detail("memory.post-ready", collectProcessMemoryUsageMb());
     }
   } catch (err) {
+    startupTrace.close();
     await closeOnStartupFailure();
     throw err;
   }
