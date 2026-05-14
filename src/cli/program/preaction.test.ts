@@ -135,6 +135,10 @@ describe("registerPreActionHooks", () => {
       .option("--json")
       .action(() => {});
     program.command("doctor").action(() => {});
+    program
+      .command("lint")
+      .option("--json")
+      .action(() => {});
     program.command("completion").action(() => {});
     program.command("secrets").action(() => {});
     program
@@ -313,6 +317,16 @@ describe("registerPreActionHooks", () => {
     expect(ensurePluginRegistryLoadedMock).not.toHaveBeenCalled();
   });
 
+  it("skips the config guard and plugin loading for lint", async () => {
+    await runPreAction({
+      parseArgv: ["lint"],
+      processArgv: ["node", "openclaw", "lint", "--json"],
+    });
+
+    expect(ensureConfigReadyMock).not.toHaveBeenCalled();
+    expect(ensurePluginRegistryLoadedMock).not.toHaveBeenCalled();
+  });
+
   it("only allows invalid config for explicit Discord reinstall requests", async () => {
     await runPreAction({
       parseArgv: ["plugins", "install", "@openclaw/discord"],
@@ -484,6 +498,7 @@ describe("registerPreActionHooks", () => {
     });
 
     expect(ensureConfigReadyMock).not.toHaveBeenCalled();
+    expect(ensurePluginRegistryLoadedMock).not.toHaveBeenCalled();
   });
 
   it("bypasses config guard for config validate when root option values are present", async () => {
@@ -493,6 +508,7 @@ describe("registerPreActionHooks", () => {
     });
 
     expect(ensureConfigReadyMock).not.toHaveBeenCalled();
+    expect(ensurePluginRegistryLoadedMock).not.toHaveBeenCalled();
   });
 
   it("bypasses config guard for config schema", async () => {
@@ -502,6 +518,7 @@ describe("registerPreActionHooks", () => {
     });
 
     expect(ensureConfigReadyMock).not.toHaveBeenCalled();
+    expect(ensurePluginRegistryLoadedMock).not.toHaveBeenCalled();
   });
 
   it("bypasses config guard for backup create", async () => {
@@ -511,6 +528,7 @@ describe("registerPreActionHooks", () => {
     });
 
     expect(ensureConfigReadyMock).not.toHaveBeenCalled();
+    expect(ensurePluginRegistryLoadedMock).not.toHaveBeenCalled();
   });
 
   it("routes logs to stderr during plugin loading in --json mode and restores after", async () => {
@@ -550,7 +568,7 @@ describe("registerPreActionHooks", () => {
           preAction?: Array<(thisCommand: Command, actionCommand: Command) => Promise<void> | void>;
         };
       }
-    )._lifeCycleHooks?.preAction;
+    )["_lifeCycleHooks"]?.preAction;
     preActionHook = hooks?.[0] ?? null;
   });
 });
