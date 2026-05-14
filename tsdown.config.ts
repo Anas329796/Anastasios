@@ -68,6 +68,25 @@ function matchesExternalOption(
   return false;
 }
 
+function isPackageManagerTypeProbe(id: string): boolean {
+  const normalizedId = id.replaceAll("\\", "/");
+  return (
+    normalizedId.includes("/node_modules/undici-types/index.d.ts") ||
+    normalizedId.includes("/node_modules/undici/index.d.ts") ||
+    normalizedId.includes("/node_modules/@types/node-fetch/index.d.ts") ||
+    normalizedId.includes("/node_modules/node-fetch")
+  );
+}
+
+function isThirdPartyDeclarationTypeImport(id: string, parentId: string | undefined): boolean {
+  const normalizedParentId = parentId?.replaceAll("\\", "/") ?? "";
+  return (
+    id === "axios" &&
+    normalizedParentId.includes("node_modules/@slack/") &&
+    normalizedParentId.endsWith(".d.ts")
+  );
+}
+
 function buildInputOptions(options: InputOptionsArg): InputOptionsReturn {
   if (process.env.OPENCLAW_BUILD_VERBOSE === "1") {
     return undefined;
@@ -99,6 +118,8 @@ function buildInputOptions(options: InputOptionsArg): InputOptionsReturn {
     ...options,
     external(id: string, parentId: string | undefined, isResolved: boolean) {
       return (
+        isPackageManagerTypeProbe(id) ||
+        isThirdPartyDeclarationTypeImport(id, parentId) ||
         shouldNeverBundleDependency(id) ||
         matchesExternalOption(previousExternal, id, parentId, isResolved)
       );
