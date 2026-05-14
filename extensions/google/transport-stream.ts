@@ -138,6 +138,8 @@ type GoogleSseChunk = {
 
 let toolCallCounter = 0;
 const GEMINI_THOUGHT_SIGNATURE_VALIDATOR_SKIP = "skip_thought_signature_validator";
+const GEMINI_THOUGHT_SIGNATURE_PATTERN = /^[A-Za-z0-9_+/=-]+$/;
+const GEMINI_THOUGHT_SIGNATURE_MIN_LENGTH = 8;
 
 function normalizeOptionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -164,6 +166,83 @@ function retainThoughtSignature(existing: string | undefined, incoming: string |
     return incoming;
   }
   return existing;
+}
+
+function isJsonLikeThoughtSignature(value: string): boolean {
+  const trimmed = value.trim();
+  return (
+    trimmed.startsWith("{") ||
+    trimmed.startsWith("[") ||
+    trimmed.includes('":') ||
+    trimmed.includes('","') ||
+    trimmed.includes('"type"')
+  );
+}
+
+function sanitizeGeminiToolCallThoughtSignature(
+  thoughtSignature: string | undefined,
+): string | undefined {
+  if (typeof thoughtSignature !== "string") {
+    return undefined;
+  }
+  const trimmed = thoughtSignature.trim();
+  if (trimmed.length < GEMINI_THOUGHT_SIGNATURE_MIN_LENGTH) {
+    return undefined;
+  }
+  if (isJsonLikeThoughtSignature(trimmed)) {
+    return undefined;
+  }
+  const lowered = normalizeLowercaseStringOrEmpty(trimmed);
+  if (
+    lowered === "reasoning" ||
+    lowered === normalizeLowercaseStringOrEmpty(GEMINI_THOUGHT_SIGNATURE_VALIDATOR_SKIP)
+  ) {
+    return undefined;
+  }
+  if (!GEMINI_THOUGHT_SIGNATURE_PATTERN.test(trimmed)) {
+    return undefined;
+  }
+  return trimmed;
+}
+
+function isSameGoogleTransportRoute(
+  source: { api?: string; provider?: string; model?: string },
+  model: GoogleTransportModel,
+): boolean {
+  return (
+    source.provider === model.provider && source.api === model.api && source.model === model.id
+  );
+}
+
+function collectToolCallThoughtSignatures(
+  context: Context,
+  model: GoogleTransportModel,
+): Map<string, string> {
+  const sigById = new Map<string, string>();
+  for (const msg of context.messages ?? []) {
+    if (msg.role !== "assistant" || !Array.isArray(msg.content)) {
+      continue;
+    }
+    // Only trust thought signatures from the same Google route. Signatures
+    // from other providers (e.g. Anthropic, OpenAI) may pass the base64
+    // sanitizer but are not valid Gemini-issued values and must not be
+    // replayed. Gemini requires its own signatures returned exactly as issued.
+    const source = msg as { api?: string; provider?: string; model?: string };
+    if (!isSameGoogleTransportRoute(source, model)) {
+      continue;
+    }
+    for (const block of msg.content) {
+      if (block.type !== "toolCall") {
+        continue;
+      }
+      const signature = sanitizeGeminiToolCallThoughtSignature(block.thoughtSignature);
+      if (!signature) {
+        continue;
+      }
+      sigById.set(block.id, signature);
+    }
+  }
+  return sigById;
 }
 
 function mapToolChoice(
@@ -385,6 +464,9 @@ function normalizeGoogleThinkingConfig(
 
 function convertGoogleMessages(model: GoogleTransportModel, context: Context) {
   const contents: Array<Record<string, unknown>> = [];
+  const replayToolCallThoughtSignatures = requiresToolCallThoughtSignature(model.id)
+    ? collectToolCallThoughtSignatures(context, model)
+    : new Map<string, string>();
   const transformedMessages = transformTransportMessages(
     context.messages,
     model,
@@ -422,7 +504,7 @@ function convertGoogleMessages(model: GoogleTransportModel, context: Context) {
     }
 
     if (msg.role === "assistant") {
-      const isSameProviderAndModel = msg.provider === model.provider && msg.model === model.id;
+      const isSameRoute = isSameGoogleTransportRoute(msg, model);
       const parts: Array<Record<string, unknown>> = [];
       for (const block of msg.content) {
         if (block.type === "text") {
@@ -431,7 +513,7 @@ function convertGoogleMessages(model: GoogleTransportModel, context: Context) {
           }
           parts.push({
             text: sanitizeTransportPayloadText(block.text),
-            ...(isSameProviderAndModel && block.textSignature
+            ...(isSameRoute && block.textSignature
               ? { thoughtSignature: block.textSignature }
               : {}),
           });
@@ -441,7 +523,7 @@ function convertGoogleMessages(model: GoogleTransportModel, context: Context) {
           if (!block.thinking.trim()) {
             continue;
           }
-          if (isSameProviderAndModel) {
+          if (isSameRoute) {
             parts.push({
               thought: true,
               text: sanitizeTransportPayloadText(block.thinking),
@@ -453,8 +535,16 @@ function convertGoogleMessages(model: GoogleTransportModel, context: Context) {
           continue;
         }
         if (block.type === "toolCall") {
+          const replayedThoughtSignature = replayToolCallThoughtSignatures.get(block.id);
+          // Use stored signature only when it came from the same Google route;
+          // otherwise fall back to a same-route replayed value from context.
+          // Never replay signatures from foreign providers — Gemini requires
+          // its own signatures returned exactly as issued.
+          const ownSignature = isSameRoute
+            ? sanitizeGeminiToolCallThoughtSignature(block.thoughtSignature)
+            : undefined;
           const thoughtSignature =
-            (isSameProviderAndModel ? block.thoughtSignature : undefined) ??
+            retainThoughtSignature(ownSignature, replayedThoughtSignature) ??
             (requiresToolCallThoughtSignature(model.id)
               ? GEMINI_THOUGHT_SIGNATURE_VALIDATOR_SKIP
               : undefined);
@@ -1098,6 +1188,16 @@ function createGoogleTransportStreamFn(kind: GoogleTransportApi): StreamFn {
                 typeof part.thoughtSignature === "string" && part.thoughtSignature.length > 0;
               const hasText = typeof part.text === "string";
               if (hasText || (hasThoughtSignature && !part.functionCall)) {
+                if (hasThoughtSignature && !hasText) {
+                  const latestBlock = output.content[output.content.length - 1];
+                  if (latestBlock?.type === "toolCall") {
+                    latestBlock.thoughtSignature = retainThoughtSignature(
+                      latestBlock.thoughtSignature,
+                      part.thoughtSignature,
+                    );
+                    continue;
+                  }
+                }
                 const isThinking = part.thought === true || !hasText;
                 const currentBlock = output.content[currentBlockIndex];
                 if (
@@ -1164,6 +1264,15 @@ function createGoogleTransportStreamFn(kind: GoogleTransportApi): StreamFn {
                 const isDuplicate = output.content.some(
                   (block) => block.type === "toolCall" && block.id === providedId,
                 );
+                const existingToolCall =
+                  typeof providedId === "string"
+                    ? output.content.find(
+                        (
+                          block,
+                        ): block is Extract<GoogleTransportContentBlock, { type: "toolCall" }> =>
+                          block.type === "toolCall" && block.id === providedId,
+                      )
+                    : undefined;
                 const toolCallId =
                   providedId && !isDuplicate
                     ? providedId
@@ -1173,7 +1282,10 @@ function createGoogleTransportStreamFn(kind: GoogleTransportApi): StreamFn {
                   id: toolCallId,
                   name: part.functionCall.name || "",
                   arguments: part.functionCall.args ?? {},
-                  thoughtSignature: part.thoughtSignature,
+                  thoughtSignature: retainThoughtSignature(
+                    existingToolCall?.thoughtSignature,
+                    part.thoughtSignature,
+                  ),
                 };
                 output.content.push(toolCall);
                 const blockIndex = output.content.length - 1;

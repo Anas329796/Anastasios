@@ -166,6 +166,30 @@ function requireThinkingConfig(config: Record<string, unknown>): Record<string, 
   return thinkingConfig as Record<string, unknown>;
 }
 
+type GoogleTestContentTurn = Record<string, unknown> & {
+  parts: Array<Record<string, unknown>>;
+};
+
+function isModelTurnWithParts(content: Record<string, unknown>): content is GoogleTestContentTurn {
+  return content.role === "model" && Array.isArray(content.parts);
+}
+
+function getFirstModelTurn(contents: Array<Record<string, unknown>>): GoogleTestContentTurn {
+  const turn = contents.find(isModelTurnWithParts);
+  if (!turn) {
+    throw new Error("Expected at least one Google model turn");
+  }
+  return turn;
+}
+
+function getLastModelTurn(contents: Array<Record<string, unknown>>): GoogleTestContentTurn {
+  const turn = contents.toReversed().find(isModelTurnWithParts);
+  if (!turn) {
+    throw new Error("Expected at least one Google model turn");
+  }
+  return turn;
+}
+
 describe("google transport stream", () => {
   beforeAll(async () => {
     ({
@@ -324,6 +348,52 @@ describe("google transport stream", () => {
     expect(result.content[2]).toHaveProperty("name", "lookup");
     expect(result.content[2]).toHaveProperty("arguments", { q: "hello" });
     expect(result.content[2]).toHaveProperty("thoughtSignature", "call_sig_1");
+  });
+
+  it("merges tool-call thought signatures from sibling SSE parts", async () => {
+    guardedFetchMock.mockResolvedValueOnce(
+      buildSseResponse([
+        {
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    functionCall: { id: "call_1", name: "lookup", args: { q: "hello" } },
+                  },
+                  { thoughtSignature: "call_sig_merged_1" },
+                ],
+              },
+              finishReason: "STOP",
+            },
+          ],
+        },
+      ]),
+    );
+
+    const streamFn = createGoogleGenerativeAiTransportStreamFn();
+    const stream = await Promise.resolve(
+      streamFn(
+        buildGeminiModel({
+          id: "gemini-3.1-pro-preview",
+          name: "Gemini 3.1 Pro Preview",
+        }),
+        {
+          messages: [{ role: "user", content: "hello", timestamp: 0 }],
+        } as never,
+      ),
+    );
+    const result = await stream.result();
+
+    expect(result.content).toEqual([
+      {
+        type: "toolCall",
+        id: "call_1",
+        name: "lookup",
+        arguments: { q: "hello" },
+        thoughtSignature: "call_sig_merged_1",
+      },
+    ]);
   });
 
   it("builds a lean Gemini 3 first-response retry payload", () => {
@@ -700,7 +770,7 @@ describe("google transport stream", () => {
     });
   });
 
-  it("uses Gemini skip-validator thought signatures for cross-provider tool-call replay", () => {
+  it("re-attaches replayed Gemini thought signatures when a later tool call is missing one", () => {
     const model = buildGeminiModel({
       id: "gemini-3.1-pro-preview",
       name: "Gemini 3.1 Pro Preview",
@@ -710,9 +780,9 @@ describe("google transport stream", () => {
       messages: [
         {
           role: "assistant",
-          provider: "anthropic",
-          api: "anthropic-messages",
-          model: "claude-opus-4-7",
+          provider: "google",
+          api: "google-generative-ai",
+          model: "gemini-3.1-pro-preview",
           stopReason: "toolUse",
           timestamp: 0,
           content: [
@@ -721,13 +791,104 @@ describe("google transport stream", () => {
               id: "call_1",
               name: "lookup",
               arguments: { q: "hello" },
+              thoughtSignature: "call_sig_replay_1",
+            },
+          ],
+        },
+        {
+          role: "toolResult",
+          timestamp: 1,
+          content: [
+            {
+              type: "toolResult",
+              toolCallId: "call_1",
+              content: [{ type: "text", text: "ok" }],
+            },
+          ],
+        },
+        {
+          role: "assistant",
+          provider: "google",
+          api: "google-generative-ai",
+          model: "gemini-3.1-pro-preview",
+          stopReason: "toolUse",
+          timestamp: 2,
+          content: [
+            {
+              type: "toolCall",
+              id: "call_1",
+              name: "lookup",
+              arguments: { q: "hello-again" },
             },
           ],
         },
       ],
     } as never);
 
-    expect(params.contents[0]).toEqual({
+    // Find the last model-role content; should carry the replayed signature
+    // even though the second stored toolCall block had none.
+    expect(getLastModelTurn(params.contents)).toMatchObject({
+      role: "model",
+      parts: [
+        {
+          thoughtSignature: "call_sig_replay_1",
+          functionCall: { name: "lookup", args: { q: "hello-again" } },
+        },
+      ],
+    });
+  });
+
+  it("does not replay tool-call thought signatures from a different provider route", () => {
+    const model = buildGeminiModel({
+      id: "gemini-3.1-pro-preview",
+      name: "Gemini 3.1 Pro Preview",
+    });
+
+    // Prior turn came from an Anthropic route — its signature looks valid base64
+    // but must NOT be replayed into a Gemini request.
+    const params = buildGoogleGenerativeAiParams(model, {
+      messages: [
+        {
+          role: "assistant",
+          provider: "anthropic",
+          api: "anthropic",
+          model: "claude-sonnet-4",
+          stopReason: "toolUse",
+          timestamp: 0,
+          content: [
+            {
+              type: "toolCall",
+              id: "call_foreign",
+              name: "lookup",
+              arguments: { q: "hello" },
+              // Plausible-looking base64 from a non-Gemini provider
+              thoughtSignature: "msg_01XFDUDYJgAACcnSM2TTgQsA",
+            },
+          ],
+        },
+        {
+          role: "toolResult",
+          timestamp: 1,
+          content: [
+            {
+              type: "toolResult",
+              toolCallId: "call_foreign",
+              content: [{ type: "text", text: "ok" }],
+            },
+          ],
+        },
+        {
+          role: "user",
+          content: [{ type: "text", text: "Continue." }],
+        },
+      ],
+    } as never);
+
+    // The foreign signature should not be replayed into the Gemini payload.
+    // Gemini 3 still needs the documented skip fallback for unsigned function
+    // calls that came from another route.
+    const firstModelTurn = getFirstModelTurn(params.contents);
+    expect(firstModelTurn).toMatchObject({
       role: "model",
       parts: [
         {
@@ -735,6 +896,133 @@ describe("google transport stream", () => {
           functionCall: { name: "lookup", args: { q: "hello" } },
         },
       ],
+    });
+    expect(firstModelTurn.parts[0].thoughtSignature).not.toBe("msg_01XFDUDYJgAACcnSM2TTgQsA");
+  });
+
+  it("replaces non-base64 Gemini tool-call thought signatures with the skip fallback", () => {
+    const model = buildGeminiModel({
+      id: "gemini-3.1-pro-preview",
+      name: "Gemini 3.1 Pro Preview",
+    });
+
+    const params = buildGoogleGenerativeAiParams(model, {
+      messages: [
+        {
+          role: "assistant",
+          provider: "google",
+          api: "google-generative-ai",
+          model: "gemini-3.1-pro-preview",
+          stopReason: "toolUse",
+          timestamp: 0,
+          content: [
+            {
+              type: "toolCall",
+              id: "call_1",
+              name: "lookup",
+              arguments: { q: "hello" },
+              thoughtSignature: "reasoning",
+            },
+          ],
+        },
+      ],
+    } as never);
+
+    const part = (params.contents[0] as { parts: Array<Record<string, unknown>> }).parts[0];
+    expect(part).toMatchObject({
+      thoughtSignature: "skip_thought_signature_validator",
+      functionCall: { name: "lookup", args: { q: "hello" } },
+    });
+  });
+
+  it("preserves the skip-validator fallback for unsigned Gemini tool-call replay", () => {
+    const model = buildGeminiModel({
+      id: "gemini-3.1-pro-preview",
+      name: "Gemini 3.1 Pro Preview",
+    });
+
+    const params = buildGoogleGenerativeAiParams(model, {
+      messages: [
+        {
+          role: "assistant",
+          provider: "google",
+          api: "google-generative-ai",
+          model: "gemini-3.1-pro-preview",
+          stopReason: "toolUse",
+          timestamp: 0,
+          content: [
+            {
+              type: "toolCall",
+              id: "call_1",
+              name: "lookup",
+              arguments: { q: "hello" },
+              thoughtSignature: "skip_thought_signature_validator",
+            },
+          ],
+        },
+      ],
+    } as never);
+
+    const part = (params.contents[0] as { parts: Array<Record<string, unknown>> }).parts[0];
+    expect(part).toMatchObject({
+      thoughtSignature: "skip_thought_signature_validator",
+      functionCall: { name: "lookup", args: { q: "hello" } },
+    });
+  });
+
+  it("adds skip-validator fallback to unsigned sibling Gemini 3 tool calls", () => {
+    const model = buildGeminiModel({
+      id: "gemini-3.1-pro-preview",
+      name: "Gemini 3.1 Pro Preview",
+    });
+
+    const params = buildGoogleGenerativeAiParams(model, {
+      messages: [
+        {
+          role: "assistant",
+          provider: "google",
+          api: "google-generative-ai",
+          model: "gemini-3.1-pro-preview",
+          stopReason: "toolUse",
+          timestamp: 0,
+          content: [
+            {
+              type: "toolCall",
+              id: "call_math",
+              name: "math_eval",
+              arguments: { expression: "17*23" },
+              thoughtSignature: "real_sig_1",
+            },
+            {
+              type: "toolCall",
+              id: "call_lookup",
+              name: "lookup_fact",
+              arguments: { key: "beta" },
+            },
+            {
+              type: "toolCall",
+              id: "call_transform",
+              name: "string_transform",
+              arguments: { text: "claw", mode: "reverse" },
+            },
+          ],
+        },
+      ],
+    } as never);
+
+    const parts = (params.contents[0] as { parts: Array<Record<string, unknown>> }).parts;
+    expect(parts).toHaveLength(3);
+    expect(parts[0]).toMatchObject({
+      thoughtSignature: "real_sig_1",
+      functionCall: { name: "math_eval", args: { expression: "17*23" } },
+    });
+    expect(parts[1]).toMatchObject({
+      thoughtSignature: "skip_thought_signature_validator",
+      functionCall: { name: "lookup_fact", args: { key: "beta" } },
+    });
+    expect(parts[2]).toMatchObject({
+      thoughtSignature: "skip_thought_signature_validator",
+      functionCall: { name: "string_transform", args: { text: "claw", mode: "reverse" } },
     });
   });
 
