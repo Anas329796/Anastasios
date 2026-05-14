@@ -444,3 +444,74 @@ describe("spawnSubagentDirect seam flow", () => {
     ).toBe(false);
   });
 });
+
+describe("isolated context engine skip", () => {
+  let spawnIsolated: typeof import("./subagent-spawn.js").spawnSubagentDirect;
+  let resetIsolated: typeof import("./subagent-registry.js").resetSubagentRegistryForTests;
+  const resolveContextEngineSpy = vi.fn(async () => ({
+    prepareSubagentSpawn: vi.fn(async () => ({ rollback: vi.fn() })),
+  }));
+  const ensureContextEnginesSpy = vi.fn();
+
+  beforeAll(async () => {
+    const callGateway = vi.fn();
+    const updateStore = vi.fn();
+    const registerRun = vi.fn();
+    const resolveAgent = vi.fn(
+      (cfg: { agents?: { list?: Array<{ id?: string }> } }, agentId: string) =>
+        cfg.agents?.list?.find((agent) => agent.id === agentId),
+    );
+    installAcceptedSubagentGatewayMock(callGateway);
+    updateStore.mockImplementation(
+      async (
+        _storePath: string,
+        mutator: (store: Record<string, Record<string, unknown>>) => unknown,
+      ) => {
+        const store: Record<string, Record<string, unknown>> = {};
+        await mutator(store);
+        return store;
+      },
+    );
+    ({ resetSubagentRegistryForTests: resetIsolated, spawnSubagentDirect: spawnIsolated } =
+      await loadSubagentSpawnModuleForTest({
+        callGatewayMock: callGateway,
+        getRuntimeConfig: () =>
+          createSubagentSpawnTestConfig(os.tmpdir(), {
+            agents: {
+              defaults: { workspace: os.tmpdir() },
+              list: [{ id: "main", workspace: os.tmpdir() }],
+            },
+          }),
+        updateSessionStoreMock: updateStore,
+        registerSubagentRunMock: registerRun,
+        resolveAgentConfig: resolveAgent,
+        resolveSubagentSpawnModelSelection: () => "openai-codex/gpt-5.4",
+        resolveSandboxRuntimeStatus: () => ({ sandboxed: false }),
+        ensureContextEnginesInitializedMock: ensureContextEnginesSpy,
+        resolveContextEngineMock: resolveContextEngineSpy,
+        sessionStorePath: "/tmp/subagent-spawn-isolated-test-store.json",
+      }));
+  });
+
+  beforeEach(() => {
+    resetIsolated();
+    resolveContextEngineSpy.mockClear();
+    ensureContextEnginesSpy.mockClear();
+  });
+
+  it("does not invoke context engine preparation for isolated subagent spawns", async () => {
+    const result = await spawnIsolated(
+      {
+        task: "Reply only with: OK",
+        context: "isolated",
+      },
+      {
+        agentSessionKey: "agent:main:main",
+      },
+    );
+
+    expect(result.status).toBe("accepted");
+    expect(resolveContextEngineSpy).not.toHaveBeenCalled();
+    expect(ensureContextEnginesSpy).not.toHaveBeenCalled();
+  });
+});

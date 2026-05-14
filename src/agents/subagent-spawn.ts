@@ -457,6 +457,15 @@ async function prepareContextEngineSubagentSpawn(params: {
 }): Promise<
   { status: "ok"; preparation?: SubagentSpawnPreparation } | { status: "error"; error: string }
 > {
+  // Isolated subagent spawns should not inherit context-engine state.
+  // Preparing the context engine for isolated runs injects large inherited
+  // payloads that bloat lightweight spawns and cause runaway CPU on local
+  // inference runtimes (e.g. Ollama).  Short-circuit here to keep isolated
+  // runs truly lightweight.
+  if (params.context.mode === "isolated") {
+    return { status: "ok", preparation: undefined };
+  }
+
   try {
     subagentSpawnDeps.ensureContextEnginesInitialized();
     const engine = await subagentSpawnDeps.resolveContextEngine(params.cfg);
