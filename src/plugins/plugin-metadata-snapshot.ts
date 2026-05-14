@@ -31,6 +31,7 @@ export type {
 function resolvePluginMetadataControlPlaneFingerprint(
   params: Pick<LoadPluginMetadataSnapshotParams, "config" | "env" | "workspaceDir"> & {
     index?: InstalledPluginIndex;
+    inventoryFingerprint?: string;
     policyHash?: string;
   },
 ): string {
@@ -235,13 +236,15 @@ function loadPluginMetadataSnapshotImpl(
   const owners = buildPluginMetadataOwnerMaps(manifestRegistry.plugins);
   const ownerMapsMs = performance.now() - ownerMapsStartedAt;
   const totalMs = performance.now() - totalStartedAt;
+  const inventoryFingerprint = resolveInstalledManifestRegistryIndexFingerprint(index);
 
   return {
     policyHash: index.policyHash,
+    inventoryFingerprint,
     configFingerprint: resolvePluginMetadataControlPlaneFingerprint({
       config: params.config,
       env: params.env,
-      index,
+      inventoryFingerprint,
       policyHash: index.policyHash,
       workspaceDir: params.workspaceDir,
     }),
