@@ -27,6 +27,7 @@ Docs: https://docs.openclaw.ai
 - CLI/plugins: keep bare plugin and parent-command help on the lightweight path, avoiding plugin registry discovery before rendering help.
 - CLI tables: preserve muted/color styling on wrapped continuation lines after multiline cells, keeping `openclaw plugins list` descriptions readable.
 - Process execution: collapse case-insensitive duplicate child environment keys on Windows so caller-provided overrides such as `PATH` cannot be shadowed by host `Path`.
+- Browser CLI: request the existing `operator.admin` gateway scope explicitly for browser control commands, avoiding unnecessary scope-upgrade approval loops. Fixes #81555. (#81716) Thanks @joshavant.
 - iOS: restore first-use Contacts, Calendar, and Reminders permission prompts and add Privacy & Access status/actions in Settings. Thanks @BunsDev.
 - Canvas: return not found for malformed percent-encoded Canvas/A2UI/document asset paths and keep decoded parent traversal blocked before path normalization.
 - Telegram: allow trusted local Bot API media files whose filenames start with dots instead of falling back to remote download.
@@ -150,6 +151,7 @@ Docs: https://docs.openclaw.ai
 - Telegram/groups: in single-account setups, treat an explicit empty `accounts.<id>.groups: {}` map the same as undefined so the root `channels.telegram.groups` allowlist still applies, instead of silently dropping every group update under the default `groupPolicy: "allowlist"`. Multi-account semantics are unchanged so per-account explicit-empty groups still scope-disable a single account without affecting siblings; the explicit way to block all groups for any account remains `groupPolicy: "disabled"`. Fixes #79427. (#81030) Thanks @kinjitakabe.
 - Codex (app-server): project user-configured `mcp.servers` into new Codex thread configs, matching the codex-cli runtime's existing `-c mcp_servers=...` behavior so app-server-runtime agents see the same user MCP servers the CLI runtime already exposes. Plugin-curated apps remain attached via the separate `apps` config patch. Fixes #80814. Thanks @kinjitakabe.
 - Enforce Slack plugin approval button authorization [AI]. (#80899) Thanks @pgondhi987.
+- Mattermost: log a structured `mattermost no-visible-reply` diagnostic when a substantive (non-reasoning) final reply payload reaches `deliverMattermostReplyPayload` but the underlying `deliverTextOrMediaReply` returns `"empty"` — previously the run completed with a misleading `delivered reply to <channel>` log even though no Mattermost API send happened, masking silent completions in channel/thread contexts. No behavior change; the diagnostic surfaces the failure so operators can detect it instead of seeing the agent appear to go silent. Fixes #80501. Thanks @robbyproc87.
 - Recognize PowerShell -ec inline commands [AI]. (#80893) Thanks @pgondhi987.
 - fix(qqbot): authorize approval button callbacks [AI]. (#80892) Thanks @pgondhi987.
 - Telegram: render supported HTML tags in streamed and durable replies instead of showing literal markup. (#80977)
