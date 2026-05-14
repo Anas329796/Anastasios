@@ -3331,20 +3331,6 @@
       "kind": "html-attribute",
       "name": "placeholder",
       "path": "ui/src/ui/views/cron.ts",
-      "text": "+1555... or chat id"
-    },
-    {
-      "count": 1,
-      "kind": "html-attribute",
-      "name": "placeholder",
-      "path": "ui/src/ui/views/cron.ts",
-      "text": "Account ID for multi-account setups"
-    },
-    {
-      "count": 1,
-      "kind": "html-attribute",
-      "name": "placeholder",
-      "path": "ui/src/ui/views/cron.ts",
       "text": "agent:main:main"
     },
     {
@@ -3353,111 +3339,6 @@
       "name": "placeholder",
       "path": "ui/src/ui/views/cron.ts",
       "text": "default"
-    },
-    {
-      "count": 1,
-      "kind": "html-text",
-      "name": "text",
-      "path": "ui/src/ui/views/cron.ts",
-      "text": "+ New"
-    },
-    {
-      "count": 1,
-      "kind": "html-text",
-      "name": "text",
-      "path": "ui/src/ui/views/cron.ts",
-      "text": "Announce (via channel)"
-    },
-    {
-      "count": 1,
-      "kind": "html-text",
-      "name": "text",
-      "path": "ui/src/ui/views/cron.ts",
-      "text": "Consecutive errors before alerting."
-    },
-    {
-      "count": 1,
-      "kind": "html-text",
-      "name": "text",
-      "path": "ui/src/ui/views/cron.ts",
-      "text": "Control when this job sends repeated-failure alerts."
-    },
-    {
-      "count": 1,
-      "kind": "html-text",
-      "name": "text",
-      "path": "ui/src/ui/views/cron.ts",
-      "text": "Custom per-job settings"
-    },
-    {
-      "count": 1,
-      "kind": "html-text",
-      "name": "text",
-      "path": "ui/src/ui/views/cron.ts",
-      "text": "Disable for this job"
-    },
-    {
-      "count": 1,
-      "kind": "html-text",
-      "name": "text",
-      "path": "ui/src/ui/views/cron.ts",
-      "text": "Inherit global setting"
-    },
-    {
-      "count": 1,
-      "kind": "html-text",
-      "name": "text",
-      "path": "ui/src/ui/views/cron.ts",
-      "text": "Light context"
-    },
-    {
-      "count": 1,
-      "kind": "html-text",
-      "name": "text",
-      "path": "ui/src/ui/views/cron.ts",
-      "text": "Minimum seconds between alerts."
-    },
-    {
-      "count": 1,
-      "kind": "html-text",
-      "name": "text",
-      "path": "ui/src/ui/views/cron.ts",
-      "text": "Optional channel account ID for multi-account setups."
-    },
-    {
-      "count": 1,
-      "kind": "html-text",
-      "name": "text",
-      "path": "ui/src/ui/views/cron.ts",
-      "text": "Optional recipient override for failure alerts."
-    },
-    {
-      "count": 1,
-      "kind": "html-text",
-      "name": "text",
-      "path": "ui/src/ui/views/cron.ts",
-      "text": "Optional routing key for job delivery and wake routing."
-    },
-    {
-      "count": 1,
-      "kind": "html-text",
-      "name": "text",
-      "path": "ui/src/ui/views/cron.ts",
-      "text": "Run if due"
-    },
-    {
-      "count": 1,
-      "kind": "html-text",
-      "name": "text",
-      "path": "ui/src/ui/views/cron.ts",
-      "text": "Use lightweight bootstrap context for this agent job."
-    },
-    {
-      "count": 1,
-      "kind": "html-text",
-      "name": "text",
-      "path": "ui/src/ui/views/cron.ts",
-      "text": "Webhook (HTTP POST)"
     },
     {
       "count": 1,
