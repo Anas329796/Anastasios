@@ -2,6 +2,7 @@ import type { SessionAcpMeta } from "../config/sessions/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { logVerbose } from "../globals.js";
 import { formatErrorMessage } from "../infra/errors.js";
+import { getSessionBindingService } from "../infra/outbound/session-binding-service.js";
 import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import { getAcpSessionManager } from "./control-plane/manager.js";
 import { resolveConfiguredAcpBindingSpecBySessionKey } from "./persistent-bindings.resolve.js";
@@ -11,7 +12,12 @@ import {
   type ConfiguredAcpBindingSpec,
   type ResolvedConfiguredAcpBinding,
 } from "./persistent-bindings.types.js";
+import { toAcpRuntimeError } from "./runtime/errors.js";
 import { readAcpSessionEntry } from "./runtime/session-meta.js";
+import {
+  isAcpStaleSessionError,
+  unbindStaleAcpSessionBindings as unbindStaleAcpSessionBindingRecords,
+} from "./runtime/stale-session.js";
 
 function sessionMatchesConfiguredBinding(params: {
   cfg: OpenClawConfig;
@@ -135,6 +141,25 @@ export async function ensureConfiguredAcpBindingReady(params: {
   };
 }
 
+async function cleanupStaleAcpSessionBindings(params: {
+  sessionKey: string;
+  message: string;
+}): Promise<void> {
+  const result = await unbindStaleAcpSessionBindingRecords({
+    targetSessionKey: params.sessionKey,
+    unbind: (input) => getSessionBindingService().unbind(input),
+  });
+  if (result.ok) {
+    logVerbose(
+      `acp-configured-binding: removed ${result.removedCount} stale binding(s) for ${params.sessionKey} after reset failure: ${params.message}`,
+    );
+    return;
+  }
+  logVerbose(
+    `acp-configured-binding: failed to unbind stale bindings for ${params.sessionKey}: ${formatErrorMessage(result.error)}`,
+  );
+}
+
 export async function resetAcpSessionInPlace(params: {
   cfg: OpenClawConfig;
   sessionKey: string;
@@ -171,7 +196,7 @@ export async function resetAcpSessionInPlace(params: {
   const acpManager = getAcpSessionManager();
 
   try {
-    await acpManager.closeSession({
+    const closeResult = await acpManager.closeSession({
       cfg: params.cfg,
       sessionKey,
       reason: `${params.reason}-in-place-reset`,
@@ -180,10 +205,39 @@ export async function resetAcpSessionInPlace(params: {
       allowBackendUnavailable: true,
       requireAcpSession: false,
     });
+    const runtimeNotice =
+      typeof closeResult.runtimeNotice === "string" ? closeResult.runtimeNotice : "";
+    if (
+      runtimeNotice &&
+      isAcpStaleSessionError({ code: "ACP_SESSION_INIT_FAILED", message: runtimeNotice })
+    ) {
+      await cleanupStaleAcpSessionBindings({
+        sessionKey,
+        message: runtimeNotice,
+      });
+      return {
+        ok: false,
+        skipped: true,
+        error: runtimeNotice,
+      };
+    }
 
     return { ok: true };
   } catch (error) {
-    const message = formatErrorMessage(error);
+    const acpError = toAcpRuntimeError({
+      error,
+      fallbackCode: "ACP_SESSION_INIT_FAILED",
+      fallbackMessage: "ACP session reset failed.",
+    });
+    const message = acpError.message;
+    if (isAcpStaleSessionError({ code: acpError.code, message })) {
+      await cleanupStaleAcpSessionBindings({ sessionKey, message });
+      return {
+        ok: false,
+        skipped: true,
+        error: message,
+      };
+    }
     logVerbose(`acp-configured-binding: failed reset for ${sessionKey}: ${message}`);
     return {
       ok: false,
