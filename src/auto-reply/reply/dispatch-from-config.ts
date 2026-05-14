@@ -635,6 +635,9 @@ export async function dispatchReplyFromConfig(
     payload: ReplyPayload,
     mode: "additive" | "terminal",
   ): Promise<boolean> => {
+    if (suppressAutomaticSourceDelivery) {
+      return false;
+    }
     const result = await routeReplyToOriginating(payload);
     if (result) {
       if (!result.ok) {
@@ -823,10 +826,14 @@ export async function dispatchReplyFromConfig(
 
   if (pluginOwnedBinding) {
     touchConversationBindingRecord(pluginOwnedBinding.bindingId);
-    if (suppressDelivery) {
+    const shouldSkipPluginClaimForSuppressedDelivery =
+      sendPolicyDenied || (suppressDelivery && !suppressAutomaticSourceDelivery);
+    if (shouldSkipPluginClaimForSuppressedDelivery) {
       // Plugin-bound inbound handlers typically emit outbound replies we
-      // cannot rewind. When automatic delivery is suppressed, skip the plugin
-      // claim and fall through to normal suppressed agent processing.
+      // cannot rewind. When automatic delivery is explicitly denied, skip the
+      // plugin claim and fall through to normal suppressed agent processing.
+      // message_tool_only is the normal visible-reply mode for group chats and
+      // must still let the bound plugin own the turn unless sendPolicy denied it.
       logVerbose(
         `plugin-bound inbound skipped under ${deliverySuppressionReason} (plugin=${pluginOwnedBinding.pluginId} session=${sessionKey ?? "unknown"}); falling through to suppressed agent processing`,
       );

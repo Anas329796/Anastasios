@@ -96,7 +96,7 @@ describe("runtime conversation binding route", () => {
     });
   });
 
-  it("touches plugin-owned bindings without rewriting the channel route", () => {
+  it("touches plugin-owned bindings without rewriting the channel session", () => {
     const route = createRoute();
     const binding = createBinding({
       metadata: {
