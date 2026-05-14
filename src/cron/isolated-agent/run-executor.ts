@@ -77,6 +77,7 @@ export type CronExecutionResult = {
   liveSelection: CronLiveSelection;
   emptyOutputRepairAttempted?: boolean;
   emptyOutputRepairFailed?: boolean;
+  emptyOutputHadFreshDescendants?: boolean;
 };
 
 function buildEmptyOutputRepairPrompt(commandBody: string): string {
@@ -400,6 +401,7 @@ export async function executeCronRun(params: {
     didDescendantStartSinceRunStart(entry, runStartedAt);
   let emptyOutputRepairAttempted = false;
   let emptyOutputRepairFailed = false;
+  let emptyOutputHadFreshDescendants = false;
   const MAX_MODEL_SWITCH_RETRIES = 2;
   let modelSwitchRetries = 0;
   while (true) {
@@ -521,6 +523,7 @@ export async function executeCronRun(params: {
         didDescendantStartDuringRun,
       );
       hasActiveDescendants = countActiveDescendantRuns(params.runSessionKey) > 0;
+      emptyOutputHadFreshDescendants = hasFreshDescendants;
     }
 
     if (shouldRetryEmptyOutput && !hasFreshDescendants && !hasActiveDescendants) {
@@ -575,5 +578,6 @@ export async function executeCronRun(params: {
     liveSelection: params.liveSelection,
     emptyOutputRepairAttempted,
     emptyOutputRepairFailed,
+    emptyOutputHadFreshDescendants,
   };
 }

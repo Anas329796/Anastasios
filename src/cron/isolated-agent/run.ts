@@ -1026,6 +1026,7 @@ async function finalizeCronRun(params: {
     deliveryBestEffort: resolveCronDeliveryBestEffort(prepared.input.job),
     deliveryPayloadHasStructuredContent,
     deliveryPayloads,
+    emptyOutputHadFreshDescendants: execution.emptyOutputHadFreshDescendants,
     synthesizedText,
     ttsAuto: prepared.cronSession.sessionEntry.ttsAuto,
     summary,
