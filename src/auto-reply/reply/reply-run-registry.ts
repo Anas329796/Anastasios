@@ -4,6 +4,7 @@ import {
 } from "../../logging/diagnostic-run-activity.js";
 import { resolveGlobalSingleton } from "../../shared/global-singleton.js";
 import { normalizeOptionalString } from "../../shared/string-coerce.js";
+import { getCurrentGeneration, incrementGeneration } from "./run-generation.js";
 
 export type ReplyRunKey = string;
 
@@ -53,6 +54,17 @@ export type ReplyOperation = {
   readonly resetTriggered: boolean;
   readonly phase: ReplyOperationPhase;
   readonly result: ReplyOperationResult | null;
+  /**
+   * Per-session run generation captured when this operation began. Downstream
+   * code that needs to fence stale side effects can compare this against
+   * `isCurrentGeneration(key, runGeneration)` from `./run-generation.js`.
+   */
+  readonly runGeneration: number;
+  /**
+   * True when the session's current generation is still this operation's
+   * captured generation. Convenience wrapper over `isCurrentGeneration`.
+   */
+  isCurrent(): boolean;
   setPhase(next: "queued" | "preflight_compacting" | "memory_flushing" | "running"): void;
   updateSessionId(nextSessionId: string): void;
   attachBackend(handle: ReplyBackendHandle): void;
@@ -240,6 +252,10 @@ export function createReplyOperation(params: {
   let phase: ReplyOperationPhase = "queued";
   let result: ReplyOperationResult | null = null;
   let stateCleared = false;
+  // Capture the session's current generation at run-begin. Any future
+  // invalidation (user abort, new-message takeover) bumps the registry so
+  // downstream fences can drop stale output keyed to this captured value.
+  const capturedGeneration = getCurrentGeneration(sessionKey);
 
   const clearState = () => {
     if (stateCleared) {
@@ -267,6 +283,10 @@ export function createReplyOperation(params: {
     if (opts?.abortedCode && !result) {
       result = { kind: "aborted", code: opts.abortedCode };
     }
+    // Invalidate this session's generation so any downstream callers
+    // still holding `capturedGeneration` see `isCurrent()` flip to false
+    // and drop their pending side effects (tools, deltas, typing, finals).
+    incrementGeneration(sessionKey);
     phase = "aborted";
     abortInternally(abortReason);
     getAttachedBackend(operation)?.cancel(reason);
@@ -304,6 +324,12 @@ export function createReplyOperation(params: {
     },
     get result() {
       return result;
+    },
+    get runGeneration() {
+      return capturedGeneration;
+    },
+    isCurrent() {
+      return getCurrentGeneration(sessionKey) === capturedGeneration;
     },
     setPhase(next) {
       if (result) {
