@@ -91,10 +91,10 @@ export async function persistSessionUsageUpdate(params: {
   cliSessionId?: string;
   cliSessionBinding?: import("../../config/sessions.js").CliSessionBinding;
   logLabel?: string;
-}): Promise<void> {
+}): Promise<boolean> {
   const { storePath, sessionKey } = params;
   if (!storePath || !sessionKey) {
-    return;
+    return false;
   }
 
   const label = params.logLabel ? `${params.logLabel} ` : "";
@@ -165,10 +165,11 @@ export async function persistSessionUsageUpdate(params: {
           return applyCliSessionIdToSessionPatch(params, entry, patch);
         },
       });
+      return true;
     } catch (err) {
       logVerbose(`failed to persist ${label}usage update: ${String(err)}`);
+      return false;
     }
-    return;
   }
 
   if (
@@ -194,8 +195,11 @@ export async function persistSessionUsageUpdate(params: {
           return applyCliSessionIdToSessionPatch(params, entry, patch);
         },
       });
+      return true;
     } catch (err) {
       logVerbose(`failed to persist ${label}model/context update: ${String(err)}`);
+      return false;
     }
   }
+  return false;
 }

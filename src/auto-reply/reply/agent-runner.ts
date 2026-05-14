@@ -1724,7 +1724,7 @@ export async function runReplyAgent(params: {
       }) ??
       DEFAULT_CONTEXT_TOKENS;
 
-    await persistRunSessionUsage({
+    const didPersistRunSessionUsage = await persistRunSessionUsage({
       storePath,
       sessionKey,
       cfg,
@@ -1741,7 +1741,7 @@ export async function runReplyAgent(params: {
       cliSessionBinding,
     });
 
-    if (autoFallbackSelectionToClear) {
+    if (autoFallbackSelectionToClear && didPersistRunSessionUsage) {
       const currentFallbackStateEntry =
         (sessionKey ? activeSessionStore?.[sessionKey] : undefined) ?? fallbackStateEntry;
       if (

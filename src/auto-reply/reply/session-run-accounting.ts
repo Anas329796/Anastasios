@@ -66,8 +66,10 @@ export function resolveRunSessionModelPersistence(params: {
   };
 }
 
-export async function persistRunSessionUsage(params: PersistRunSessionUsageParams): Promise<void> {
-  await persistSessionUsageUpdate(params);
+export async function persistRunSessionUsage(
+  params: PersistRunSessionUsageParams,
+): Promise<boolean> {
+  return await persistSessionUsageUpdate(params);
 }
 
 export async function incrementRunCompactionCount(
