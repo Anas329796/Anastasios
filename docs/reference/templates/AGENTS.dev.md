@@ -35,7 +35,7 @@ git commit -m "Add agent workspace"
 
 ## Daily memory (recommended)
 
-- Keep a short daily log at memory/YYYY-MM-DD.md (create memory/ if needed).
+- Keep a short daily log at memory/YYYY-MM-DD.md (create memory/ if needed). Read existing notes before updating them.
 - On session start, read today + yesterday if present.
 - Capture durable facts, preferences, and decisions; avoid secrets.
 
