@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { captureEnv } from "../test-utils/env.js";
 import { resetProcessRegistryForTests } from "./bash-process-registry.js";
-import { createExecTool } from "./bash-tools.exec.js";
+import { __testing, createExecTool } from "./bash-tools.exec.js";
 import { resolveShellFromPath } from "./shell-utils.js";
 
 const isWin = process.platform === "win32";
@@ -9,6 +9,7 @@ const defaultShell = isWin
   ? undefined
   : process.env.OPENCLAW_TEST_SHELL || resolveShellFromPath("bash") || process.env.SHELL || "sh";
 const longDelayCmd = isWin ? "Start-Sleep -Seconds 5" : "sleep 5";
+const fakeSecretOutput = "OPENAI_API_KEY=sk-proj-redaction-canary-1234567890";
 
 describe("exec foreground failures", () => {
   let envSnapshot: ReturnType<typeof captureEnv>;
@@ -54,6 +55,26 @@ describe("exec foreground failures", () => {
     expect(details.aggregated).toBe("");
     expect(details.durationMs).toBeTypeOf("number");
     expect(details.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("redacts secret-shaped stdout before returning foreground results", () => {
+    const result = __testing.buildExecForegroundResult({
+      outcome: {
+        status: "completed",
+        exitCode: 0,
+        exitSignal: null,
+        durationMs: 1,
+        aggregated: `${fakeSecretOutput}\n`,
+        timedOut: false,
+      },
+    });
+
+    const text = (result.content[0] as { text?: string }).text ?? "";
+    const details = result.details as { aggregated?: string };
+    expect(text).not.toContain(fakeSecretOutput);
+    expect(details.aggregated).not.toContain(fakeSecretOutput);
+    expect(text).toContain("OPENAI_API_KEY=sk-pro…7890");
+    expect(details.aggregated).toContain("OPENAI_API_KEY=sk-pro…7890");
   });
 
   it("rejects invalid host values before launching a command", async () => {

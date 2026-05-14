@@ -19,6 +19,7 @@ import {
   resolveShellEnvFallbackTimeoutMs,
 } from "../infra/shell-env.js";
 import { logInfo } from "../logger.js";
+import { redactSecrets, redactToolPayloadText } from "../logging/redact.js";
 import { parseAgentSessionKey, resolveAgentIdFromSessionKey } from "../routing/session-key.js";
 import { createLazyImportLoader } from "../shared/lazy-promise.js";
 import {
@@ -73,21 +74,25 @@ function buildExecForegroundResult(params: {
   warningText?: string;
 }): AgentToolResult<ExecToolDetails> {
   const warningText = params.warningText?.trim() ? `${params.warningText}\n\n` : "";
+  const aggregated = redactToolPayloadText(params.outcome.aggregated);
   if (params.outcome.status === "failed") {
-    return failedTextResult(`${warningText}${params.outcome.reason}`, {
-      status: "failed",
-      exitCode: params.outcome.exitCode ?? null,
-      durationMs: params.outcome.durationMs,
-      aggregated: params.outcome.aggregated,
-      timedOut: params.outcome.timedOut,
-      cwd: params.cwd,
-    });
+    return failedTextResult(
+      `${warningText}${redactToolPayloadText(params.outcome.reason)}`,
+      redactSecrets({
+        status: "failed",
+        exitCode: params.outcome.exitCode ?? null,
+        durationMs: params.outcome.durationMs,
+        aggregated,
+        timedOut: params.outcome.timedOut,
+        cwd: params.cwd,
+      }),
+    );
   }
-  return textResult(`${warningText}${renderExecOutputText(params.outcome.aggregated)}`, {
+  return textResult(`${warningText}${renderExecOutputText(aggregated)}`, {
     status: "completed",
     exitCode: params.outcome.exitCode,
     durationMs: params.outcome.durationMs,
-    aggregated: params.outcome.aggregated,
+    aggregated,
     cwd: params.cwd,
   });
 }
@@ -1737,6 +1742,7 @@ export function createExecTool(
 export const execTool = createExecTool();
 
 export const __testing = {
+  buildExecForegroundResult,
   parseOpenClawChannelsLoginShellCommand,
   validateScriptFileForShellBleed,
 };
