@@ -374,6 +374,7 @@ async function deliverReplies(params: {
           content: rawContent,
           metadata: {
             channel: "signal",
+            ...(reply.mediaUrls.length > 0 ? { mediaUrls: reply.mediaUrls } : {}),
           },
         },
         {
