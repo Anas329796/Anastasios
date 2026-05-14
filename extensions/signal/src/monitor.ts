@@ -1,5 +1,6 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import type { SignalReactionNotificationMode } from "openclaw/plugin-sdk/config-contracts";
+import { getGlobalHookRunner } from "openclaw/plugin-sdk/plugin-runtime";
 import {
   detectMime,
   estimateBase64DecodedBytes,
@@ -361,11 +362,39 @@ async function deliverReplies(params: {
 }) {
   const { replies, target, baseUrl, account, accountId, runtime, maxBytes, textLimit, chunkMode } =
     params;
+  const hookRunner = getGlobalHookRunner();
+  const hasMessageSendingHooks = hookRunner?.hasHooks("message_sending") ?? false;
   for (const payload of replies) {
     const reply = resolveSendableOutboundReplyParts(payload);
+    const rawContent = reply.text;
+    if (hasMessageSendingHooks && rawContent !== undefined) {
+      const hookResult = await hookRunner?.runMessageSending(
+        {
+          to: target,
+          content: rawContent,
+          metadata: {
+            channel: "signal",
+            ...(reply.mediaUrls.length > 0 ? { mediaUrls: reply.mediaUrls } : {}),
+          },
+        },
+        {
+          channelId: "signal",
+          accountId,
+          conversationId: target,
+        },
+      );
+      if (hookResult?.cancel) {
+        continue;
+      }
+      if (typeof hookResult?.content === "string" && hookResult.content !== rawContent) {
+        payload.text = hookResult.content;
+      }
+    }
+    const updatedReply =
+      payload.text !== rawContent ? resolveSendableOutboundReplyParts(payload) : reply;
     const delivered = await deliverTextOrMediaReply({
       payload,
-      text: reply.text,
+      text: updatedReply.text,
       chunkText: (value) => chunkTextWithMode(value, textLimit, chunkMode),
       sendText: async (chunk) => {
         await sendMessageSignal(target, chunk, {
