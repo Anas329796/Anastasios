@@ -13,12 +13,16 @@ import {
   requireValidExecTarget,
 } from "../infra/exec-approvals.js";
 import { resolveExecSafeBinRuntimePolicy } from "../infra/exec-safe-bin-runtime-policy.js";
-import { sanitizeHostExecEnvWithDiagnostics } from "../infra/host-env-security.js";
+import {
+  isDangerousHostEnvOverrideVarName,
+  sanitizeHostExecEnvWithDiagnostics,
+} from "../infra/host-env-security.js";
 import {
   getShellPathFromLoginShell,
   resolveShellEnvFallbackTimeoutMs,
 } from "../infra/shell-env.js";
 import { logInfo } from "../logger.js";
+import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
 import { parseAgentSessionKey, resolveAgentIdFromSessionKey } from "../routing/session-key.js";
 import { createLazyImportLoader } from "../shared/lazy-promise.js";
 import {
@@ -1521,12 +1525,41 @@ export function createExecTool(
         applyPathPrepend(env, defaultPathPrepend);
       }
 
+      // Let plugins contribute channel-specific env vars. Filter out keys that
+      // the host env security policy marks as dangerous overrides (e.g. LD_PRELOAD,
+      // proxy/TLS pivots) so plugin hooks cannot silently bypass the sanitizer.
+      // PATH overrides are intentionally allowed — plugins may prepend custom tool dirs.
+      let pluginEnv: Record<string, string> | undefined;
+      const hookRunner = getGlobalHookRunner();
+      if (hookRunner?.hasHooks("resolve_exec_env")) {
+        const rawPluginEnv = await hookRunner.runResolveExecEnv(
+          {
+            sessionKey: defaults?.sessionKey,
+            toolName: "exec",
+            host,
+          },
+          {
+            agentId,
+            sessionKey: defaults?.sessionKey,
+            messageProvider: defaults?.messageProvider,
+            channelId: defaults?.currentChannelId,
+          },
+        );
+        pluginEnv = {};
+        for (const [key, value] of Object.entries(rawPluginEnv)) {
+          if (!isDangerousHostEnvOverrideVarName(key)) {
+            pluginEnv[key] = value;
+          }
+        }
+        Object.assign(env, pluginEnv);
+      }
+
       if (host === "node") {
         return executeNodeHostCommand({
           command: params.command,
           workdir,
           env,
-          requestedEnv: params.env,
+          requestedEnv: { ...params.env, ...pluginEnv },
           requestedNode: params.node?.trim(),
           boundNode: defaults?.node?.trim(),
           sessionKey: defaults?.sessionKey,
