@@ -2974,6 +2974,8 @@ export async function runEmbeddedAttempt(
           modelId: params.model.id,
           trigger: params.trigger,
           ...buildAgentHookContextChannelFields(params),
+          ...(params.senderId ? { senderId: params.senderId } : {}),
+          ...(params.currentChannelId ? { chatId: params.currentChannelId } : {}),
         };
         const promptBuildMessages =
           pruneProcessedHistoryImages(activeSession.messages) ?? activeSession.messages;
@@ -3436,6 +3438,8 @@ export async function runEmbeddedAttempt(
                   workspaceDir: params.workspaceDir,
                   trigger: params.trigger,
                   ...buildAgentHookContextChannelFields(params),
+                  ...(params.senderId ? { senderId: params.senderId } : {}),
+                  ...(params.currentChannelId ? { chatId: params.currentChannelId } : {}),
                 },
               )
               .catch((err) => {
@@ -3894,6 +3898,8 @@ export async function runEmbeddedAttempt(
                 workspaceDir: params.workspaceDir,
                 trigger: params.trigger,
                 ...buildAgentHookContextChannelFields(params),
+                ...(params.senderId ? { senderId: params.senderId } : {}),
+                ...(params.currentChannelId ? { chatId: params.currentChannelId } : {}),
               },
             )
             .catch((err) => {
@@ -4004,6 +4010,8 @@ export async function runEmbeddedAttempt(
               workspaceDir: params.workspaceDir,
               trigger: params.trigger,
               ...buildAgentHookContextChannelFields(params),
+              ...(params.senderId ? { senderId: params.senderId } : {}),
+              ...(params.currentChannelId ? { chatId: params.currentChannelId } : {}),
             },
           )
           .catch((err) => {
