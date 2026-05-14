@@ -28,9 +28,15 @@ describe("group runtime loading", () => {
       silentReplyPolicy: "allow",
       silentToken: "NO_REPLY",
     });
+    expect(groupChatContext).toContain("You are in a WhatsApp group chat.");
     expect(groupChatContext).toContain(
-      "You are in a WhatsApp group chat. Your replies are automatically sent to this group chat. Do not use the message tool to send to this same group - just reply normally.",
+      "Do not use the message tool to send plain text to this same group",
     );
+    expect(groupChatContext).toContain(
+      "Exception: when a live decision needs channel-native interactive controls such as inline buttons",
+    );
+    expect(groupChatContext).toContain("presentation.blocks buttons");
+    expect(groupChatContext).toContain("final assistant turn silent to avoid a duplicate");
     expect(groupChatContext).toContain("Minimize empty lines and use normal chat conventions");
     expect(groupChatContext).not.toContain("wrap bare URLs");
     expect(groupChatContext).toContain("If addressed to someone else");
