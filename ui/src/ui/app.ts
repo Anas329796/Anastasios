@@ -894,6 +894,17 @@ export class OpenClawApp extends LitElement {
     this.requestUpdate();
   }
 
+  setDocumentTitleSyncEnabled(enabled: boolean) {
+    if (this.settings.documentTitleSyncEnabled === enabled) {
+      return;
+    }
+    applySettingsInternal(this as unknown as Parameters<typeof applySettingsInternal>[0], {
+      ...this.settings,
+      documentTitleSyncEnabled: enabled,
+    });
+    this.requestUpdate();
+  }
+
   setTextScale(value: number) {
     applySettingsInternal(this as unknown as Parameters<typeof applySettingsInternal>[0], {
       ...this.settings,

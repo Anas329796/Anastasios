@@ -57,7 +57,14 @@ type LifecycleHost = {
   controlUiResponsivenessObserver?: { disconnect: () => void } | null;
   popStateHandler: () => void;
   topbarObserver: ResizeObserver | null;
+  settings?: {
+    documentTitleSyncEnabled?: boolean;
+    token?: string | null;
+  } | null;
 };
+
+// Matches the static <title> in ui/index.html; used when the per-agent title sync is disabled.
+const STATIC_DOCUMENT_TITLE = "OpenClaw Control";
 
 export function handleConnected(host: LifecycleHost) {
   const connectGeneration = ++host.connectGeneration;
@@ -142,7 +149,37 @@ export function handleDisconnected(host: LifecycleHost) {
   host.controlUiResponsivenessObserver = null;
 }
 
+// Once gateway.controlUi.title (static instance-wide title, see #51067) lands,
+// give it precedence over the per-agent assistantName below.
+export function syncDocumentTitleFromHost(host: LifecycleHost): void {
+  if (typeof document === "undefined") {
+    return;
+  }
+  const enabled = host.settings?.documentTitleSyncEnabled !== false;
+  if (!enabled) {
+    if (document.title !== STATIC_DOCUMENT_TITLE) {
+      document.title = STATIC_DOCUMENT_TITLE;
+    }
+    return;
+  }
+  const name =
+    (typeof host.assistantName === "string" && host.assistantName.trim()) ||
+    (typeof host.assistantAgentId === "string" && host.assistantAgentId && host.assistantAgentId.trim()) ||
+    "Control";
+  const next = `${name} \u00b7 OpenClaw`;
+  if (document.title !== next) {
+    document.title = next;
+  }
+}
+
 export function handleUpdated(host: LifecycleHost, changed: Map<PropertyKey, unknown>) {
+  if (
+    changed.has("assistantName") ||
+    changed.has("assistantAgentId") ||
+    changed.has("settings")
+  ) {
+    syncDocumentTitleFromHost(host);
+  }
   if (host.tab === "chat" && host.chatManualRefreshInFlight) {
     return;
   }

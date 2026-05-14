@@ -207,6 +207,7 @@ describe("loadSettings default gateway URL derivation", () => {
       navWidth: 220,
       navGroupsCollapsed: {},
       borderRadius: 50,
+      documentTitleSyncEnabled: true,
       textScale: 100,
       sessionsByGateway: {
         "wss://gateway.example:8443/openclaw": {
@@ -242,6 +243,7 @@ describe("loadSettings default gateway URL derivation", () => {
       navWidth: 220,
       navGroupsCollapsed: {},
       borderRadius: 50,
+      documentTitleSyncEnabled: true,
       textScale: 100,
     });
 
@@ -275,6 +277,7 @@ describe("loadSettings default gateway URL derivation", () => {
       navWidth: 220,
       navGroupsCollapsed: {},
       borderRadius: 50,
+      documentTitleSyncEnabled: true,
     });
 
     saveSettings({
@@ -293,6 +296,7 @@ describe("loadSettings default gateway URL derivation", () => {
       navWidth: 220,
       navGroupsCollapsed: {},
       borderRadius: 50,
+      documentTitleSyncEnabled: true,
     });
 
     const settings = loadSettings();
@@ -323,6 +327,7 @@ describe("loadSettings default gateway URL derivation", () => {
       navWidth: 220,
       navGroupsCollapsed: {},
       borderRadius: 50,
+      documentTitleSyncEnabled: true,
     });
     const settings = loadSettings();
     expect(settings.gatewayUrl).toBe(gwUrl);
@@ -342,6 +347,7 @@ describe("loadSettings default gateway URL derivation", () => {
       navWidth: 220,
       navGroupsCollapsed: {},
       borderRadius: 50,
+      documentTitleSyncEnabled: true,
       textScale: 100,
       sessionsByGateway: {
         [gwUrl]: {
@@ -422,6 +428,7 @@ describe("loadSettings default gateway URL derivation", () => {
       navWidth: 220,
       navGroupsCollapsed: {},
       borderRadius: 50,
+      documentTitleSyncEnabled: true,
     });
     saveSettings({
       gatewayUrl: gwUrl,
@@ -438,6 +445,7 @@ describe("loadSettings default gateway URL derivation", () => {
       navWidth: 220,
       navGroupsCollapsed: {},
       borderRadius: 50,
+      documentTitleSyncEnabled: true,
     });
 
     expect(loadSettings().token).toBe("");
@@ -467,6 +475,7 @@ describe("loadSettings default gateway URL derivation", () => {
       navWidth: 320,
       navGroupsCollapsed: {},
       borderRadius: 50,
+      documentTitleSyncEnabled: true,
     });
 
     const scopedKey = `openclaw.control.settings.v1:${gwUrl}`;
@@ -503,6 +512,7 @@ describe("loadSettings default gateway URL derivation", () => {
       navWidth: 220,
       navGroupsCollapsed: {},
       borderRadius: 50,
+      documentTitleSyncEnabled: true,
       customTheme,
     });
 
@@ -534,6 +544,7 @@ describe("loadSettings default gateway URL derivation", () => {
         navWidth: 220,
         navGroupsCollapsed: {},
         borderRadius: 50,
+        documentTitleSyncEnabled: true,
         customTheme: {
           sourceUrl: "https://tweakcn.com/themes/broken",
           themeId: "broken",
@@ -579,6 +590,7 @@ describe("loadSettings default gateway URL derivation", () => {
       navWidth: 220,
       navGroupsCollapsed: {},
       borderRadius: 50,
+      documentTitleSyncEnabled: true,
     });
 
     const settings = loadSettings();
@@ -623,6 +635,7 @@ describe("loadSettings default gateway URL derivation", () => {
       navWidth: 220,
       navGroupsCollapsed: {},
       borderRadius: 50,
+      documentTitleSyncEnabled: true,
     });
 
     const persisted = JSON.parse(localStorage.getItem(scopedKey) ?? "{}");
