@@ -247,6 +247,11 @@ export type SessionMaintenanceConfig = {
    * Default: 80% of maxDiskBytes.
    */
   highWaterBytes?: number | string;
+  /**
+   * Session keys that should never be pruned, even if they exceed retention limits.
+   * Useful for preserving primary sessions like the main WebUI session.
+   */
+  preserveKeys?: string[];
 };
 
 export type LoggingConfig = {
