@@ -332,6 +332,7 @@ async function rollbackManagedNpmPluginInstall(params: {
   targetDir: string;
   timeoutMs: number;
   logger: PluginInstallLogger;
+  snapshot?: ManagedNpmPluginInstallRollbackSnapshot;
   peerDependencySnapshot?: ManagedNpmRootPeerDependencySnapshot;
 }): Promise<void> {
   if (params.snapshot) {
@@ -730,87 +731,69 @@ async function installPluginFromManagedNpmRoot(
     };
   }
 
-  logger.info?.(`Installing ${params.displaySpec} into ${npmRoot}…`);
-  if (params.packageName !== "openclaw") {
-    const repairedOpenClawPeer = await repairManagedNpmRootOpenClawPeer({
-      npmRoot,
-      timeoutMs,
-      logger,
-    });
-    if (repairedOpenClawPeer) {
-      logger.info?.(`Repaired stale openclaw peer dependency in ${npmRoot}`);
+  const rollbackSnapshot = await createManagedNpmPluginInstallRollbackSnapshot({
+    npmRoot,
+  });
+  try {
+    logger.info?.(`Installing ${params.displaySpec} into ${npmRoot}…`);
+    if (params.packageName !== "openclaw") {
+      const repairedOpenClawPeer = await repairManagedNpmRootOpenClawPeer({
+        npmRoot,
+        timeoutMs,
+        logger,
+      });
+      if (repairedOpenClawPeer) {
+        logger.info?.(`Repaired stale openclaw peer dependency in ${npmRoot}`);
+      }
     }
-  }
-  const preInstallRootPackageNames = await listManagedNpmRootPackageNames(npmRoot);
-  const managedOverrides = await readOpenClawManagedNpmRootOverrides();
-  const rollbackPeerDependencySnapshot = await readManagedNpmRootPeerDependencySnapshot({
-    npmRoot,
-  });
-  await upsertManagedNpmRootDependency({
-    npmRoot,
-  });
-  await syncManagedNpmRootPeerDependencies({ npmRoot, managedOverrides });
-  const npmInstallArgs = [
-    "npm",
-    ...createSafeNpmInstallArgs({
-      omitDev: true,
-      omitPeer: true,
-      loglevel: "error",
-      legacyPeerDeps: true,
-      noAudit: true,
-      noFund: true,
-    }),
-  ];
-  const npmInstallOptions = {
-    cwd: npmRoot,
-    timeoutMs: Math.max(timeoutMs, 300_000),
-    env: createSafeNpmInstallEnv(process.env, {
-      legacyPeerDeps: true,
-      packageLock: true,
-      quiet: true,
-    }),
-  };
-  let install = await runCommandWithTimeout(npmInstallArgs, npmInstallOptions);
-  let omitUnsupportedManagedOverrides = false;
-  if (install.code !== 0 && isNpmAliasOverrideComparatorError(install)) {
-    logger.warn?.(
-      "npm rejected managed npm alias overrides; retrying plugin install without alias overrides for this npm version.",
-    );
-    omitUnsupportedManagedOverrides = true;
+    const preInstallRootPackageNames = await listManagedNpmRootPackageNames(npmRoot);
+    const managedOverrides = await readOpenClawManagedNpmRootOverrides();
+    const rollbackPeerDependencySnapshot = await readManagedNpmRootPeerDependencySnapshot({
+      npmRoot,
+    });
     await upsertManagedNpmRootDependency({
       npmRoot,
       packageName: params.packageName,
       dependencySpec: params.dependencySpec,
       managedOverrides,
     });
-    install = await runCommandWithTimeout(npmInstallArgs, npmInstallOptions);
-  }
-  if (install.code !== 0) {
-    await rollbackManagedNpmPluginInstall({
-      npmRoot,
-      packageName: params.packageName,
-      targetDir: installRoot,
-      timeoutMs,
-      logger,
-      peerDependencySnapshot: rollbackPeerDependencySnapshot,
-    });
-    return {
-      ok: false,
-      error: `npm install failed: ${install.stderr.trim() || install.stdout.trim()}`,
+    await syncManagedNpmRootPeerDependencies({ npmRoot, managedOverrides });
+    const npmInstallArgs = [
+      "npm",
+      ...createSafeNpmInstallArgs({
+        omitDev: true,
+        omitPeer: true,
+        loglevel: "error",
+        legacyPeerDeps: true,
+        noAudit: true,
+        noFund: true,
+      }),
+    ];
+    const npmInstallOptions = {
+      cwd: npmRoot,
+      timeoutMs: Math.max(timeoutMs, 300_000),
+      env: createSafeNpmInstallEnv(process.env, {
+        legacyPeerDeps: true,
+        packageLock: true,
+        quiet: true,
+      }),
     };
-  }
-  let settledManagedPeerDependencies = false;
-  for (let peerSyncPass = 0; peerSyncPass < 10; peerSyncPass += 1) {
-    const syncedPeerDependencies = await syncManagedNpmRootPeerDependencies({
-      npmRoot,
-      managedOverrides,
-      omitUnsupportedManagedOverrides,
-    });
-    if (!syncedPeerDependencies) {
-      settledManagedPeerDependencies = true;
-      break;
+    let install = await runCommandWithTimeout(npmInstallArgs, npmInstallOptions);
+    let omitUnsupportedManagedOverrides = false;
+    if (install.code !== 0 && isNpmAliasOverrideComparatorError(install)) {
+      logger.warn?.(
+        "npm rejected managed npm alias overrides; retrying plugin install without alias overrides for this npm version.",
+      );
+      omitUnsupportedManagedOverrides = true;
+      await upsertManagedNpmRootDependency({
+        npmRoot,
+        packageName: params.packageName,
+        dependencySpec: params.dependencySpec,
+        managedOverrides,
+        omitUnsupportedManagedOverrides: true,
+      });
+      install = await runCommandWithTimeout(npmInstallArgs, npmInstallOptions);
     }
-    install = await runCommandWithTimeout(npmInstallArgs, npmInstallOptions);
     if (install.code !== 0) {
       await rollbackManagedNpmPluginInstall({
         npmRoot,
@@ -818,80 +801,111 @@ async function installPluginFromManagedNpmRoot(
         targetDir: installRoot,
         timeoutMs,
         logger,
+        snapshot: rollbackSnapshot,
         peerDependencySnapshot: rollbackPeerDependencySnapshot,
       });
       return {
         ok: false,
-        error: `npm install failed after syncing managed peer dependencies: ${install.stderr.trim() || install.stdout.trim()}`,
+        error: `npm install failed: ${install.stderr.trim() || install.stdout.trim()}`,
       };
     }
-  }
-  if (!settledManagedPeerDependencies) {
-    const syncedPeerDependencies = await syncManagedNpmRootPeerDependencies({
-      npmRoot,
-      managedOverrides,
-      omitUnsupportedManagedOverrides,
-    });
-    settledManagedPeerDependencies = !syncedPeerDependencies;
-  }
-  if (!settledManagedPeerDependencies) {
-    await rollbackManagedNpmPluginInstall({
-      npmRoot,
-      packageName: params.packageName,
-      targetDir: installRoot,
-      timeoutMs,
-      logger,
-      peerDependencySnapshot: rollbackPeerDependencySnapshot,
-    });
-    return {
-      ok: false,
-      error:
-        "npm install could not settle managed peer dependencies after 10 sync passes; refusing to leave a partially reconciled plugin dependency tree.",
-    };
-  }
-  if (params.packageName !== "openclaw") {
-    const repairedOpenClawPeer = await repairManagedNpmRootOpenClawPeer({
-      npmRoot,
-      timeoutMs,
-      logger,
-    });
-    if (repairedOpenClawPeer) {
-      logger.info?.(`Repaired stale openclaw peer dependency in ${npmRoot} after npm install`);
+    let settledManagedPeerDependencies = false;
+    for (let peerSyncPass = 0; peerSyncPass < 10; peerSyncPass += 1) {
+      const syncedPeerDependencies = await syncManagedNpmRootPeerDependencies({
+        npmRoot,
+        managedOverrides,
+        omitUnsupportedManagedOverrides,
+      });
+      if (!syncedPeerDependencies) {
+        settledManagedPeerDependencies = true;
+        break;
+      }
+      install = await runCommandWithTimeout(npmInstallArgs, npmInstallOptions);
+      if (install.code !== 0) {
+        await rollbackManagedNpmPluginInstall({
+          npmRoot,
+          packageName: params.packageName,
+          targetDir: installRoot,
+          timeoutMs,
+          logger,
+          snapshot: rollbackSnapshot,
+          peerDependencySnapshot: rollbackPeerDependencySnapshot,
+        });
+        return {
+          ok: false,
+          error: `npm install failed after syncing managed peer dependencies: ${install.stderr.trim() || install.stdout.trim()}`,
+        };
+      }
     }
-  }
-  try {
-    await relinkOpenClawPeerDependenciesInManagedNpmRoot({
-      npmRoot,
-      logger,
-    });
-  } catch (error) {
-    await rollbackManagedNpmPluginInstall({
-      npmRoot,
-      packageName: params.packageName,
-      targetDir: installRoot,
-      timeoutMs,
-      logger,
-      peerDependencySnapshot: rollbackPeerDependencySnapshot,
-    });
-    return {
-      ok: false,
-      error: `Failed to repair openclaw peer links after npm install: ${String(error)}`,
-    };
-  }
-  if (installedPackageNeedsOpenClawPeerLinkRepair(installRoot)) {
-    await rollbackManagedNpmPluginInstall({
-      npmRoot,
-      packageName: params.packageName,
-      targetDir: installRoot,
-      timeoutMs,
-      logger,
-      peerDependencySnapshot: rollbackPeerDependencySnapshot,
-    });
-    return {
-      ok: false,
-      error: formatUnresolvedOpenClawPeerLinkError(params.packageName),
-    };
-  }
+    if (!settledManagedPeerDependencies) {
+      const syncedPeerDependencies = await syncManagedNpmRootPeerDependencies({
+        npmRoot,
+        managedOverrides,
+        omitUnsupportedManagedOverrides,
+      });
+      settledManagedPeerDependencies = !syncedPeerDependencies;
+    }
+    if (!settledManagedPeerDependencies) {
+      await rollbackManagedNpmPluginInstall({
+        npmRoot,
+        packageName: params.packageName,
+        targetDir: installRoot,
+        timeoutMs,
+        logger,
+        snapshot: rollbackSnapshot,
+        peerDependencySnapshot: rollbackPeerDependencySnapshot,
+      });
+      return {
+        ok: false,
+        error:
+          "npm install could not settle managed peer dependencies after 10 sync passes; refusing to leave a partially reconciled plugin dependency tree.",
+      };
+    }
+    if (params.packageName !== "openclaw") {
+      const repairedOpenClawPeer = await repairManagedNpmRootOpenClawPeer({
+        npmRoot,
+        timeoutMs,
+        logger,
+      });
+      if (repairedOpenClawPeer) {
+        logger.info?.(`Repaired stale openclaw peer dependency in ${npmRoot} after npm install`);
+      }
+    }
+    try {
+      await relinkOpenClawPeerDependenciesInManagedNpmRoot({
+        npmRoot,
+        logger,
+      });
+    } catch (error) {
+      await rollbackManagedNpmPluginInstall({
+        npmRoot,
+        packageName: params.packageName,
+        targetDir: installRoot,
+        timeoutMs,
+        logger,
+        snapshot: rollbackSnapshot,
+        peerDependencySnapshot: rollbackPeerDependencySnapshot,
+      });
+      return {
+        ok: false,
+        error: `Failed to repair openclaw peer links after npm install: ${String(error)}`,
+      };
+    }
+    if (installedPackageNeedsOpenClawPeerLinkRepair(installRoot)) {
+      await rollbackManagedNpmPluginInstall({
+        npmRoot,
+        packageName: params.packageName,
+        targetDir: installRoot,
+        timeoutMs,
+        logger,
+        snapshot: rollbackSnapshot,
+        peerDependencySnapshot: rollbackPeerDependencySnapshot,
+      });
+      return {
+        ok: false,
+        error: formatUnresolvedOpenClawPeerLinkError(params.packageName),
+      };
+    }
 
     let installedDependency: ManagedNpmRootInstalledDependency | null;
     try {
@@ -907,6 +921,7 @@ async function installPluginFromManagedNpmRoot(
         timeoutMs,
         logger,
         snapshot: rollbackSnapshot,
+        peerDependencySnapshot: rollbackPeerDependencySnapshot,
       });
       return {
         ok: false,
@@ -926,6 +941,7 @@ async function installPluginFromManagedNpmRoot(
         timeoutMs,
         logger,
         snapshot: rollbackSnapshot,
+        peerDependencySnapshot: rollbackPeerDependencySnapshot,
       });
       return {
         ok: false,
@@ -936,11 +952,6 @@ async function installPluginFromManagedNpmRoot(
     const newRootPackageDirs = await listNewManagedNpmRootPackageDirs({
       beforeInstallPackageNames: preInstallRootPackageNames,
       npmRoot,
-      packageName: params.packageName,
-      targetDir: installRoot,
-      timeoutMs,
-      logger,
-      peerDependencySnapshot: rollbackPeerDependencySnapshot,
     });
     const result = await installPluginFromInstalledPackageDir({
       dangerouslyForceUnsafeInstall: params.dangerouslyForceUnsafeInstall,
@@ -948,7 +959,10 @@ async function installPluginFromManagedNpmRoot(
       packageDir: installRoot,
       dependencyScanRootDir: npmRoot,
       logger,
-      peerDependencySnapshot: rollbackPeerDependencySnapshot,
+      expectedPluginId,
+      trustedSourceLinkedOfficialInstall: params.trustedSourceLinkedOfficialInstall,
+      mode: effectiveMode,
+      installPolicyRequest: params.installPolicyRequest,
     });
     if (!result.ok) {
       await rollbackManagedNpmPluginInstall({
@@ -958,6 +972,7 @@ async function installPluginFromManagedNpmRoot(
         timeoutMs,
         logger,
         snapshot: rollbackSnapshot,
+        peerDependencySnapshot: rollbackPeerDependencySnapshot,
       });
       return result;
     }
@@ -969,38 +984,6 @@ async function installPluginFromManagedNpmRoot(
   } finally {
     await cleanupManagedNpmPluginInstallRollbackSnapshot(rollbackSnapshot);
   }
-
-  const newRootPackageDirs = await listNewManagedNpmRootPackageDirs({
-    beforeInstallPackageNames: preInstallRootPackageNames,
-    npmRoot,
-  });
-  const result = await installPluginFromInstalledPackageDir({
-    dangerouslyForceUnsafeInstall: params.dangerouslyForceUnsafeInstall,
-    additionalDependencyPackageDirs: newRootPackageDirs,
-    packageDir: installRoot,
-    dependencyScanRootDir: npmRoot,
-    logger,
-    expectedPluginId,
-    trustedSourceLinkedOfficialInstall: params.trustedSourceLinkedOfficialInstall,
-    mode: effectiveMode,
-    installPolicyRequest: params.installPolicyRequest,
-  });
-  if (!result.ok) {
-    await rollbackManagedNpmPluginInstall({
-      npmRoot,
-      packageName: params.packageName,
-      targetDir: installRoot,
-      timeoutMs,
-      logger,
-      peerDependencySnapshot: rollbackPeerDependencySnapshot,
-    });
-    return result;
-  }
-  return {
-    ...result,
-    npmResolution: params.npmResolution,
-    ...(params.integrityDrift ? { integrityDrift: params.integrityDrift } : {}),
-  };
 }
 
 async function stageNpmPackArchiveInManagedRoot(params: {
