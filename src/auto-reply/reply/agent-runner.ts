@@ -281,6 +281,52 @@ function clearAutoFallbackSelectionAfterAccounting(
   return updated;
 }
 
+async function clearPersistedAutoFallbackSelectionAfterAccounting(params: {
+  storePath: string;
+  sessionKey: string;
+  expected: AutoFallbackSelectionSnapshot;
+}): Promise<void> {
+  const persist = async () => {
+    await updateSessionStoreEntry({
+      storePath: params.storePath,
+      sessionKey: params.sessionKey,
+      update: async (entry) => {
+        if (!matchesAutoFallbackSelectionSnapshot(entry, params.expected)) {
+          return null;
+        }
+        const preserveUserAuthProfile = hasUserAuthProfileOverride(entry);
+        return {
+          providerOverride: undefined,
+          modelOverride: undefined,
+          modelOverrideSource: undefined,
+          modelOverrideFallbackOriginProvider: undefined,
+          modelOverrideFallbackOriginModel: undefined,
+          authProfileOverride: preserveUserAuthProfile ? entry.authProfileOverride : undefined,
+          authProfileOverrideSource: preserveUserAuthProfile
+            ? entry.authProfileOverrideSource
+            : undefined,
+          authProfileOverrideCompactionCount: preserveUserAuthProfile
+            ? entry.authProfileOverrideCompactionCount
+            : undefined,
+        };
+      },
+    });
+  };
+
+  try {
+    await persist();
+    return;
+  } catch (err) {
+    logVerbose(`failed to persist fallback selection cleanup (non-fatal): ${String(err)}`);
+  }
+
+  try {
+    await persist();
+  } catch (err) {
+    logVerbose(`retry failed to persist fallback selection cleanup (non-fatal): ${String(err)}`);
+  }
+}
+
 function buildInlinePluginStatusPayload(params: {
   entry: SessionEntry | undefined;
   includeTraceLines: boolean;
@@ -1711,29 +1757,10 @@ export async function runReplyAgent(params: {
         }
       }
       if (sessionKey && storePath) {
-        await updateSessionStoreEntry({
+        await clearPersistedAutoFallbackSelectionAfterAccounting({
           storePath,
           sessionKey,
-          update: async (entry) => {
-            if (!matchesAutoFallbackSelectionSnapshot(entry, autoFallbackSelectionToClear)) {
-              return null;
-            }
-            const preserveUserAuthProfile = hasUserAuthProfileOverride(entry);
-            return {
-              providerOverride: undefined,
-              modelOverride: undefined,
-              modelOverrideSource: undefined,
-              modelOverrideFallbackOriginProvider: undefined,
-              modelOverrideFallbackOriginModel: undefined,
-              authProfileOverride: preserveUserAuthProfile ? entry.authProfileOverride : undefined,
-              authProfileOverrideSource: preserveUserAuthProfile
-                ? entry.authProfileOverrideSource
-                : undefined,
-              authProfileOverrideCompactionCount: preserveUserAuthProfile
-                ? entry.authProfileOverrideCompactionCount
-                : undefined,
-            };
-          },
+          expected: autoFallbackSelectionToClear,
         });
       }
     }

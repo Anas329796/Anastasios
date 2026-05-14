@@ -1872,6 +1872,58 @@ describe("runReplyAgent typing (heartbeat)", () => {
     expect(stored.fallbackNoticeActiveModel).toBe("anthropic/claude-haiku");
   });
 
+  it("does not fail successful replies when persisted auto fallback cleanup cannot write", async () => {
+    const sessionEntry: SessionEntry = {
+      sessionId: "session",
+      updatedAt: Date.now(),
+      providerOverride: "openai-codex",
+      modelOverride: "gpt-5.4",
+      modelOverrideSource: "auto",
+      modelOverrideFallbackOriginProvider: "anthropic",
+      modelOverrideFallbackOriginModel: "claude-opus",
+    };
+    const sessionStore = { main: sessionEntry };
+    const storePath = await mkdtemp(join(tmpdir(), "openclaw-agent-runner-cleanup-blocked-"));
+
+    state.runEmbeddedPiAgentMock.mockResolvedValue({
+      payloads: [{ text: "final" }],
+      meta: {},
+    });
+    const fallbackSpy = vi
+      .spyOn(modelFallbackModule, "runWithModelFallback")
+      .mockImplementation(
+        async ({ run }: { run: (provider: string, model: string) => Promise<unknown> }) => ({
+          result: await run("anthropic", "claude-haiku"),
+          provider: "anthropic",
+          model: "claude-haiku",
+          attempts: [],
+        }),
+      );
+    try {
+      const { run } = createMinimalRun({
+        sessionEntry,
+        sessionStore,
+        sessionKey: "main",
+        storePath,
+        runOverrides: {
+          provider: "openai-codex",
+          model: "gpt-5.4",
+        },
+      });
+      const result = await run();
+
+      const firstPayload = Array.isArray(result) ? result[0] : result;
+      expect(firstPayload?.text).toBe("final");
+    } finally {
+      fallbackSpy.mockRestore();
+      await rm(storePath, { force: true, recursive: true });
+    }
+
+    expect(sessionEntry.providerOverride).toBeUndefined();
+    expect(sessionEntry.modelOverride).toBeUndefined();
+    expect(sessionEntry.modelOverrideSource).toBeUndefined();
+  });
+
   it("does not persist fallback state for an equivalent CLI runtime alias", async () => {
     const sessionEntry: SessionEntry = {
       sessionId: "session",
