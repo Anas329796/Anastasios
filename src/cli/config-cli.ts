@@ -89,6 +89,11 @@ type ConfigPatchOptions = {
   json?: boolean | undefined;
   replacePath?: string[] | undefined;
 };
+type ConfigUnsetOptions = {
+  dryRun?: boolean | undefined;
+  allowExec?: boolean | undefined;
+  json?: boolean | undefined;
+};
 type ConfigMutationOptions = {
   dryRun?: boolean | undefined;
   allowExec?: boolean | undefined;
@@ -1977,9 +1982,20 @@ export async function runConfigGet(opts: { path: string; json?: boolean; runtime
   }
 }
 
-export async function runConfigUnset(opts: { path: string; runtime?: RuntimeEnv }) {
+export async function runConfigUnset(opts: {
+  path: string;
+  cliOptions?: ConfigUnsetOptions;
+  runtime?: RuntimeEnv;
+}) {
   const runtime = opts.runtime ?? defaultRuntime;
+  const cliOptions = opts.cliOptions ?? {};
   try {
+    if (cliOptions.json && !cliOptions.dryRun) {
+      throw new Error("config unset mode error: --json requires --dry-run.");
+    }
+    if (cliOptions.allowExec && !cliOptions.dryRun) {
+      throw new Error("config unset mode error: --allow-exec requires --dry-run.");
+    }
     const parsedPath = parseRequiredPath(opts.path);
     const autoManagedUnsetTargets = findAutoManagedMetaUnsetTargets(parsedPath);
     if (autoManagedUnsetTargets.length > 0) {
@@ -1992,14 +2008,109 @@ export async function runConfigUnset(opts: { path: string; runtime?: RuntimeEnv 
     const next = structuredClone(snapshot.resolved) as Record<string, unknown>;
     const unsetResult = unsetAtPath(next, parsedPath);
     if (!unsetResult.removed) {
-      runtime.error(
-        danger(
-          `Config path not found: ${opts.path}. Nothing was changed. Run ${formatCliCommand("openclaw config get <path>")} first if you are unsure of the path.`,
-        ),
-      );
+      if (cliOptions.json) {
+        writeRuntimeJson(runtime, { ok: false, error: "Config path not found", path: opts.path });
+      } else {
+        runtime.error(
+          danger(
+            `Config path not found: ${opts.path}. Nothing was changed. Run ${formatCliCommand("openclaw config get <path>")} first if you are unsure of the path.`,
+          ),
+        );
+      }
       runtime.exit(1);
       return;
     }
+
+    if (cliOptions.dryRun) {
+      const nextConfig = normalizeConfigMutationModelRefs(next as OpenClawConfig);
+      // Schema validation
+      const validated = validateConfigObjectRaw(nextConfig, {
+        touchedPaths: [parsedPath],
+        validateBundledChannels: true,
+      });
+      const errors: ConfigSetDryRunError[] = [];
+      if (!validated.ok) {
+        errors.push(
+          ...formatConfigIssueLines(validated.issues, "-", { normalizeRoot: true }).map((message) => ({
+            kind: "schema" as const,
+            message,
+          })),
+        );
+      }
+      // SecretRef fallout check: collect refs that might be affected by provider/default removal
+      // Check if unsetting secrets.providers, secrets.providers.<alias>, secrets.defaults, or secrets.defaults.<alias>
+      const isProviderPath = pathStartsWith(parsedPath, parsePath("secrets.providers"));
+      const isDefaultsPath = pathStartsWith(parsedPath, parsePath("secrets.defaults"));
+      // Affects SecretRef resolution if removing providers or defaults (or top-level secrets)
+      const affectsSecretResolution = isProviderPath || isDefaultsPath ||
+        (parsedPath.length === 1 && parsedPath[0] === "secrets");
+      let skippedExecRefs: SecretRef[] = [];
+      if (affectsSecretResolution) {
+        let refs: SecretRef[];
+        if (isProviderPath) {
+          const providerAlias = parsedPath[2];
+          // If providerAlias is undefined, we're removing the entire secrets.providers map
+          refs = collectAffectedRefsForProviderRemoval(nextConfig, providerAlias);
+        } else if (isDefaultsPath) {
+          // Removing defaults affects ref resolution - collect all refs to check resolvability
+          refs = collectAffectedRefsForProviderRemoval(nextConfig, undefined);
+        } else {
+          // Top-level secrets removal - collect all refs
+          refs = collectAffectedRefsForProviderRemoval(nextConfig, undefined);
+        }
+        // Filter out exec refs unless --allow-exec is set
+        const { refsToResolve, skippedExecRefs: execRefs } = selectDryRunRefsForResolution({
+          refs,
+          allowExecInDryRun: Boolean(cliOptions.allowExec),
+        });
+        skippedExecRefs = execRefs;
+        errors.push(
+          ...collectDryRunStaticErrorsForSkippedExecRefs({
+            refs: skippedExecRefs,
+            config: nextConfig,
+          }),
+        );
+        const resolvabilityErrors = await collectDryRunResolvabilityErrors({
+          refs: refsToResolve,
+          config: nextConfig,
+        });
+        errors.push(...resolvabilityErrors);
+      }
+      const dedupedErrors = dedupeDryRunErrors(errors);
+      if (dedupedErrors.length > 0) {
+        if (cliOptions.json) {
+          writeRuntimeJson(runtime, {
+            ok: false,
+            operations: 1,
+            errors: dedupedErrors,
+            skippedExecRefs: skippedExecRefs.length,
+          });
+        } else {
+          runtime.error(danger(formatDryRunFailureMessage({ errors: dedupedErrors, skippedExecRefs: skippedExecRefs.length })));
+        }
+        runtime.exit(1);
+        return;
+      }
+      if (cliOptions.json) {
+        writeRuntimeJson(runtime, {
+          ok: true,
+          operations: 1,
+          checks: { schema: true, resolvability: affectsSecretResolution },
+          skippedExecRefs: skippedExecRefs.length,
+        });
+      } else {
+        if (skippedExecRefs.length > 0) {
+          runtime.log(
+            info(
+              `Dry run note: skipped ${skippedExecRefs.length} exec SecretRef resolvability check(s). Re-run with --allow-exec to execute exec providers during dry-run.`,
+            ),
+          );
+        }
+        runtime.log(success(`Dry run successful: 1 update(s) validated against ${shortenHomePath(snapshot.path)}.`));
+      }
+      return;
+    }
+
     await replaceConfigFile({
       nextConfig: next,
       ...(snapshot.hash !== undefined ? { baseHash: snapshot.hash } : {}),
@@ -2012,6 +2123,23 @@ export async function runConfigUnset(opts: { path: string; runtime?: RuntimeEnv 
     runtime.error(danger(String(err)));
     runtime.exit(1);
   }
+}
+
+function collectAffectedRefsForProviderRemoval(config: OpenClawConfig, providerAlias?: string): SecretRef[] {
+  const refs: SecretRef[] = [];
+  for (const target of discoverConfigSecretTargets(config)) {
+    const { ref } = resolveSecretInputRef({
+      value: target.value,
+      refValue: target.refValue,
+      defaults: config.secrets?.defaults,
+    });
+    // If providerAlias is undefined, collect all refs (entire provider map removal)
+    // Otherwise, only collect refs that use the specific provider
+    if (ref && (providerAlias === undefined || ref.provider === providerAlias)) {
+      refs.push(ref);
+    }
+  }
+  return refs;
 }
 
 export async function runConfigFile(opts: { runtime?: RuntimeEnv }) {
@@ -2249,8 +2377,19 @@ export function registerConfigCli(program: Command) {
     .command("unset")
     .description("Remove a config value by dot path")
     .argument("<path>", "Config path (dot or bracket notation)")
-    .action(async (path: string) => {
-      await runConfigUnset({ path });
+    .option(
+      "--dry-run",
+      "Validate removal without writing openclaw.json",
+      false,
+    )
+    .option(
+      "--allow-exec",
+      "Dry-run only: allow exec SecretRef resolvability checks (may execute provider commands)",
+      false,
+    )
+    .option("--json", "Output dry-run result as JSON", false)
+    .action(async (path: string, opts: ConfigUnsetOptions) => {
+      await runConfigUnset({ path, cliOptions: opts });
     });
 
   cmd

@@ -2524,6 +2524,56 @@ describe("config cli", () => {
         unsetPaths: [["channels", "discord", "guilds", "123"]],
       });
     });
+
+    it("dry-run validates removal without writing", async () => {
+      const resolved: OpenClawConfig = {
+        gateway: { port: 18789 },
+        tools: { profile: "coding", alsoAllow: ["agents_list"] },
+      };
+      setSnapshot(resolved, resolved);
+
+      await runConfigCommand(["config", "unset", "tools.alsoAllow", "--dry-run"]);
+
+      expect(mockWriteConfigFile).not.toHaveBeenCalled();
+      expect(mockLog).toHaveBeenCalledWith(expect.stringContaining("Dry run successful"));
+    });
+
+    it("dry-run --json outputs structured result", async () => {
+      const resolved: OpenClawConfig = {
+        gateway: { port: 18789 },
+        tools: { profile: "coding", alsoAllow: ["agents_list"] },
+      };
+      setSnapshot(resolved, resolved);
+
+      await runConfigCommand(["config", "unset", "tools.alsoAllow", "--dry-run", "--json"]);
+
+      expect(mockWriteConfigFile).not.toHaveBeenCalled();
+      const output = JSON.parse(String(mockLog.mock.calls.at(0)?.[0]));
+      expect(output.ok).toBe(true);
+      expect(output.operations).toBe(1);
+    });
+
+    it("dry-run --json reports path not found", async () => {
+      const resolved: OpenClawConfig = { gateway: { port: 18789 } };
+      setSnapshot(resolved, resolved);
+
+      await expect(
+        runConfigCommand(["config", "unset", "tools.nonexistent", "--dry-run", "--json"]),
+      ).rejects.toThrow("__exit__:1");
+
+      const output = JSON.parse(String(mockLog.mock.calls.at(0)?.[0]));
+      expect(output.ok).toBe(false);
+      expect(output.error).toBe("Config path not found");
+    });
+
+    it("rejects --json without --dry-run", async () => {
+      await expect(
+        runConfigCommand(["config", "unset", "tools.alsoAllow", "--json"]),
+      ).rejects.toThrow("__exit__:1");
+
+      expect(mockWriteConfigFile).not.toHaveBeenCalled();
+      expectErrorIncludes("config unset mode error: --json requires --dry-run.");
+    });
   });
 
   describe("config file", () => {
