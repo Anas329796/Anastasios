@@ -23,6 +23,7 @@ import {
   type PreparedSecretsRuntimeSnapshot,
 } from "../../secrets/runtime.js";
 import { diffConfigPaths } from "../config-diff.js";
+import { resolveConfigReloadMetadata } from "../config-reload-plan.js";
 import {
   formatControlPlaneActor,
   resolveControlPlaneActor,
@@ -289,7 +290,7 @@ export const configHandlers: GatewayRequestHandlers = {
     }
     const path = (params as { path: string }).path;
     const schema = loadSchemaWithPlugins();
-    const result = lookupConfigSchema(schema, path);
+    const result = lookupConfigSchema(schema, path, resolveConfigReloadMetadata);
     if (!result) {
       respond(
         false,
