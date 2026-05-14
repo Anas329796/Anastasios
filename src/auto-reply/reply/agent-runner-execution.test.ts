@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LiveSessionModelSwitchError } from "../../agents/live-model-switch-error.js";
-import type { SessionEntry } from "../../config/sessions.js";
+import { updateSessionStore, type SessionEntry } from "../../config/sessions.js";
 import type { ModelDefinitionConfig } from "../../config/types.models.js";
 import { CommandLaneClearedError, GatewayDrainingError } from "../../process/command-queue.js";
 import { getReplyPayloadMetadata } from "../reply-payload.js";
@@ -3548,6 +3548,81 @@ describe("runAgentTurnWithFallback", () => {
     expect(sessionStore.main.providerOverride).toBeUndefined();
     expect(sessionStore.main.modelOverride).toBeUndefined();
     expect(sessionStore.main.authProfileOverride).toBeUndefined();
+  });
+
+  it("retries persisted fallback cleanup when success rollback write fails", async () => {
+    state.runWithModelFallbackMock.mockImplementation(
+      async (params: { run: (provider: string, model: string) => Promise<unknown> }) => ({
+        result: await params.run("openai-codex", "gpt-5.4"),
+        provider: "openai-codex",
+        model: "gpt-5.4",
+        attempts: [],
+      }),
+    );
+    state.runEmbeddedPiAgentMock.mockResolvedValue({
+      payloads: [{ text: "ok" }],
+      meta: {},
+    });
+
+    const followupRun = createFollowupRun();
+    followupRun.run.provider = "anthropic";
+    followupRun.run.model = "claude-opus-4-6";
+
+    const sessionEntry: SessionEntry = {
+      sessionId: "session",
+      updatedAt: Date.now(),
+      totalTokens: 1,
+      compactionCount: 0,
+    };
+    const sessionStore = { main: sessionEntry };
+    const persistedStore: Record<string, SessionEntry> = { main: { ...sessionEntry } };
+    const updateSessionStoreMock = vi.mocked(updateSessionStore);
+    let storeWriteAttempt = 0;
+    updateSessionStoreMock.mockImplementation(
+      async (_storePath: string, update: (store: Record<string, SessionEntry>) => void) => {
+        storeWriteAttempt += 1;
+        if (storeWriteAttempt === 2) {
+          throw new Error("sessions store temporarily locked");
+        }
+        update(persistedStore);
+      },
+    );
+
+    const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
+    const result = await runAgentTurnWithFallback({
+      commandBody: "hello",
+      followupRun,
+      sessionCtx: {
+        Provider: "telegram",
+        MessageSid: "msg",
+      } as unknown as TemplateContext,
+      opts: {},
+      typingSignals: createMockTypingSignaler(),
+      blockReplyPipeline: null,
+      blockStreamingEnabled: false,
+      resolvedBlockStreamingBreak: "message_end",
+      applyReplyToMode: (payload) => payload,
+      shouldEmitToolResult: () => true,
+      shouldEmitToolOutput: () => false,
+      pendingToolTasks: new Set(),
+      resetSessionAfterCompactionFailure: async () => false,
+      resetSessionAfterRoleOrderingConflict: async () => false,
+      isHeartbeat: false,
+      sessionKey: "main",
+      getActiveSessionEntry: () => sessionEntry,
+      activeSessionStore: sessionStore,
+      storePath: "/tmp/sessions.json",
+      resolvedVerboseLevel: "off",
+    });
+
+    expect(result.kind).toBe("success");
+    expect(storeWriteAttempt).toBe(3);
+    expect(sessionEntry.providerOverride).toBeUndefined();
+    expect(sessionEntry.modelOverride).toBeUndefined();
+    expect(sessionEntry.modelOverrideSource).toBeUndefined();
+    expect(persistedStore.main.providerOverride).toBeUndefined();
+    expect(persistedStore.main.modelOverride).toBeUndefined();
+    expect(persistedStore.main.modelOverrideSource).toBeUndefined();
   });
 
   it("does not persist fallback selection for legacy user overrides without modelOverrideSource", async () => {
