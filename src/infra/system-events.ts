@@ -19,6 +19,11 @@ export type SystemEvent = {
   ts: number;
   contextKey?: string | null;
   deliveryContext?: DeliveryContext;
+  /**
+   * @deprecated Compatibility-only field for older plugin readers. OpenClaw no
+   * longer stores, sets, or reads system-event trust metadata.
+   */
+  trusted?: boolean;
 };
 
 const MAX_EVENTS = 20;

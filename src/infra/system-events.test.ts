@@ -119,6 +119,9 @@ describe("system events (session routing)", () => {
       }),
     ).toBe(true);
 
+    const legacyTrustedValue: boolean | undefined =
+      peekSystemEventEntries("legacy-trusted")[0]?.trusted;
+    expect(legacyTrustedValue).toBeUndefined();
     expect(peekSystemEventEntries("legacy-trusted")).toEqual([
       {
         text: "Legacy plugin event",
