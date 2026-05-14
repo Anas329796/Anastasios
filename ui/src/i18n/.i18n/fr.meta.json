@@ -3,14 +3,20 @@
     "chat.autoScrollAlways",
     "chat.autoScrollMode",
     "chat.autoScrollNearBottom",
-    "chat.autoScrollOff"
+    "chat.autoScrollOff",
+    "config.quick.roundness.default",
+    "config.quick.roundness.full",
+    "config.quick.roundness.none",
+    "config.quick.roundness.round",
+    "config.quick.roundness.slight",
+    "config.quick.roundnessLabel"
   ],
-  "generatedAt": "2026-05-14T02:57:13.240Z",
+  "generatedAt": "2026-05-14T08:42:04.614Z",
   "locale": "fr",
   "model": "gpt-5.5",
   "provider": "openai",
-  "sourceHash": "21a3e182cf575ee49da8100200441d290766012efb17685445098f21d46dcab7",
-  "totalKeys": 1112,
-  "translatedKeys": 1108,
+  "sourceHash": "0f608420c9a47a883f2b17ca69275f38d1955b5f11d7dd78d2298c3d44a0fced",
+  "totalKeys": 1371,
+  "translatedKeys": 1361,
   "workflow": 1
 }
