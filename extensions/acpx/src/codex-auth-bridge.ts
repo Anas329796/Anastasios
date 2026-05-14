@@ -362,6 +362,14 @@ function writeRedactedStderrLog(text) {
   }
 }
 
+function redactIncompletePrivateKeyTail(text) {
+  const unclosedPrivateKeyStart = hasUnclosedPrivateKeyBlock(text);
+  if (unclosedPrivateKeyStart === -1) {
+    return text;
+  }
+  return text.slice(0, unclosedPrivateKeyStart) + "[REDACTED_PRIVATE_KEY]";
+}
+
 function flushFinalizedStderrLogText() {
   const lastLineBreak = pendingStderrLogText.lastIndexOf("\\n");
   if (lastLineBreak === -1) {
@@ -398,7 +406,7 @@ function appendStderrLog(chunk) {
 }
 
 function finishStderrLog() {
-  const text = pendingStderrLogText;
+  const text = redactIncompletePrivateKeyTail(pendingStderrLogText);
   pendingStderrLogText = "";
   writeRedactedStderrLog(text);
 }

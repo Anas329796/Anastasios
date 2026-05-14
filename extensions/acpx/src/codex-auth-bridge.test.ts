@@ -547,6 +547,7 @@ describe("prepareAcpxCodexAuthConfig", () => {
         "-----BEGIN PRIVATE KEY-----\\nprivate-secret-body\\n",
         "-----END PRIVATE KEY-----\\n",
         "tail-token=tail-secret-1234567890",
+        "\\n-----BEGIN PRIVATE KEY-----\\ntruncated-private-secret",
       ];
       let index = 0;
       function writeNext() {
@@ -607,6 +608,7 @@ describe("prepareAcpxCodexAuthConfig", () => {
     expect(log).not.toContain("query-secret-1234567890");
     expect(log).not.toContain("github_pat_1234567890abcdefghijklmnopqrstuvwxyz");
     expect(log).not.toContain("private-secret-body");
+    expect(log).not.toContain("truncated-private-secret");
     expect(log).not.toContain("tail-secret-1234567890");
     await expectPathMissing(path.join(stateDir, "acpx", "codex-acp-wrapper.stderr.log"));
   });
