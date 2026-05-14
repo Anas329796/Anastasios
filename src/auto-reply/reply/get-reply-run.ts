@@ -421,6 +421,7 @@ export async function runPreparedReply(
     ctx,
     isHeartbeat,
   });
+  const inboundTurnKind = promptSessionCtx.InboundTurnKind;
   const silentReplyConversationType = resolvePromptSilentReplyConversationType({
     ctx: promptSessionCtx,
     inboundSessionKey: ctx.SessionKey,
@@ -650,6 +651,7 @@ export async function runPreparedReply(
     startupContextPrelude,
     softResetTail,
     isHeartbeat,
+    turnKind: inboundTurnKind,
   });
   const effectiveBaseBody = promptEnvelopeBase.effectiveBaseBody;
   let prefixedBodyBase = await applySessionHints({
@@ -721,6 +723,7 @@ export async function runPreparedReply(
       startupContextPrelude,
       softResetTail,
       isHeartbeat,
+      turnKind: inboundTurnKind,
       threadContextNote,
       systemEventBlocks: drainedSystemEventBlocks,
     });
@@ -751,6 +754,7 @@ export async function runPreparedReply(
   const skillsSnapshot = skillResult.skillsSnapshot;
   let { prefixedCommandBody, queuedBody, transcriptCommandBody, currentTurnContext } =
     await traceRunPhase("reply.build_prompt_bodies", () => rebuildPromptBodies());
+  const isRoomEvent = inboundTurnKind === "room_event";
   if (!resolvedThinkLevel) {
     resolvedThinkLevel = await modelState.resolveDefaultThinkingLevel();
   }
@@ -967,6 +971,7 @@ export async function runPreparedReply(
   const followupRun = {
     prompt: queuedBody,
     transcriptPrompt: transcriptCommandBody,
+    currentTurnKind: inboundTurnKind,
     currentTurnContext,
     messageId: sessionCtx.MessageSidFull ?? sessionCtx.MessageSid,
     summaryLine: baseBodyTrimmedRaw,
@@ -1046,11 +1051,13 @@ export async function runPreparedReply(
       ownerNumbers: command.ownerList.length > 0 ? command.ownerList : undefined,
       inputProvenance: ctx.InputProvenance ?? sessionCtx.InputProvenance,
       extraSystemPrompt: extraSystemPromptParts.join("\n\n") || undefined,
-      sourceReplyDeliveryMode: opts?.sourceReplyDeliveryMode,
+      sourceReplyDeliveryMode: isRoomEvent ? "message_tool_only" : opts?.sourceReplyDeliveryMode,
       silentReplyPromptMode,
       extraSystemPromptStatic: extraSystemPromptStaticParts.join("\n\n"),
       skipProviderRuntimeHints: useFastReplyRuntime,
       allowEmptyAssistantReplyAsSilent,
+      suppressNextUserMessagePersistence: isRoomEvent,
+      suppressTranscriptOnlyAssistantPersistence: isRoomEvent,
       ...(!useFastReplyRuntime &&
       isReasoningTagProvider(provider, {
         config: cfg,

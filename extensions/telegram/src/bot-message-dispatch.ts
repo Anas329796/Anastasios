@@ -400,8 +400,10 @@ export const dispatchTelegramMessage = async ({
     ackReactionPromise,
     reactionApi,
     removeAckAfterReply,
-    statusReactionController,
+    statusReactionController: rawStatusReactionController,
   } = context;
+  const isRoomEvent = ctxPayload.InboundTurnKind === "room_event";
+  const statusReactionController = isRoomEvent ? null : rawStatusReactionController;
   const statusReactionTiming = {
     ...DEFAULT_TIMING,
     ...cfg.messages?.statusReactions?.timing,
@@ -485,7 +487,7 @@ export const dispatchTelegramMessage = async ({
   });
   const forceBlockStreamingForReasoning = resolvedReasoningLevel === "on";
   const streamReasoningDraft = resolvedReasoningLevel === "stream";
-  const streamDeliveryEnabled = streamMode !== "off";
+  const streamDeliveryEnabled = !isRoomEvent && streamMode !== "off";
   const rawReplyQuoteText =
     ctxPayload.ReplyToIsQuote && typeof ctxPayload.ReplyToQuoteText === "string"
       ? ctxPayload.ReplyToQuoteText
@@ -538,7 +540,7 @@ export const dispatchTelegramMessage = async ({
     !hasTelegramQuoteReply &&
     !accountBlockStreamingEnabled &&
     !forceBlockStreamingForReasoning;
-  const canStreamReasoningDraft = streamReasoningDraft;
+  const canStreamReasoningDraft = !isRoomEvent && streamReasoningDraft;
   const draftReplyToMessageId =
     replyToMode !== "off" && typeof msg.message_id === "number"
       ? (replyQuoteMessageId ?? msg.message_id)
@@ -1156,7 +1158,7 @@ export const dispatchTelegramMessage = async ({
       }
     }
 
-    if (statusReactionController) {
+    if (statusReactionController && !isRoomEvent) {
       void statusReactionController.setThinking();
     }
 
@@ -1428,6 +1430,8 @@ export const dispatchTelegramMessage = async ({
                 replyOptions: {
                   skillFilter,
                   disableBlockStreaming,
+                  sourceReplyDeliveryMode: isRoomEvent ? "message_tool_only" : undefined,
+                  suppressTyping: isRoomEvent,
                   onPartialReply:
                     answerLane.stream || reasoningLane.stream
                       ? (payload) =>
@@ -1467,7 +1471,8 @@ export const dispatchTelegramMessage = async ({
                     : undefined,
                   suppressDefaultToolProgressMessages:
                     !streamDeliveryEnabled || Boolean(answerLane.stream),
-                  allowProgressCallbacksWhenSourceDeliverySuppressed: Boolean(answerLane.stream),
+                  allowProgressCallbacksWhenSourceDeliverySuppressed:
+                    !isRoomEvent && Boolean(answerLane.stream),
                   onToolStart: async (payload) => {
                     const toolName = payload.name?.trim();
                     const progressPromise = pushStreamToolProgress(
@@ -1646,16 +1651,19 @@ export const dispatchTelegramMessage = async ({
         },
       });
     }
-    clearGroupHistory();
+    if (!isRoomEvent) {
+      clearGroupHistory();
+    }
     return;
   }
   let sentFallback = false;
   const deliverySummary = deliveryState.snapshot();
-  if (
-    dispatchError ||
-    (!deliverySummary.delivered &&
-      (deliverySummary.skippedNonSilent > 0 || deliverySummary.failedNonSilent > 0))
-  ) {
+  const shouldSendFailureFallback =
+    !isRoomEvent &&
+    (dispatchError ||
+      (!deliverySummary.delivered &&
+        (deliverySummary.skippedNonSilent > 0 || deliverySummary.failedNonSilent > 0)));
+  if (shouldSendFailureFallback) {
     const fallbackText = dispatchError
       ? "Something went wrong while processing your request. Please try again."
       : EMPTY_RESPONSE_FALLBACK;
@@ -1715,7 +1723,13 @@ export const dispatchTelegramMessage = async ({
     );
   }
 
+  const shouldClearGroupHistory =
+    !isRoomEvent || deliverySummary.delivered || sentFallback || queuedFinal;
+
   if (!hasFinalResponse) {
+    if (!shouldClearGroupHistory) {
+      return;
+    }
     clearGroupHistory();
     return;
   }
@@ -1788,5 +1802,7 @@ export const dispatchTelegramMessage = async ({
       },
     });
   }
-  clearGroupHistory();
+  if (shouldClearGroupHistory) {
+    clearGroupHistory();
+  }
 };

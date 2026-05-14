@@ -2,6 +2,7 @@ import { finalizeInboundContext } from "../../auto-reply/reply/inbound-context.j
 import type { FinalizedMsgContext } from "../../auto-reply/templating.js";
 import type { ContextVisibilityMode } from "../../config/types.base.js";
 import { shouldIncludeSupplementalContext } from "../../security/context-visibility.js";
+import type { InboundTurnKind } from "./kind.js";
 import type {
   AccessFacts,
   ConversationFacts,
@@ -45,6 +46,7 @@ export type BuiltChannelTurnContext = FinalizedMsgContext & {
   RawBody: string;
   SessionKey: string;
   To: string;
+  InboundTurnKind: InboundTurnKind;
 };
 
 function compactStrings(values: Array<string | undefined>): string[] | undefined {
@@ -134,6 +136,7 @@ export function buildChannelTurnContext(
 
   return finalizeInboundContext({
     Body: body,
+    InboundTurnKind: params.message.inboundTurnKind ?? "user_request",
     BodyForAgent: params.message.bodyForAgent ?? params.message.rawBody,
     InboundHistory: params.message.inboundHistory,
     RawBody: params.message.rawBody,

@@ -362,6 +362,7 @@ describe("runPreparedReply media-only handling", () => {
   it("passes message-tool-only delivery into direct chat prompt context", async () => {
     await runPreparedReply(
       baseParams({
+        opts: { sourceReplyDeliveryMode: "message_tool_only" },
         ctx: {
           Body: "yo",
           RawBody: "yo",
@@ -380,9 +381,6 @@ describe("runPreparedReply media-only handling", () => {
           ChatType: "direct",
           OriginatingChannel: "telegram",
           OriginatingTo: "telegram-direct-test-id",
-        },
-        opts: {
-          sourceReplyDeliveryMode: "message_tool_only",
         },
       }),
     );
@@ -1318,6 +1316,99 @@ describe("runPreparedReply media-only handling", () => {
     );
     expect(call?.followupRun.currentTurnContext?.text).not.toContain(
       "Reply target of current user message",
+    );
+  });
+
+  it("runs room events as contextual events instead of direct user prompts", async () => {
+    vi.mocked(buildInboundUserContextPrefix).mockReturnValueOnce(
+      [
+        "Conversation info (untrusted metadata):",
+        "```json",
+        JSON.stringify({ message_id: "35676", turn_kind: "room_event" }, null, 2),
+        "```",
+        "",
+        "Conversation context (untrusted, chronological, selected for current message):",
+        "#35673 obviyus: @HamVerBot make a note",
+        "#35674 Keśava: I wish I could enjoy 5.5",
+        "#35675 obviyus ->#35674: Are you fr fr",
+      ].join("\n"),
+    );
+
+    await runPreparedReply(
+      baseParams({
+        opts: { sourceReplyDeliveryMode: "message_tool_only" },
+        ctx: {
+          Body: "No wtf",
+          RawBody: "No wtf",
+          CommandBody: "No wtf",
+          Provider: "telegram",
+          Surface: "telegram",
+          ChatType: "group",
+        },
+        sessionCtx: {
+          Body: "No wtf",
+          BodyStripped: "No wtf",
+          Provider: "telegram",
+          Surface: "telegram",
+          ChatType: "group",
+          InboundTurnKind: "room_event",
+          MessageSid: "35676",
+          SenderName: "Keśava",
+        },
+      }),
+    );
+
+    const call = requireLastRunReplyAgentCall();
+    expect(call?.commandBody).toBe("[OpenClaw room event]");
+    expect(call?.transcriptCommandBody).toBe("");
+    expect(call?.followupRun.prompt).toBe("[OpenClaw room event]");
+    expect(call?.followupRun.transcriptPrompt).toBe("");
+    expect(call?.followupRun.currentTurnKind).toBe("room_event");
+    expect(call?.followupRun.run.sourceReplyDeliveryMode).toBe("message_tool_only");
+    expect(call?.followupRun.run.suppressNextUserMessagePersistence).toBe(true);
+    expect(call?.followupRun.currentTurnContext?.text).toContain(
+      "#35675 obviyus ->#35674: Are you fr fr",
+    );
+    expect(call?.followupRun.currentTurnContext?.text).toContain("[OpenClaw turn]");
+    expect(call?.followupRun.currentTurnContext?.text).toContain(
+      "visible_reply_contract: message_tool_only",
+    );
+    expect(call?.followupRun.currentTurnContext?.text).toContain(
+      "Current event:\n#35676 Keśava: No wtf",
+    );
+  });
+
+  it("keeps room events tool-only when group replies are automatic", async () => {
+    vi.mocked(buildInboundUserContextPrefix).mockReturnValueOnce("room context");
+
+    await runPreparedReply(
+      baseParams({
+        opts: { sourceReplyDeliveryMode: "automatic" },
+        ctx: {
+          Body: "ambient",
+          RawBody: "ambient",
+          CommandBody: "ambient",
+          Provider: "telegram",
+          Surface: "telegram",
+          ChatType: "group",
+        },
+        sessionCtx: {
+          Body: "ambient",
+          BodyStripped: "ambient",
+          Provider: "telegram",
+          Surface: "telegram",
+          ChatType: "group",
+          InboundTurnKind: "room_event",
+          MessageSid: "991",
+          SenderName: "Alice",
+        },
+      }),
+    );
+
+    const call = requireLastRunReplyAgentCall();
+    expect(call?.followupRun.run.sourceReplyDeliveryMode).toBe("message_tool_only");
+    expect(call?.followupRun.currentTurnContext?.text).toContain(
+      "visible_reply_contract: message_tool_only",
     );
   });
 
