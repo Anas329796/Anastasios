@@ -15,6 +15,7 @@ import { logVerbose } from "../../globals.js";
 import { registerAgentRunContext } from "../../infra/agent-events.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { defaultRuntime } from "../../runtime.js";
+import { readStringValue } from "../../shared/string-coerce.js";
 import { isInternalMessageChannel } from "../../utils/message-channel.js";
 import type { GetReplyOptions, ReplyPayload } from "../types.js";
 import { runPreflightCompactionIfNeeded } from "./agent-runner-memory.js";
@@ -35,6 +36,139 @@ import type { TypingController } from "./typing.js";
 
 type EmbeddedAgentRunResult = Awaited<ReturnType<typeof runEmbeddedPiAgent>>;
 
+type FollowupAgentEvent = { stream: string; data: Record<string, unknown> };
+
+function readApprovalScopeValue(value: unknown): "turn" | "session" | undefined {
+  return value === "turn" || value === "session" ? value : undefined;
+}
+
+function filterStringArray(value: unknown): string[] | undefined {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : undefined;
+}
+
+async function forwardFollowupProgressEvent(params: {
+  evt: FollowupAgentEvent;
+  opts?: GetReplyOptions;
+  detailMode?: "explain" | "raw";
+  emitChannelProgress?: boolean;
+  onCompactionComplete?: () => void;
+}) {
+  const { evt, opts } = params;
+  const emitChannelProgress = params.emitChannelProgress !== false;
+  if (!emitChannelProgress && evt.stream !== "compaction") {
+    return;
+  }
+
+  if (evt.stream === "tool") {
+    const phase = readStringValue(evt.data.phase) ?? "";
+    const name = readStringValue(evt.data.name);
+    if (phase === "start" || phase === "update") {
+      await opts?.onToolStart?.({
+        name,
+        phase,
+        args:
+          evt.data.args && typeof evt.data.args === "object"
+            ? (evt.data.args as Record<string, unknown>)
+            : undefined,
+        detailMode: params.detailMode,
+      });
+    }
+  }
+
+  const suppressItemChannelProgress =
+    evt.stream === "item" &&
+    evt.data.suppressChannelProgress === true &&
+    Boolean(opts?.onToolStart);
+  if (evt.stream === "item" && !suppressItemChannelProgress) {
+    await opts?.onItemEvent?.({
+      itemId: readStringValue(evt.data.itemId),
+      kind: readStringValue(evt.data.kind),
+      title: readStringValue(evt.data.title),
+      name: readStringValue(evt.data.name),
+      phase: readStringValue(evt.data.phase),
+      status: readStringValue(evt.data.status),
+      summary: readStringValue(evt.data.summary),
+      progressText: readStringValue(evt.data.progressText),
+      meta: readStringValue(evt.data.meta),
+      approvalId: readStringValue(evt.data.approvalId),
+      approvalSlug: readStringValue(evt.data.approvalSlug),
+    });
+  }
+
+  if (evt.stream === "plan") {
+    await opts?.onPlanUpdate?.({
+      phase: readStringValue(evt.data.phase),
+      title: readStringValue(evt.data.title),
+      explanation: readStringValue(evt.data.explanation),
+      steps: filterStringArray(evt.data.steps),
+      source: readStringValue(evt.data.source),
+    });
+  }
+
+  if (evt.stream === "approval") {
+    await opts?.onApprovalEvent?.({
+      phase: readStringValue(evt.data.phase),
+      kind: readStringValue(evt.data.kind),
+      status: readStringValue(evt.data.status),
+      title: readStringValue(evt.data.title),
+      itemId: readStringValue(evt.data.itemId),
+      toolCallId: readStringValue(evt.data.toolCallId),
+      approvalId: readStringValue(evt.data.approvalId),
+      approvalSlug: readStringValue(evt.data.approvalSlug),
+      command: readStringValue(evt.data.command),
+      host: readStringValue(evt.data.host),
+      reason: readStringValue(evt.data.reason),
+      scope: readApprovalScopeValue(evt.data.scope),
+      message: readStringValue(evt.data.message),
+    });
+  }
+
+  if (evt.stream === "command_output") {
+    await opts?.onCommandOutput?.({
+      itemId: readStringValue(evt.data.itemId),
+      phase: readStringValue(evt.data.phase),
+      title: readStringValue(evt.data.title),
+      toolCallId: readStringValue(evt.data.toolCallId),
+      name: readStringValue(evt.data.name),
+      output: readStringValue(evt.data.output),
+      status: readStringValue(evt.data.status),
+      exitCode:
+        typeof evt.data.exitCode === "number" || evt.data.exitCode === null
+          ? evt.data.exitCode
+          : undefined,
+      durationMs: typeof evt.data.durationMs === "number" ? evt.data.durationMs : undefined,
+      cwd: readStringValue(evt.data.cwd),
+    });
+  }
+
+  if (evt.stream === "patch") {
+    await opts?.onPatchSummary?.({
+      itemId: readStringValue(evt.data.itemId),
+      phase: readStringValue(evt.data.phase),
+      title: readStringValue(evt.data.title),
+      toolCallId: readStringValue(evt.data.toolCallId),
+      name: readStringValue(evt.data.name),
+      added: filterStringArray(evt.data.added),
+      modified: filterStringArray(evt.data.modified),
+      deleted: filterStringArray(evt.data.deleted),
+      summary: readStringValue(evt.data.summary),
+    });
+  }
+
+  if (evt.stream === "compaction") {
+    const phase = readStringValue(evt.data.phase) ?? "";
+    if (phase === "start") {
+      await opts?.onCompactionStart?.();
+    }
+    if (phase === "end" && evt.data?.completed === true) {
+      params.onCompactionComplete?.();
+      await opts?.onCompactionEnd?.();
+    }
+  }
+}
+
 export function createFollowupRunner(params: {
   opts?: GetReplyOptions;
   typing: TypingController;
@@ -45,6 +179,7 @@ export function createFollowupRunner(params: {
   storePath?: string;
   defaultModel: string;
   agentCfgContextTokens?: number;
+  toolProgressDetail?: "explain" | "raw";
 }): (queued: FollowupRun) => Promise<void> {
   const {
     opts,
@@ -56,6 +191,7 @@ export function createFollowupRunner(params: {
     storePath,
     defaultModel,
     agentCfgContextTokens,
+    toolProgressDetail,
   } = params;
   const typingSignals = createTypingSignaler({
     typing,
@@ -211,6 +347,13 @@ export function createFollowupRunner(params: {
         ? queued
         : { ...queued, run: { ...queued.run, config: runtimeConfig } };
     const run = effectiveQueued.run;
+    const shouldEmitVerboseProgress = () => run.verboseLevel !== "off";
+    const shouldSuppressDefaultToolProgressMessages = () =>
+      opts?.suppressDefaultToolProgressMessages === true && !shouldEmitVerboseProgress();
+    const shouldEmitToolResultProgress = () =>
+      shouldEmitVerboseProgress() && !shouldSuppressDefaultToolProgressMessages();
+    const shouldEmitToolOutputProgress = () =>
+      run.verboseLevel === "full" && !shouldSuppressDefaultToolProgressMessages();
     const replyOperation = createReplyOperation({
       sessionId: run.sessionId,
       sessionKey: replySessionKey ?? "",
@@ -327,15 +470,31 @@ export function createFollowupRunner(params: {
                   bootstrapPromptWarningSignaturesSeen[
                     bootstrapPromptWarningSignaturesSeen.length - 1
                   ],
-                onAgentEvent: (evt) => {
-                  if (evt.stream !== "compaction") {
+                toolProgressDetail,
+                shouldEmitToolResult: shouldEmitToolResultProgress,
+                shouldEmitToolOutput: shouldEmitToolOutputProgress,
+                onToolResult: async (payload) => {
+                  if (
+                    run.sourceReplyDeliveryMode === "message_tool_only" &&
+                    run.verboseLevel === "off"
+                  ) {
                     return;
                   }
-                  const phase = typeof evt.data.phase === "string" ? evt.data.phase : "";
-                  const completed = evt.data?.completed === true;
-                  if (phase === "end" && completed) {
-                    attemptCompactionCount += 1;
-                  }
+                  await sendFollowupPayloads([payload], effectiveQueued, {
+                    provider,
+                    modelId: model,
+                  });
+                },
+                onAgentEvent: async (evt) => {
+                  await forwardFollowupProgressEvent({
+                    evt,
+                    opts,
+                    detailMode: toolProgressDetail,
+                    emitChannelProgress: shouldEmitToolResultProgress(),
+                    onCompactionComplete: () => {
+                      attemptCompactionCount += 1;
+                    },
+                  });
                 },
               });
               bootstrapPromptWarningSignaturesSeen = resolveBootstrapWarningSignaturesSeen(

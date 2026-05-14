@@ -1175,7 +1175,7 @@ export async function dispatchReplyFromConfig(
       return parts.join("\n\n").trim() || "Planning next steps.";
     };
     const maybeSendWorkingStatus = async (label: string): Promise<void> => {
-      if (suppressDelivery) {
+      if (shouldSuppressProgressDelivery()) {
         return;
       }
       const normalizedLabel = normalizeWorkingLabel(label);
@@ -1204,7 +1204,11 @@ export async function dispatchReplyFromConfig(
       explanation?: string;
       steps?: string[];
     }): Promise<void> => {
-      if (suppressDelivery || !shouldEmitVerboseProgress() || !shouldSendVerboseProgressMessages) {
+      if (
+        shouldSuppressProgressDelivery() ||
+        !shouldEmitVerboseProgress() ||
+        !shouldSendVerboseProgressMessages
+      ) {
         return;
       }
       const replyPayload: ReplyPayload = {
@@ -1306,6 +1310,8 @@ export async function dispatchReplyFromConfig(
       params.replyOptions?.suppressDefaultToolProgressMessages === true;
     const shouldSuppressDefaultToolProgressMessages = () =>
       suppressDefaultToolProgressMessages && !shouldEmitVerboseProgress();
+    const shouldSuppressProgressDelivery = () =>
+      sendPolicyDenied || (suppressDelivery && !shouldEmitVerboseProgress());
     const onToolResultFromReplyOptions = params.replyOptions?.onToolResult;
     const onPlanUpdateFromReplyOptions = params.replyOptions?.onPlanUpdate;
     const onApprovalEventFromReplyOptions = params.replyOptions?.onApprovalEvent;
@@ -1377,7 +1383,7 @@ export async function dispatchReplyFromConfig(
               if (!suppressAutomaticSourceDelivery) {
                 await onToolResultFromReplyOptions?.(payload);
               }
-              if (suppressDelivery) {
+              if (shouldSuppressProgressDelivery()) {
                 return;
               }
               const ttsPayload = await maybeApplyTtsToReplyPayload({

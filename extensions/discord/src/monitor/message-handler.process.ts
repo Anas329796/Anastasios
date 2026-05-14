@@ -539,6 +539,7 @@ export async function processDiscordMessage(
                 sessionKey: ctxPayload.SessionKey,
                 threadBindings,
                 mediaLocalRoots,
+                kind: info.kind,
               });
               replyReference.markSent();
               observer?.onFinalReplyDelivered?.();
@@ -574,6 +575,7 @@ export async function processDiscordMessage(
           sessionKey: ctxPayload.SessionKey,
           threadBindings,
           mediaLocalRoots,
+          kind: info.kind,
         });
         replyReference.markSent();
         if (isFinal) {
