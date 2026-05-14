@@ -328,6 +328,20 @@ function normalizeDeepgramQueryKeys(query: ProviderQuery): ProviderQuery {
   return normalized;
 }
 
+function resolveProviderStringOption(
+  query: ProviderQuery | undefined,
+  ...keys: string[]
+): string | undefined {
+  for (const key of keys) {
+    const value = query?.[key];
+    const text = typeof value === "string" ? value.trim() : "";
+    if (text) {
+      return text;
+    }
+  }
+  return undefined;
+}
+
 function resolveProviderQuery(params: {
   providerId: string;
   config?: MediaUnderstandingConfig;
@@ -666,6 +680,16 @@ export async function runProviderEntry(params: {
             params.config?.language ??
             cfg.tools?.media?.audio?.language,
           prompt: requestOverrides.prompt ?? prompt,
+          responseFormat: resolveProviderStringOption(
+            providerQuery,
+            "response_format",
+            "responseFormat",
+          ),
+          chunkingStrategy: resolveProviderStringOption(
+            providerQuery,
+            "chunking_strategy",
+            "chunkingStrategy",
+          ),
           query: providerQuery,
           timeoutMs,
           fetchFn,
@@ -677,6 +701,7 @@ export async function runProviderEntry(params: {
       text: trimOutput(result.text, maxChars),
       provider: providerId,
       model: result.model ?? model,
+      ...(result.segments ? { segments: result.segments } : {}),
     };
   }
 
