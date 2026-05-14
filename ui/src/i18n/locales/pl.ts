@@ -81,6 +81,9 @@ export const pl: TranslationMap = {
     logout: "Wyloguj",
   },
   channels: {
+    refreshingBackground:
+      "Refreshing channel status in the background; showing the last successful snapshot.",
+    partialChecks: "Some channel checks did not finish before the UI budget.",
     health: {
       title: "Stan kanału",
       subtitle: "Migawki stanu kanału z Gateway.",
@@ -238,6 +241,11 @@ export const pl: TranslationMap = {
     noSummary: "Nie zapisano podsumowania.",
     branchFromCheckpoint: "Utwórz gałąź z punktu kontrolnego",
     restoreCheckpoint: "Przywróć punkt kontrolny",
+    pagination: {
+      of: "of {count}",
+    },
+    perPage: "{size} per page",
+    minutesSeconds: "{minutes}m {seconds}s",
   },
   agents: {
     noAgents: "No agents",
@@ -432,6 +440,7 @@ export const pl: TranslationMap = {
     access: {
       title: "Dostęp do Gateway",
       subtitle: "Gdzie panel się łączy i jak się uwierzytelnia.",
+      wsPlaceholder: "ws://100.x.y.z:18789",
       wsUrl: "URL WebSocket",
       token: "Token Gateway",
       password: "Hasło (nie jest przechowywane)",
@@ -450,6 +459,7 @@ export const pl: TranslationMap = {
     snapshot: {
       title: "Migawka",
       subtitle: "Najnowsze informacje z uzgadniania połączenia z Gateway.",
+      tick: "{seconds}s",
       status: "Status",
       uptime: "Czas działania",
       tickInterval: "Interwał tyknięcia",

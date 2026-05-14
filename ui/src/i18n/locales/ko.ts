@@ -81,6 +81,9 @@ export const ko: TranslationMap = {
     logout: "로그아웃",
   },
   channels: {
+    refreshingBackground:
+      "Refreshing channel status in the background; showing the last successful snapshot.",
+    partialChecks: "Some channel checks did not finish before the UI budget.",
     health: {
       title: "채널 상태",
       subtitle: "Gateway의 채널 상태 스냅샷입니다.",
@@ -236,6 +239,11 @@ export const ko: TranslationMap = {
     noSummary: "캡처된 요약이 없습니다.",
     branchFromCheckpoint: "체크포인트에서 브랜치 생성",
     restoreCheckpoint: "체크포인트 복원",
+    pagination: {
+      of: "of {count}",
+    },
+    perPage: "{size} per page",
+    minutesSeconds: "{minutes}m {seconds}s",
   },
   agents: {
     noAgents: "No agents",
@@ -430,6 +438,7 @@ export const ko: TranslationMap = {
     access: {
       title: "Gateway 액세스",
       subtitle: "대시보드가 연결되는 위치와 인증 방식입니다.",
+      wsPlaceholder: "ws://100.x.y.z:18789",
       wsUrl: "WebSocket URL",
       token: "Gateway 토큰",
       password: "비밀번호(저장되지 않음)",
@@ -448,6 +457,7 @@ export const ko: TranslationMap = {
     snapshot: {
       title: "스냅샷",
       subtitle: "최신 Gateway 핸드셰이크 정보입니다.",
+      tick: "{seconds}s",
       status: "상태",
       uptime: "가동 시간",
       tickInterval: "틱 간격",

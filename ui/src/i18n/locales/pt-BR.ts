@@ -81,6 +81,9 @@ export const pt_BR: TranslationMap = {
     logout: "Sair",
   },
   channels: {
+    refreshingBackground:
+      "Refreshing channel status in the background; showing the last successful snapshot.",
+    partialChecks: "Some channel checks did not finish before the UI budget.",
     health: {
       title: "Saúde do canal",
       subtitle: "Instantâneos do status do canal do gateway.",
@@ -237,6 +240,11 @@ export const pt_BR: TranslationMap = {
     noSummary: "Nenhum resumo capturado.",
     branchFromCheckpoint: "Criar ramificação a partir do checkpoint",
     restoreCheckpoint: "Restaurar checkpoint",
+    pagination: {
+      of: "of {count}",
+    },
+    perPage: "{size} per page",
+    minutesSeconds: "{minutes}m {seconds}s",
   },
   agents: {
     noAgents: "No agents",
@@ -431,6 +439,7 @@ export const pt_BR: TranslationMap = {
     access: {
       title: "Acesso ao Gateway",
       subtitle: "Onde o dashboard se conecta e como ele se autentica.",
+      wsPlaceholder: "ws://100.x.y.z:18789",
       wsUrl: "URL WebSocket",
       token: "Token do Gateway",
       password: "Senha (não armazenada)",
@@ -449,6 +458,7 @@ export const pt_BR: TranslationMap = {
     snapshot: {
       title: "Resumo",
       subtitle: "Informações mais recentes do handshake do gateway.",
+      tick: "{seconds}s",
       status: "Status",
       uptime: "Tempo de Atividade",
       tickInterval: "Intervalo de Tick",

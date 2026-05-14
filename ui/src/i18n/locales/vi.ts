@@ -81,6 +81,9 @@ export const vi: TranslationMap = {
     logout: "Đăng xuất",
   },
   channels: {
+    refreshingBackground:
+      "Refreshing channel status in the background; showing the last successful snapshot.",
+    partialChecks: "Some channel checks did not finish before the UI budget.",
     health: {
       title: "Tình trạng kênh",
       subtitle: "Ảnh chụp trạng thái kênh từ gateway.",
@@ -237,6 +240,11 @@ export const vi: TranslationMap = {
     noSummary: "Chưa ghi nhận bản tóm tắt.",
     branchFromCheckpoint: "Tạo nhánh từ điểm kiểm tra",
     restoreCheckpoint: "Khôi phục điểm kiểm tra",
+    pagination: {
+      of: "of {count}",
+    },
+    perPage: "{size} per page",
+    minutesSeconds: "{minutes}m {seconds}s",
   },
   agents: {
     noAgents: "Không có agent",
@@ -431,6 +439,7 @@ export const vi: TranslationMap = {
     access: {
       title: "Truy cập Gateway",
       subtitle: "Nơi bảng điều khiển kết nối và cách xác thực.",
+      wsPlaceholder: "ws://100.x.y.z:18789",
       wsUrl: "URL WebSocket",
       token: "Token Gateway",
       password: "Mật khẩu (không được lưu)",
@@ -449,6 +458,7 @@ export const vi: TranslationMap = {
     snapshot: {
       title: "Ảnh chụp",
       subtitle: "Thông tin bắt tay Gateway mới nhất.",
+      tick: "{seconds}s",
       status: "Trạng thái",
       uptime: "Thời gian hoạt động",
       tickInterval: "Khoảng thời gian tick",

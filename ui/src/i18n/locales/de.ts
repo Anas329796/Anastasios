@@ -81,6 +81,9 @@ export const de: TranslationMap = {
     logout: "Abmelden",
   },
   channels: {
+    refreshingBackground:
+      "Refreshing channel status in the background; showing the last successful snapshot.",
+    partialChecks: "Some channel checks did not finish before the UI budget.",
     health: {
       title: "Channel-Zustand",
       subtitle: "Statusaufnahmen der Channels vom Gateway.",
@@ -240,6 +243,11 @@ export const de: TranslationMap = {
     noSummary: "Keine Zusammenfassung erfasst.",
     branchFromCheckpoint: "Von Checkpoint verzweigen",
     restoreCheckpoint: "Checkpoint wiederherstellen",
+    pagination: {
+      of: "of {count}",
+    },
+    perPage: "{size} per page",
+    minutesSeconds: "{minutes}m {seconds}s",
   },
   agents: {
     noAgents: "No agents",
@@ -434,6 +442,7 @@ export const de: TranslationMap = {
     access: {
       title: "Gateway-Zugang",
       subtitle: "Wo sich das Dashboard verbindet und wie es sich authentifiziert.",
+      wsPlaceholder: "ws://100.x.y.z:18789",
       wsUrl: "WebSocket-URL",
       token: "Gateway-Token",
       password: "Passwort (nicht gespeichert)",
@@ -452,6 +461,7 @@ export const de: TranslationMap = {
     snapshot: {
       title: "Aufnahme",
       subtitle: "Neueste Gateway-Handshake-Informationen.",
+      tick: "{seconds}s",
       status: "Status",
       uptime: "Betriebszeit",
       tickInterval: "Tick-Intervall",

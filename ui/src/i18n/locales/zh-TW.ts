@@ -81,6 +81,9 @@ export const zh_TW: TranslationMap = {
     logout: "登出",
   },
   channels: {
+    refreshingBackground:
+      "Refreshing channel status in the background; showing the last successful snapshot.",
+    partialChecks: "Some channel checks did not finish before the UI budget.",
     health: {
       title: "頻道健康狀態",
       subtitle: "來自 Gateway 的頻道狀態快照。",
@@ -235,6 +238,11 @@ export const zh_TW: TranslationMap = {
     noSummary: "未擷取摘要。",
     branchFromCheckpoint: "從檢查點建立分支",
     restoreCheckpoint: "還原檢查點",
+    pagination: {
+      of: "of {count}",
+    },
+    perPage: "{size} per page",
+    minutesSeconds: "{minutes}m {seconds}s",
   },
   agents: {
     noAgents: "No agents",
@@ -429,6 +437,7 @@ export const zh_TW: TranslationMap = {
     access: {
       title: "網關訪問",
       subtitle: "儀表板連接的位置及其身份驗證方式。",
+      wsPlaceholder: "ws://100.x.y.z:18789",
       wsUrl: "WebSocket URL",
       token: "網關令牌",
       password: "密碼 (不存儲)",
@@ -447,6 +456,7 @@ export const zh_TW: TranslationMap = {
     snapshot: {
       title: "快照",
       subtitle: "最新的網關握手信息。",
+      tick: "{seconds}s",
       status: "狀態",
       uptime: "運行時間",
       tickInterval: "刻度間隔",

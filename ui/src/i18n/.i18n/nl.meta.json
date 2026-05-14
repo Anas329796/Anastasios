@@ -3,14 +3,17 @@
     "chat.autoScrollAlways",
     "chat.autoScrollMode",
     "chat.autoScrollNearBottom",
-    "chat.autoScrollOff"
+    "chat.autoScrollOff",
+    "sessionsView.minutesSeconds",
+    "sessionsView.pagination.of",
+    "sessionsView.perPage"
   ],
-  "generatedAt": "2026-05-14T02:57:16.053Z",
+  "generatedAt": "2026-05-14T08:45:09.838Z",
   "locale": "nl",
   "model": "gpt-5.5",
   "provider": "openai",
-  "sourceHash": "21a3e182cf575ee49da8100200441d290766012efb17685445098f21d46dcab7",
-  "totalKeys": 1112,
-  "translatedKeys": 1108,
+  "sourceHash": "ccb26d3016152a3621ef4b9aec936cabf961983d7d06224f04041ee080af7d6b",
+  "totalKeys": 1119,
+  "translatedKeys": 1112,
   "workflow": 1
 }

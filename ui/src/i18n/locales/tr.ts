@@ -81,6 +81,9 @@ export const tr: TranslationMap = {
     logout: "Çıkış yap",
   },
   channels: {
+    refreshingBackground:
+      "Refreshing channel status in the background; showing the last successful snapshot.",
+    partialChecks: "Some channel checks did not finish before the UI budget.",
     health: {
       title: "Kanal durumu",
       subtitle: "Gateway'den alınan kanal durumu anlık görüntüleri.",
@@ -239,6 +242,11 @@ export const tr: TranslationMap = {
     noSummary: "Özet yakalanmadı.",
     branchFromCheckpoint: "Kontrol noktasından dal oluştur",
     restoreCheckpoint: "Kontrol noktasını geri yükle",
+    pagination: {
+      of: "of {count}",
+    },
+    perPage: "{size} per page",
+    minutesSeconds: "{minutes}m {seconds}s",
   },
   agents: {
     noAgents: "No agents",
@@ -433,6 +441,7 @@ export const tr: TranslationMap = {
     access: {
       title: "Gateway Erişimi",
       subtitle: "Kontrol panelinin nereye bağlandığı ve nasıl kimlik doğruladığı.",
+      wsPlaceholder: "ws://100.x.y.z:18789",
       wsUrl: "WebSocket URL'si",
       token: "Gateway Token",
       password: "Parola (saklanmaz)",
@@ -451,6 +460,7 @@ export const tr: TranslationMap = {
     snapshot: {
       title: "Anlık Görüntü",
       subtitle: "En son gateway el sıkışma bilgileri.",
+      tick: "{seconds}s",
       status: "Durum",
       uptime: "Çalışma Süresi",
       tickInterval: "Tick Aralığı",
