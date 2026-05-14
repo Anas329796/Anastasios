@@ -84,7 +84,10 @@ export function buildMissingScopeForbiddenBody(missingScope: string | undefined)
   };
 }
 
-export function sendMissingScopeForbidden(res: ServerResponse, missingScope: string | undefined) {
+export function sendMissingScopeForbidden(
+  res: ServerResponse,
+  missingScope: string | undefined,
+) {
   sendJson(res, 403, buildMissingScopeForbiddenBody(missingScope));
 }
 
