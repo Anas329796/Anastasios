@@ -1572,7 +1572,7 @@ describe("runGatewayUpdate", () => {
   });
 
   async function runNpmGlobalUpdateCase(params: {
-    expectedInstallCommand: string;
+    expectedInstallCommand: string | ((argv: string[]) => boolean);
     channel?: "stable" | "beta";
     tag?: string;
   }): Promise<{ calls: string[]; result: Awaited<ReturnType<typeof runGatewayUpdate>> }> {
@@ -1606,7 +1606,7 @@ describe("runGatewayUpdate", () => {
     pkgRoot: string;
     npmRootOutput?: string;
     pnpmRootOutput?: string;
-    installCommand: string;
+    installCommand: string | ((argv: string[]) => boolean);
     gitRootMode?: "not-git" | "missing";
     onInstall?: (options?: {
       env?: NodeJS.ProcessEnv;
@@ -1615,6 +1615,10 @@ describe("runGatewayUpdate", () => {
     }) => Promise<void>;
   }) => {
     const calls: string[] = [];
+    const matchesInstallCommand = (argv: string[]) =>
+      typeof params.installCommand === "string"
+        ? argv.join(" ") === params.installCommand
+        : params.installCommand(argv);
     const runCommand = async (argv: string[], options?: { env?: NodeJS.ProcessEnv }) => {
       const key = argv.join(" ");
       calls.push(key);
@@ -1636,18 +1640,34 @@ describe("runGatewayUpdate", () => {
         }
         return { stdout: "", stderr: "", code: 1 };
       }
-      if (key === params.installCommand) {
+      if (argv[0] === "npm" && argv[1] === "pack") {
+        const packDestinationIndex = argv.indexOf("--pack-destination");
+        const packDestination =
+          packDestinationIndex >= 0 ? argv[packDestinationIndex + 1] : undefined;
+        if (typeof packDestination !== "string") {
+          return { stdout: "", stderr: "missing pack destination", code: 1 };
+        }
+        await fs.mkdir(packDestination, { recursive: true });
+        const tarballName = "openclaw-2.0.0.tgz";
+        await fs.writeFile(path.join(packDestination, tarballName), "");
+        return {
+          stdout: JSON.stringify([{ filename: tarballName }]),
+          stderr: "",
+          code: 0,
+        };
+      }
+      if (matchesInstallCommand(argv)) {
         await params.onInstall?.(options);
         return { stdout: "ok", stderr: "", code: 0 };
       }
       const prefixIndex = argv.indexOf("--prefix");
       const installPrefix = prefixIndex >= 0 ? argv[prefixIndex + 1] : undefined;
       if (installPrefix) {
-        const normalizedInstallCommand = [
+        const normalizedInstallArgv = [
           ...argv.slice(0, prefixIndex),
           ...argv.slice(prefixIndex + 2),
-        ].join(" ");
-        if (normalizedInstallCommand === params.installCommand) {
+        ];
+        if (matchesInstallCommand(normalizedInstallArgv)) {
           const packageRoot =
             process.platform === "win32"
               ? path.join(installPrefix, "node_modules", "openclaw")
@@ -1696,16 +1716,29 @@ describe("runGatewayUpdate", () => {
 
   it("updates global npm installs from the GitHub main package spec", async () => {
     const { calls, result } = await runNpmGlobalUpdateCase({
-      expectedInstallCommand:
-        "npm i -g github:openclaw/openclaw#main --no-fund --no-audit --loglevel=error",
+      expectedInstallCommand: (argv) =>
+        argv[0] === "npm" &&
+        argv[1] === "i" &&
+        argv[2] === "-g" &&
+        argv.some((arg) => arg.endsWith("openclaw-2.0.0.tgz")) &&
+        argv.includes("--no-fund") &&
+        argv.includes("--no-audit") &&
+        argv.includes("--loglevel=error"),
       tag: "main",
     });
 
     expect(result.status).toBe("ok");
     expect(result.mode).toBe("npm");
-    expect(calls).toContain(
-      "npm i -g github:openclaw/openclaw#main --no-fund --no-audit --loglevel=error",
+    expect(calls.some((call) => call.startsWith("npm pack github:openclaw/openclaw#main "))).toBe(
+      true,
     );
+    expect(
+      calls.some((call) =>
+        /^npm i -g (?:--prefix \S+ )?\S+openclaw-2\.0\.0\.tgz --no-fund --no-audit --loglevel=error$/.test(
+          call,
+        ),
+      ),
+    ).toBe(true);
   });
 
   it("runs doctor after global npm updates before reporting success", async () => {

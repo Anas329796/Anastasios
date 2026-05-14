@@ -379,6 +379,12 @@ describe("update-cli", () => {
   const packageInstallCommandCall = () =>
     commandCalls().find(([argv]) => argv[0] === "npm" && argv[1] === "i" && argv[2] === "-g");
 
+  const packagePackCommandCall = () =>
+    commandCalls().find(([argv]) => argv[0] === "npm" && argv[1] === "pack");
+
+  const isNpmGitPackageSpec = (spec: string) =>
+    /^github:/i.test(spec) || /^git\+(?:ssh|https|http|file):/i.test(spec) || /^git:/i.test(spec);
+
   const doctorCommandCall = () =>
     commandCalls().find(
       ([argv]) => argv[2] === "doctor" && argv[3] === "--non-interactive" && argv[4] === "--fix",
@@ -435,15 +441,41 @@ describe("update-cli", () => {
   const expectPackageInstallSpec = (spec: string) => {
     expect(runGatewayUpdate).not.toHaveBeenCalled();
     const call = packageInstallCommandCall();
-    expect(call?.[0]).toEqual([
-      "npm",
-      "i",
-      "-g",
-      spec,
-      "--no-fund",
-      "--no-audit",
-      "--loglevel=error",
-    ]);
+    if (isNpmGitPackageSpec(spec)) {
+      const packCall = packagePackCommandCall();
+      const packDestinationIndex = packCall?.[0].indexOf("--pack-destination") ?? -1;
+      const packDestination =
+        packDestinationIndex >= 0 ? packCall?.[0][packDestinationIndex + 1] : undefined;
+      expect(packCall?.[0]).toEqual([
+        "npm",
+        "pack",
+        spec,
+        "--pack-destination",
+        expect.any(String),
+        "--json",
+        "--loglevel=error",
+      ]);
+      expect(call?.[0]).toEqual([
+        "npm",
+        "i",
+        "-g",
+        path.join(String(packDestination), "openclaw-9999.0.0.tgz"),
+        "--no-fund",
+        "--no-audit",
+        "--loglevel=error",
+      ]);
+    } else {
+      expect(packagePackCommandCall()).toBeUndefined();
+      expect(call?.[0]).toEqual([
+        "npm",
+        "i",
+        "-g",
+        spec,
+        "--no-fund",
+        "--no-audit",
+        "--loglevel=error",
+      ]);
+    }
     if (call?.[1] === undefined) {
       throw new Error("Expected package install command options");
     }
@@ -597,13 +629,24 @@ describe("update-cli", () => {
         latestVersion: "1.2.3",
       },
     });
-    vi.mocked(runCommandWithTimeout).mockResolvedValue({
-      stdout: "",
-      stderr: "",
-      code: 0,
-      signal: null,
-      killed: false,
-      termination: "exit",
+    vi.mocked(runCommandWithTimeout).mockImplementation(async (argv) => {
+      if (Array.isArray(argv) && argv[0] === "npm" && argv[1] === "pack") {
+        const packDestinationIndex = argv.indexOf("--pack-destination");
+        const packDestination =
+          packDestinationIndex >= 0 ? argv[packDestinationIndex + 1] : undefined;
+        if (typeof packDestination === "string") {
+          await fs.mkdir(packDestination, { recursive: true });
+          await fs.writeFile(path.join(packDestination, "openclaw-9999.0.0.tgz"), "");
+        }
+      }
+      return {
+        stdout: "",
+        stderr: "",
+        code: 0,
+        signal: null,
+        killed: false,
+        termination: "exit",
+      };
     });
     vi.spyOn(updateCliShared, "readPackageName").mockImplementation(readPackageName);
     vi.spyOn(updateCliShared, "readPackageVersion").mockImplementation(readPackageVersion);
