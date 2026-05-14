@@ -78,6 +78,7 @@ export async function resolveCommandsSystemPromptBundle(
     }
   })();
   const skillsPrompt = skillsSnapshot.prompt ?? "";
+  const continuationEnabled = params.cfg?.agents?.defaults?.continuation?.enabled === true;
   const tools = (() => {
     try {
       return createOpenClawCodingTools({
@@ -98,6 +99,24 @@ export async function resolveCommandsSystemPromptBundle(
         senderIsOwner: params.command.senderIsOwner,
         modelProvider: params.provider,
         modelId: params.model,
+        // System-prompt generation path: register request_compaction in the
+        // toolNames list when continuation is enabled so the prompt reflects
+        // the full RFC §2.1 tool surface. Actual compaction only runs on
+        // runtime paths; this inventory closure is a no-op.
+        requestCompactionOpts: continuationEnabled
+          ? {
+              sessionId: targetSessionEntry?.sessionId,
+              // Inventory-only closure (no-op surface for /status & docs).
+              // Returning null is consistent with the contract; this is never
+              // actually invoked.
+              getContextUsage: () => null,
+              triggerCompaction: async () => ({
+                ok: false,
+                compacted: false,
+                reason: "system-prompt inventory path",
+              }),
+            }
+          : undefined,
       });
     } catch {
       return [];
@@ -168,6 +187,8 @@ export async function resolveCommandsSystemPromptBundle(
     nativeCommandGuidanceLines: listRegisteredPluginAgentPromptGuidance(),
     runtimeInfo,
     sandboxInfo,
+    memoryCitationsMode: params.cfg?.memory?.citations,
+    continuationEnabled: params.cfg?.agents?.defaults?.continuation?.enabled === true,
   });
 
   return { systemPrompt, tools, skillsPrompt, bootstrapFiles, injectedFiles, sandboxRuntime };

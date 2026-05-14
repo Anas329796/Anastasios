@@ -157,19 +157,33 @@ export type LaneExecutionState =
 
 export interface QuotaSuspension {
   schemaVersion: 1;
-  suspendedAt: number; // epoch ms
+  suspendedAt: number;
   reason: "quota_exhausted" | "manual" | "circuit_open";
   failedProvider: string;
   failedModel: string;
-  /** Recovery briefing text injected into the next attempt when state === "resuming". */
   summary?: string;
-  /** Opaque pointer to an external snapshot blob (path/key); not the briefing text itself. */
   snapshotRef?: string;
-  /** Lane that was set to concurrency=0 when this suspension was issued. */
   laneId?: string;
-  expectedResumeBy?: number; // Reaper TTL (e.g. 30min)
-  state: LaneExecutionState; // State machine check for hot-path
+  expectedResumeBy?: number;
+  state: LaneExecutionState;
 }
+
+export type SessionPostCompactionDelegate = {
+  task: string;
+  createdAt: number;
+  /** Stable original arm time, preserved across re-stage/restart cycles. */
+  firstArmedAt?: number;
+  /**
+   * Post-compaction delegates are silent by contract. Persist the explicit
+   * flags so the intent survives session-store round trips.
+   */
+  silent?: boolean;
+  silentWake?: boolean;
+  targetSessionKey?: string;
+  targetSessionKeys?: string[];
+  fanoutMode?: "tree" | "all";
+  traceparent?: string;
+};
 
 export type SessionEntry = {
   /**
@@ -193,6 +207,8 @@ export type SessionEntry = {
   pluginExtensionSlotKeys?: Record<string, Record<string, string>>;
   /** Durable one-shot prompt additions drained before the next agent turn. */
   pluginNextTurnInjections?: Record<string, SessionPluginNextTurnInjection[]>;
+  /** Internal one-shot traceparent for a freshly spawned child agent run. */
+  continuationTraceparent?: string;
   sessionId: string;
   updatedAt: number;
   sessionFile?: string;
@@ -334,6 +350,11 @@ export type SessionEntry = {
   fallbackNoticeActiveModel?: string;
   fallbackNoticeReason?: string;
   contextTokens?: number;
+  /**
+   * Last context-pressure band that fired (e.g. 80, 90, 95). Used to deduplicate
+   * pressure events — only re-fires when the session crosses into a higher band.
+   */
+  lastContextPressureBand?: number;
   compactionCount?: number;
   compactionCheckpoints?: SessionCompactionCheckpoint[];
   memoryFlushAt?: number;
@@ -363,6 +384,24 @@ export type SessionEntry = {
    */
   pluginDebugEntries?: SessionPluginDebugEntry[];
   acp?: SessionAcpMeta;
+  /** Number of continuation turns completed in the current chain. Reset on external message. */
+  continuationChainCount?: number;
+  /** Timestamp (ms) when the current continuation chain started. */
+  continuationChainStartedAt?: number;
+  /** Accumulated token usage across the current continuation chain. Reset on external message. */
+  continuationChainTokens?: number;
+  /**
+   * Stable identifier for the current continuation chain (UUIDv7,
+   * RFC 9562). Minted at the 0→1 transition of
+   * `continuationChainCount`, cleared when chain state resets. Used as
+   * the `chain.id` OTEL span attribute so all spans emitted across chain steps
+   * share a single correlation key. Stable
+   * for the lifetime of the chain by definition; survives compaction
+   * via session-store persistence alongside the other chain fields.
+   */
+  continuationChainId?: string;
+  /** Post-compaction delegates staged for execution after context compaction. */
+  pendingPostCompactionDelegates?: SessionPostCompactionDelegate[];
 };
 
 function isSessionPluginTraceLine(line: string): boolean {
@@ -574,14 +613,6 @@ export type SessionSkillSnapshot = {
   skills: Array<{ name: string; primaryEnv?: string; requiredEnv?: string[] }>;
   /** Normalized agent-level filter used to build this snapshot; undefined means unrestricted. */
   skillFilter?: string[];
-  /**
-   * Runtime-only, never persisted. Carries the full parsed Skill[] (including
-   * each SKILL.md body) so the embedded runner can skip a workspace skill
-   * scan within a turn. Stripped from sessions.json on every read and write
-   * via normalizeSessionStore — see store-load.ts. On a cold session resume
-   * this is undefined and src/agents/pi-embedded-runner/skills-runtime.ts
-   * rebuilds it by reloading skill entries from disk.
-   */
   resolvedSkills?: Skill[];
   version?: number;
 };

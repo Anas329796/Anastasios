@@ -190,7 +190,14 @@ vi.mock("./subagent-announce.runtime.js", () => ({
     return await callGatewayImpl(request);
   },
   getRuntimeConfig: () => configOverride,
+  loadConfig: () => configOverride,
   loadSessionStore: vi.fn(() => sessionStore),
+  resolveContinuationRuntimeConfig: () => ({
+    maxChainLength: 10,
+    costCapTokens: 500_000,
+    minDelayMs: 5_000,
+    maxDelayMs: 300_000,
+  }),
   resolveAgentIdFromSessionKey: () => "main",
   resolveStorePath: () => "/tmp/sessions-main.json",
   resolveMainSessionKey: () => "agent:main:main",

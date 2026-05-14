@@ -14,6 +14,7 @@ import {
   emitAgentEvent,
   registerAgentRunContext,
 } from "../infra/agent-events.js";
+import { runWithDiagnosticTraceparent } from "../infra/diagnostic-trace-context.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { buildOutboundSessionContext } from "../infra/outbound/session-context.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
@@ -45,6 +46,7 @@ import {
 } from "./agent-scope.js";
 import { clearSessionAuthProfileOverride } from "./auth-profiles/session-override.js";
 import { ensureAuthProfileStore } from "./auth-profiles/store.js";
+import { createAcpVisibleTextAccumulator } from "./command/attempt-execution.helpers.js";
 import {
   persistSessionEntry as persistSessionEntryBase,
   prependInternalEventContext,
@@ -532,38 +534,40 @@ async function agentCommandInternal(
           throw agentPolicyError;
         }
 
-        await acpManager.runTurn({
-          cfg,
-          sessionKey,
-          text: body,
-          mode: "prompt",
-          requestId: runId,
-          signal: opts.abortSignal,
-          onEvent: (event) => {
-            if (event.type === "done") {
-              stopReason = event.stopReason;
-              return;
-            }
-            if (event.type !== "text_delta") {
-              return;
-            }
-            if (event.stream && event.stream !== "output") {
-              return;
-            }
-            if (!event.text) {
-              return;
-            }
-            const visibleUpdate = visibleTextAccumulator.consume(event.text);
-            if (!visibleUpdate) {
-              return;
-            }
-            attemptExecutionRuntime.emitAcpAssistantDelta({
-              runId,
-              text: visibleUpdate.text,
-              delta: visibleUpdate.delta,
-            });
-          },
-        });
+        await runWithDiagnosticTraceparent(opts.traceparent, () =>
+          acpManager.runTurn({
+            cfg,
+            sessionKey,
+            text: body,
+            mode: "prompt",
+            requestId: runId,
+            signal: opts.abortSignal,
+            onEvent: (event) => {
+              if (event.type === "done") {
+                stopReason = event.stopReason;
+                return;
+              }
+              if (event.type !== "text_delta") {
+                return;
+              }
+              if (event.stream && event.stream !== "output") {
+                return;
+              }
+              if (!event.text) {
+                return;
+              }
+              const visibleUpdate = visibleTextAccumulator.consume(event.text);
+              if (!visibleUpdate) {
+                return;
+              }
+              attemptExecutionRuntime.emitAcpAssistantDelta({
+                runId,
+                text: visibleUpdate.text,
+                delta: visibleUpdate.delta,
+              });
+            },
+          }),
+        );
       } catch (error) {
         const { toAcpRuntimeError } = await loadAcpRuntimeErrorsRuntime();
         const acpError = toAcpRuntimeError({
@@ -1436,4 +1440,5 @@ export async function agentCommandFromIngress(
 export const __testing = {
   resolveAgentRuntimeConfig,
   prepareAgentCommandExecution,
+  createAcpVisibleTextAccumulator,
 };

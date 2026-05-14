@@ -31,6 +31,7 @@ const slackThreadOrigin = {
   accountId: "acct-1",
   threadId: "171.222",
 } as const;
+const validTraceparent = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01";
 
 function createGatewayMock(response: Record<string, unknown> = {}) {
   return vi.fn(async () => response) as unknown as typeof runtimeCallGateway;
@@ -134,6 +135,7 @@ async function deliverSlackThreadAnnouncement(params: {
   sendMessage?: typeof runtimeSendMessage;
   internalEvents?: AgentInternalEvent[];
   sourceTool?: string;
+  traceparent?: string;
 }) {
   __testing.setDepsForTest({
     callGateway: params.callGateway,
@@ -162,6 +164,7 @@ async function deliverSlackThreadAnnouncement(params: {
     directIdempotencyKey: params.directIdempotencyKey,
     internalEvents: params.internalEvents,
     sourceTool: params.sourceTool,
+    ...(params.traceparent ? { traceparent: params.traceparent } : {}),
   });
 }
 
@@ -170,6 +173,7 @@ async function deliverDiscordDirectMessageCompletion(params: {
   sendMessage?: typeof runtimeSendMessage;
   internalEvents?: AgentInternalEvent[];
   sourceTool?: string;
+  traceparent?: string;
 }) {
   const origin = {
     channel: "discord",
@@ -200,6 +204,7 @@ async function deliverDiscordDirectMessageCompletion(params: {
     directIdempotencyKey: "announce-dm-fallback-empty",
     internalEvents: params.internalEvents,
     sourceTool: params.sourceTool,
+    ...(params.traceparent ? { traceparent: params.traceparent } : {}),
   });
 }
 
@@ -267,6 +272,7 @@ async function deliverSlackChannelAnnouncement(params: {
   sendMessage?: typeof runtimeSendMessage;
   internalEvents?: AgentInternalEvent[];
   sourceTool?: string;
+  traceparent?: string;
 }) {
   const origin = {
     channel: "slack",
@@ -301,6 +307,7 @@ async function deliverSlackChannelAnnouncement(params: {
     directIdempotencyKey: params.directIdempotencyKey,
     internalEvents: params.internalEvents,
     sourceTool: params.sourceTool,
+    ...(params.traceparent ? { traceparent: params.traceparent } : {}),
   });
 }
 
@@ -446,6 +453,7 @@ describe("deliverSubagentAnnouncement active requester steering", () => {
       accountId?: string;
       threadId?: string | number;
     };
+    traceparent?: string;
   }) {
     const callGateway = createGatewayMock();
     let activityChecks = 0;
@@ -477,6 +485,7 @@ describe("deliverSubagentAnnouncement active requester steering", () => {
       requesterIsSubagent: false,
       expectsCompletionMessage: false,
       directIdempotencyKey: "announce-no-external-route",
+      ...(params.traceparent ? { traceparent: params.traceparent } : {}),
     });
 
     expectRecordFields(result, {
@@ -523,6 +532,7 @@ describe("deliverSubagentAnnouncement active requester steering", () => {
         accountId: "acct-1",
         threadId: "171.222",
       },
+      traceparent: validTraceparent,
     });
 
     expect(callGateway).not.toHaveBeenCalled();
@@ -628,6 +638,7 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
       isActive: false,
       expectsCompletionMessage: true,
       directIdempotencyKey: "announce-1b",
+      traceparent: validTraceparent,
     });
 
     expectGatewayAgentParams(callGateway, {
@@ -637,6 +648,7 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
       to: "channel:C123",
       threadId: "171.222",
       bestEffortDeliver: true,
+      traceparent: validTraceparent,
     });
   });
 
@@ -705,6 +717,7 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
       isActive: false,
       expectsCompletionMessage: true,
       directIdempotencyKey: "announce-thread-fallback-1",
+      traceparent: validTraceparent,
       internalEvents: [
         {
           type: "task_completion",
@@ -1026,6 +1039,7 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
       isActive: false,
       expectsCompletionMessage: true,
       directIdempotencyKey: "announce-thread-fallback-1",
+      traceparent: validTraceparent,
       internalEvents: [
         {
           type: "task_completion",

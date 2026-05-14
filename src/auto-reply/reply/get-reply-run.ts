@@ -449,6 +449,9 @@ export async function runPreparedReply(
     promptSessionCtx.ChatType === "group" || promptSessionCtx.ChatType === "channel";
   const isDirectChat = promptSessionCtx.ChatType === "direct" || promptSessionCtx.ChatType === "dm";
   const wasMentioned = ctx.WasMentioned === true;
+  const continuationTrigger = opts?.continuationTrigger;
+  const isDelegateWake = continuationTrigger === "delegate-return";
+  const isContinuationWake = continuationTrigger === "work-wake" || isDelegateWake;
   const { typingPolicy, suppressTyping } = resolveRunTypingPolicy({
     requestedPolicy: opts?.typingPolicy,
     suppressTyping: opts?.suppressTyping === true,
@@ -875,22 +878,16 @@ export async function runPreparedReply(
       : [provider];
   let authProfileId = useFastReplyRuntime
     ? preparedSessionState.sessionEntry?.authProfileOverride
-    : await traceRunPhase("reply.resolve_auth_profile", () =>
-        resolveSessionAuthProfileOverride({
-          cfg,
-          provider,
-          acceptedProviderIds: resolveAcceptedAuthProfileProviders(),
-          agentDir,
-          sessionEntry: preparedSessionState.sessionEntry,
-          sessionStore,
-          sessionKey,
-          storePath,
-          isNewSession,
-        }),
-      );
-  const { runReplyAgent } = await traceRunPhase("reply.load_agent_runner_runtime", () =>
-    loadAgentRunnerRuntime(),
-  );
+    : await resolveSessionAuthProfileOverride({
+        cfg,
+        provider,
+        agentDir,
+        sessionEntry: preparedSessionState.sessionEntry,
+        sessionStore,
+        sessionKey,
+        storePath,
+        isNewSession,
+      });
   const queueKey = sessionKey ?? sessionIdFinal;
   preparedSessionState = resolvePreparedSessionState();
   const resolveActiveQueueSessionId = () =>
@@ -1070,6 +1067,7 @@ export async function runPreparedReply(
         }
       : undefined;
 
+  const { runReplyAgent } = await loadAgentRunnerRuntime();
   return runReplyAgent({
     commandBody: prefixedCommandBody,
     transcriptCommandBody,
@@ -1108,5 +1106,6 @@ export async function runPreparedReply(
     typingMode,
     resetTriggered: effectiveResetTriggered,
     replyThreadingOverride,
+    isContinuationWake,
   });
 }

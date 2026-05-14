@@ -11,6 +11,7 @@ import {
 import {
   createChildDiagnosticTraceContext,
   freezeDiagnosticTraceContext,
+  runWithDiagnosticTraceContext,
   type DiagnosticTraceContext,
 } from "../infra/diagnostic-trace-context.js";
 import type { SessionState } from "../logging/diagnostic-session-state.js";
@@ -743,7 +744,10 @@ export function wrapToolWithBeforeToolCallHook(
       });
       const startedAt = Date.now();
       try {
-        const result = await execute(toolCallId, outcome.params, signal, onUpdate);
+        const executeTool = () => execute(toolCallId, outcome.params, signal, onUpdate);
+        const result = await (trace
+          ? runWithDiagnosticTraceContext(trace, executeTool)
+          : executeTool());
         const durationMs = Date.now() - startedAt;
         await recordLoopOutcome({
           ctx,

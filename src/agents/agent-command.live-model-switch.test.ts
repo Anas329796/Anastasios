@@ -1,4 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { getActiveDiagnosticTraceContext } from "../infra/diagnostic-trace-context.js";
 import { INTERNAL_RUNTIME_CONTEXT_BEGIN, INTERNAL_RUNTIME_CONTEXT_END } from "./internal-events.js";
 import { LiveSessionModelSwitchError } from "./live-model-switch-error.js";
 
@@ -1299,6 +1300,40 @@ describe("agentCommand – LiveSessionModelSwitchError retry", () => {
     expect(state.resolveAcpExplicitTurnPolicyErrorMock).toHaveBeenCalledTimes(1);
     expect(state.resolveAcpDispatchPolicyErrorMock).not.toHaveBeenCalled();
     expect(state.acpRunTurnMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs ACP turns under inherited traceparent context", async () => {
+    const traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+    const spanId = "00f067aa0ba902b7";
+    const traceparent = `00-${traceId}-${spanId}-01`;
+    let observedTrace = undefined as ReturnType<typeof getActiveDiagnosticTraceContext>;
+    state.acpResolveSessionMock.mockReturnValue({
+      kind: "ready",
+      meta: {
+        agent: "claude",
+        cwd: "/tmp/workspace",
+      },
+    });
+    state.acpRunTurnMock.mockImplementationOnce(async (params: unknown) => {
+      observedTrace = getActiveDiagnosticTraceContext();
+      const onEvent = (params as { onEvent?: (event: unknown) => void }).onEvent;
+      onEvent?.({ type: "text_delta", stream: "output", text: "done" });
+      onEvent?.({ type: "done", stopReason: "end_turn" });
+    });
+
+    await agentCommand({
+      message: "inherited ACP turn",
+      sessionKey: "agent:main",
+      senderIsOwner: true,
+      traceparent,
+    });
+
+    expect(observedTrace).toEqual({
+      traceId,
+      spanId,
+      traceFlags: "01",
+      spanIdSource: "remote",
+    });
   });
 
   it("keeps ordinary ACP turns blocked when ACP dispatch is disabled", async () => {

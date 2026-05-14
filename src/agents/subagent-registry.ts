@@ -58,6 +58,7 @@ import {
   markSubagentRunPausedAfterYield,
   type RegisterSubagentRunParams,
 } from "./subagent-registry-run-manager.js";
+import { configureSubagentRegistrySpawnRuntime } from "./subagent-registry-spawn-runtime.js";
 import {
   getSubagentRunsSnapshotForRead,
   persistSubagentRunsToDisk,
@@ -995,6 +996,11 @@ const subagentRunManager = createSubagentRunManager({
 configureSubagentRegistrySteerRuntime({
   replaceSubagentRunAfterSteer: (params) => subagentRunManager.replaceSubagentRunAfterSteer(params),
   finalizeInterruptedSubagentRun: async (params) => await finalizeInterruptedSubagentRun(params),
+});
+configureSubagentRegistrySpawnRuntime({
+  countActiveRunsForSession: (requesterSessionKey) =>
+    countActiveRunsForSession(requesterSessionKey),
+  registerSubagentRun: (params) => registerSubagentRun(params),
 });
 
 export function markSubagentRunForSteerRestart(runId: string) {

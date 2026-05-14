@@ -6,5 +6,11 @@
     "../../packages/**/*.ts",
     "../../extensions/**/*"
   ],
-  "exclude": ["../../node_modules", "../../dist", "../../dist-runtime"]
+  "exclude": [
+    "../../node_modules",
+    "../../dist",
+    "../../dist-runtime",
+    "../../packages/*/dist",
+    "../../packages/*/dist-runtime"
+  ]
 }

@@ -301,6 +301,7 @@ export async function handleInlineActions(params: {
         agentDir,
         workspaceDir,
         config: cfg,
+        liveSessionToolConfig: true,
         allowGatewaySubagentBinding: true,
         senderIsOwner: command.senderIsOwner,
         sessionId: targetSessionEntry?.sessionId,
