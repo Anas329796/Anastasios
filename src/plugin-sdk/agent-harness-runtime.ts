@@ -163,6 +163,7 @@ export {
   isActiveHarnessContextEngine,
   runHarnessContextEngineMaintenance,
 } from "../agents/harness/context-engine-lifecycle.js";
+export { estimatePrePromptTokens } from "../agents/pi-embedded-runner/run/preemptive-compaction.js";
 export {
   runAgentHarnessAfterToolCallHook,
   runAgentHarnessBeforeMessageWriteHook,
