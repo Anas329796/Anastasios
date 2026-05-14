@@ -703,6 +703,14 @@ export async function runPreparedReply(
       });
       if (eventsBlock) {
         drainedSystemEventBlocks.push(eventsBlock);
+        // Owner-auth downgrade fires for any `System (untrusted):` line in
+        // the drained block — including lines inside an
+        // INTERNAL_RUNTIME_CONTEXT wrap. The wrapped block is hidden from
+        // the user-facing transcript but still flows into the model's
+        // prompt, so attacker-influenceable content (e.g. a cron payload
+        // relayed via `queueCronAwarenessSystemEvent` with `trusted:
+        // false`) must NOT have access to owner-only tools or directives.
+        // The trust signal is the source of truth here; visibility is not.
         if (UNTRUSTED_SYSTEM_EVENT_LINE_RE.test(eventsBlock)) {
           forceSenderIsOwnerFalseFromSystemEvents = true;
         }
