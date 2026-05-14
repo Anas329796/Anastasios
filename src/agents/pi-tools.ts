@@ -655,6 +655,7 @@ export function createOpenClawCodingTools(options?: {
         const wrapped = createOpenClawReadTool(freshReadTool, {
           modelContextWindowTokens: options?.modelContextWindowTokens,
           imageSanitization,
+          containerWorkdir: sandbox?.containerWorkdir,
         });
         base.push(workspaceOnly ? wrapToolWorkspaceRootGuard(wrapped, workspaceRoot) : wrapped);
         continue;
