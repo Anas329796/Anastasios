@@ -242,10 +242,13 @@ describe("prepareAcpxCodexAuthConfig", () => {
     expect(wrapper).toContain('killChildTree("SIGTERM")');
     expect(wrapper).toContain('killChildTree("SIGKILL", { force: true })');
     expect(wrapper).toMatch(
-      /forceKillTimer = setTimeout\(\(\) => \{\s*killChildTree\("SIGKILL", \{ force: true \}\);\s*process\.exit\(1\);/s,
+      /forceKillTimer = setTimeout\(\(\) => \{\s*killChildTree\("SIGKILL", \{ force: true \}\);\s*childExitCode = 1;/s,
     );
     expect(wrapper).toMatch(
       /child\.on\("exit", \(code, signal\) => \{\s*if \(parentWatcher\) \{\s*clearInterval\(parentWatcher\);\s*\}\s*if \(orphanCleanupStarted\) \{\s*return;\s*\}/s,
+    );
+    expect(wrapper).toMatch(
+      /child\.on\("close", \(\) => \{\s*finishStderrLog\(\);\s*process\.exit\(childExitCode\);/s,
     );
     expect(wrapper).not.toMatch(
       /forceKillTimer = setTimeout\(\(\) => killChildTree\("SIGKILL"\), 1_500\);\s*forceKillTimer\.unref\?\.\(\);\s*process\.exit\(1\);/s,
@@ -523,20 +526,39 @@ describe("prepareAcpxCodexAuthConfig", () => {
     expect(resolved.agents.claude).toContain("bypass");
   });
 
-  it("captures Codex wrapper stderr in a redacted per-lease log", async () => {
+  it("captures Codex wrapper stderr in a stream-aware redacted per-lease log", async () => {
     const root = await makeTempDir();
     const stateDir = path.join(root, "state");
     const generated = generatedCodexPaths(stateDir);
     const stderrScript = path.join(root, "emit-stderr.mjs");
     await fs.writeFile(
       stderrScript,
-      `process.stderr.write([
-        "token=sk-testsecret1234567890",
-        "Authorization: Bearer bearer-secret-token-1234567890",
-        "standalone sk-live-secret1234567890",
-        "url=https://example.test/callback?token=query-secret-1234567890",
-        "github_pat_1234567890abcdefghijklmnopqrstuvwxyz",
-      ].join("\\n") + "\\n"); process.exit(1);`,
+      `const chunks = [
+        "token=sk-test",
+        "secret1234567890\\n",
+        "Authorization: Bearer bearer-secret",
+        "-token-1234567890\\n",
+        "standalone sk-live-secret",
+        "1234567890\\n",
+        "url=https://example.test/callback?token=query-secret",
+        "-1234567890\\n",
+        "github_pat_1234567890",
+        "abcdefghijklmnopqrstuvwxyz\\n",
+        "-----BEGIN PRIVATE KEY-----\\nprivate-secret-body\\n",
+        "-----END PRIVATE KEY-----\\n",
+        "tail-token=tail-secret-1234567890",
+      ];
+      let index = 0;
+      function writeNext() {
+        if (index >= chunks.length) {
+          process.exit(1);
+          return;
+        }
+        process.stderr.write(chunks[index]);
+        index += 1;
+        setTimeout(writeNext, 5);
+      }
+      writeNext();`,
       "utf8",
     );
     const pluginConfig = resolveAcpxPluginConfig({
@@ -578,10 +600,14 @@ describe("prepareAcpxCodexAuthConfig", () => {
     expect(log).toContain("standalone [REDACTED_OPENAI_KEY]");
     expect(log).toContain("?token=[REDACTED]");
     expect(log).toContain("[REDACTED_GITHUB_TOKEN]");
+    expect(log).toContain("[REDACTED_PRIVATE_KEY]");
+    expect(log).toContain("tail-token=[REDACTED]");
     expect(log).not.toContain("sk-testsecret1234567890");
     expect(log).not.toContain("bearer-secret-token-1234567890");
     expect(log).not.toContain("query-secret-1234567890");
     expect(log).not.toContain("github_pat_1234567890abcdefghijklmnopqrstuvwxyz");
+    expect(log).not.toContain("private-secret-body");
+    expect(log).not.toContain("tail-secret-1234567890");
     await expectPathMissing(path.join(stateDir, "acpx", "codex-acp-wrapper.stderr.log"));
   });
 

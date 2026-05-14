@@ -326,11 +326,28 @@ function redactDiagnosticText(text) {
   return redacted;
 }
 
-function appendStderrLog(chunk) {
+let pendingStderrLogText = "";
+const stderrPrivateKeyBeginPattern = /-----BEGIN [A-Z ]*PRIVATE KEY-----/g;
+const stderrPrivateKeyEndPattern = /-----END [A-Z ]*PRIVATE KEY-----/g;
+
+function hasUnclosedPrivateKeyBlock(text) {
+  const begins = [...text.matchAll(stderrPrivateKeyBeginPattern)];
+  if (begins.length === 0) {
+    return -1;
+  }
+  const lastBegin = begins.at(-1);
+  if (!lastBegin || lastBegin.index === undefined) {
+    return -1;
+  }
+  stderrPrivateKeyEndPattern.lastIndex = lastBegin.index;
+  const end = stderrPrivateKeyEndPattern.exec(text);
+  return end ? -1 : lastBegin.index;
+}
+
+function writeRedactedStderrLog(text) {
   if (!stderrLogPath) {
     return;
   }
-  const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
   if (!text) {
     return;
   }
@@ -343,6 +360,47 @@ function appendStderrLog(chunk) {
   } catch {
     // Stderr capture is diagnostic-only; never break the ACP adapter.
   }
+}
+
+function flushFinalizedStderrLogText() {
+  const lastLineBreak = pendingStderrLogText.lastIndexOf("\\n");
+  if (lastLineBreak === -1) {
+    if (pendingStderrLogText.length > stderrLogMaxChars) {
+      pendingStderrLogText = pendingStderrLogText.slice(-stderrLogMaxChars);
+    }
+    return;
+  }
+  let flushEnd = lastLineBreak + 1;
+  const unclosedPrivateKeyStart = hasUnclosedPrivateKeyBlock(
+    pendingStderrLogText.slice(0, flushEnd),
+  );
+  if (unclosedPrivateKeyStart !== -1) {
+    flushEnd = unclosedPrivateKeyStart;
+  }
+  if (flushEnd <= 0) {
+    if (pendingStderrLogText.length > stderrLogMaxChars) {
+      pendingStderrLogText = pendingStderrLogText.slice(-stderrLogMaxChars);
+    }
+    return;
+  }
+  const finalizedText = pendingStderrLogText.slice(0, flushEnd);
+  pendingStderrLogText = pendingStderrLogText.slice(flushEnd);
+  writeRedactedStderrLog(finalizedText);
+}
+
+function appendStderrLog(chunk) {
+  const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+  if (!text) {
+    return;
+  }
+  pendingStderrLogText += text;
+  flushFinalizedStderrLogText();
+}
+
+function finishStderrLog() {
+  const text = pendingStderrLogText;
+  pendingStderrLogText = "";
+  writeRedactedStderrLog(text);
 }
 
 function stripOpenClawWrapperArgs(args) {
@@ -424,6 +482,7 @@ child.stderr?.on("data", (chunk) => {
 
 let forceKillTimer;
 let orphanCleanupStarted = false;
+let childExitCode = 1;
 
 function killChildTree(signal, options = {}) {
   if (!child.pid || (!options.force && child.killed)) {
@@ -468,7 +527,7 @@ const parentWatcher =
         // a forced fallback signal after SIGTERM.
         forceKillTimer = setTimeout(() => {
           killChildTree("SIGKILL", { force: true });
-          process.exit(1);
+          childExitCode = 1;
         }, 1_500);
       }, 1_000);
 parentWatcher?.unref?.();
@@ -489,9 +548,15 @@ child.on("exit", (code, signal) => {
     clearTimeout(forceKillTimer);
   }
   if (code !== null) {
-    process.exit(code);
+    childExitCode = code;
+    return;
   }
-  process.exit(signal ? 1 : 0);
+  childExitCode = signal ? 1 : 0;
+});
+
+child.on("close", () => {
+  finishStderrLog();
+  process.exit(childExitCode);
 });
 `;
 }
