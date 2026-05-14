@@ -466,9 +466,18 @@ describe("devices cli clear", () => {
     await runDevicesCommand(["clear", "--yes", "--pending"]);
 
     expectGatewayCall(0, { method: "device.pair.list" });
-    expectGatewayCall(1, { method: "device.pair.remove", params: { deviceId: "device-1" } });
-    expectGatewayCall(2, { method: "device.pair.remove", params: { deviceId: "device-2" } });
-    expectGatewayCall(3, { method: "device.pair.reject", params: { requestId: "req-1" } });
+    expectGatewayCall(1, {
+      method: "device.pair.remove",
+      params: { deviceId: "device-1" },
+    });
+    expectGatewayCall(2, {
+      method: "device.pair.remove",
+      params: { deviceId: "device-2" },
+    });
+    expectGatewayCall(3, {
+      method: "device.pair.reject",
+      params: { requestId: "req-1" },
+    });
   });
 });
 
@@ -572,7 +581,14 @@ describe("devices cli local fallback", () => {
   it("refuses local fallback when the gateway request is absent from local pairing state", async () => {
     rejectGatewayForLocalFallback("scope upgrade pending approval (requestId: req-profile)");
     listDevicePairing.mockResolvedValueOnce({
-      pending: [{ requestId: "req-default", deviceId: "device-1", publicKey: "pk", ts: 1 }],
+      pending: [
+        {
+          requestId: "req-default",
+          deviceId: "device-1",
+          publicKey: "pk",
+          ts: 1,
+        },
+      ],
       paired: [],
     });
     summarizeDeviceTokens.mockReturnValue(undefined);
@@ -612,6 +628,99 @@ describe("devices cli local fallback", () => {
       runDevicesCommand(["list", "--json", "--url", "ws://127.0.0.1:18789"]),
     ).rejects.toThrow("pairing required");
     expect(listDevicePairing).not.toHaveBeenCalled();
+  });
+
+  it("routes the operator to `openclaw devices list` when a single other pending request is visible", async () => {
+    // The gateway close error omits a requestId, so the existing
+    // gateway-vs-user mismatch guard in `approvePairingWithFallback` does
+    // not fire. The supplied requestId is absent from local pending
+    // (superseded by the dial, pruned by the TTL, or never created in
+    // this profile), so the fallback previously returned null and the
+    // caller printed only "unknown requestId". The new diagnostic must
+    // identify the stale id, never suggest a direct rerun (the one
+    // visible alternative can belong to another device when TTL prune
+    // or profile mismatch is the cause), and route the operator to
+    // `openclaw devices list`. Two `callGateway` rejections cover
+    // `device.pair.list` (scope precheck) and `device.pair.approve`
+    // (the main call).
+    rejectGatewayForLocalFallback("pairing required");
+    rejectGatewayForLocalFallback("pairing required");
+    approveDevicePairing.mockResolvedValueOnce(undefined);
+    listDevicePairing.mockResolvedValue({
+      pending: [
+        {
+          requestId: "req-other",
+          deviceId: "device-1",
+          publicKey: "pk",
+          ts: 5_000,
+        },
+      ],
+      paired: [],
+    });
+
+    await expect(runDevicesApprove(["req-stale"])).rejects.toThrow(
+      /req-stale.*is not in the local pending state/s,
+    );
+
+    rejectGatewayForLocalFallback("pairing required");
+    rejectGatewayForLocalFallback("pairing required");
+    approveDevicePairing.mockResolvedValueOnce(undefined);
+    await expect(runDevicesApprove(["req-stale"])).rejects.toThrow(
+      /1 other pending request is visible.*openclaw devices list/s,
+    );
+
+    rejectGatewayForLocalFallback("pairing required");
+    rejectGatewayForLocalFallback("pairing required");
+    approveDevicePairing.mockResolvedValueOnce(undefined);
+    await expect(runDevicesApprove(["req-stale"])).rejects.not.toThrow(/Rerun:/);
+  });
+
+  it("falls back without a fresh requestId hint when no pending entries are visible locally", async () => {
+    rejectGatewayForLocalFallback("pairing required");
+    rejectGatewayForLocalFallback("pairing required");
+    approveDevicePairing.mockResolvedValueOnce(undefined);
+    listDevicePairing.mockResolvedValue({ pending: [], paired: [] });
+
+    await expect(runDevicesApprove(["req-stale"])).rejects.toThrow(
+      /No other pending requests are visible/,
+    );
+  });
+
+  it("does not suggest a direct rerun when multiple pending requests are visible", async () => {
+    // With more than one other pending request in the profile, the
+    // freshest may belong to a different device — picking it for the
+    // operator could approve an unrelated request. Assert the diagnostic
+    // routes the operator to `openclaw devices list` for explicit
+    // inspection instead of printing a `Rerun:` command.
+    rejectGatewayForLocalFallback("pairing required");
+    rejectGatewayForLocalFallback("pairing required");
+    approveDevicePairing.mockResolvedValueOnce(undefined);
+    listDevicePairing.mockResolvedValue({
+      pending: [
+        {
+          requestId: "req-other-a",
+          deviceId: "device-2",
+          publicKey: "pk2",
+          ts: 4_000,
+        },
+        {
+          requestId: "req-other-b",
+          deviceId: "device-3",
+          publicKey: "pk3",
+          ts: 5_000,
+        },
+      ],
+      paired: [],
+    });
+
+    await expect(runDevicesApprove(["req-stale"])).rejects.toThrow(
+      /2 other pending requests are visible.*openclaw devices list/s,
+    );
+
+    rejectGatewayForLocalFallback("pairing required");
+    rejectGatewayForLocalFallback("pairing required");
+    approveDevicePairing.mockResolvedValueOnce(undefined);
+    await expect(runDevicesApprove(["req-stale"])).rejects.not.toThrow(/Rerun:/);
   });
 });
 
