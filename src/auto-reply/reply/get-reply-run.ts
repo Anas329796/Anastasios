@@ -3,6 +3,7 @@ import { resolveSessionAuthProfileOverride } from "../../agents/auth-profiles/se
 import type { ExecToolDefaults } from "../../agents/bash-tools.js";
 import { resolveFastModeState } from "../../agents/fast-mode.js";
 import { resolveAgentHarnessPolicy } from "../../agents/harness/selection.js";
+import { normalizeProviderId } from "../../agents/model-selection.js";
 import { listOpenAIAuthProfileProvidersForAgentRuntime } from "../../agents/openai-codex-routing.js";
 import { resolveEmbeddedFullAccessState } from "../../agents/pi-embedded-runner/sandbox-info.js";
 import type { EmbeddedFullAccessBlockedReason } from "../../agents/pi-embedded-runner/types.js";
@@ -347,6 +348,7 @@ type RunPreparedReplyParams = {
   storePath?: string;
   workspaceDir: string;
   abortedLastRun: boolean;
+  hasAppliedImageModelOverride?: boolean;
 };
 
 export async function runPreparedReply(
@@ -377,6 +379,7 @@ export async function runPreparedReply(
     perMessageQueueOptions,
     typing,
     opts,
+    defaultProvider,
     defaultModel,
     timeoutMs,
     isNewSession,
@@ -387,6 +390,7 @@ export async function runPreparedReply(
     storePath,
     workspaceDir,
     sessionStore,
+    hasAppliedImageModelOverride,
   } = params;
   const runtimePolicySessionKey = resolveRuntimePolicySessionKey({
     cfg,
@@ -873,21 +877,34 @@ export async function runPreparedReply(
           harnessRuntime: agentHarnessPolicy.runtime,
         })
       : [provider];
-  let authProfileId = useFastReplyRuntime
-    ? preparedSessionState.sessionEntry?.authProfileOverride
-    : await traceRunPhase("reply.resolve_auth_profile", () =>
-        resolveSessionAuthProfileOverride({
-          cfg,
-          provider,
-          acceptedProviderIds: resolveAcceptedAuthProfileProviders(),
-          agentDir,
-          sessionEntry: preparedSessionState.sessionEntry,
-          sessionStore,
-          sessionKey,
-          storePath,
-          isNewSession,
-        }),
-      );
+  // When an image model override switched providers (e.g., anthropic -> openai),
+  // skip auth profile resolution to avoid forwarding the original provider's
+  // auth profile to a different provider's run. When the override stayed on the
+  // same provider (e.g., openai/gpt-4o -> openai/gpt-4o-mini), preserve the
+  // stored session auth profile so the user-selected credentials are used.
+  let authProfileId: string | undefined;
+  if (
+    hasAppliedImageModelOverride &&
+    normalizeProviderId(provider) !== normalizeProviderId(defaultProvider)
+  ) {
+    authProfileId = undefined;
+  } else if (useFastReplyRuntime) {
+    authProfileId = preparedSessionState.sessionEntry?.authProfileOverride;
+  } else {
+    authProfileId = await traceRunPhase("reply.resolve_auth_profile", () =>
+      resolveSessionAuthProfileOverride({
+        cfg,
+        provider,
+        acceptedProviderIds: resolveAcceptedAuthProfileProviders(),
+        agentDir,
+        sessionEntry: preparedSessionState.sessionEntry,
+        sessionStore,
+        sessionKey,
+        storePath,
+        isNewSession,
+      }),
+    );
+  }
   const { runReplyAgent } = await traceRunPhase("reply.load_agent_runner_runtime", () =>
     loadAgentRunnerRuntime(),
   );
@@ -934,19 +951,26 @@ export async function runPreparedReply(
         piRuntime?.waitForEmbeddedPiRunEnd(activeRunSessionId) ?? Promise.resolve(undefined),
       refreshPreparedState: async () => {
         preparedSessionState = resolvePreparedSessionState();
-        authProfileId = useFastReplyRuntime
-          ? preparedSessionState.sessionEntry?.authProfileOverride
-          : await resolveSessionAuthProfileOverride({
-              cfg,
-              provider,
-              acceptedProviderIds: resolveAcceptedAuthProfileProviders(),
-              agentDir,
-              sessionEntry: preparedSessionState.sessionEntry,
-              sessionStore,
-              sessionKey,
-              storePath,
-              isNewSession,
-            });
+        if (
+          hasAppliedImageModelOverride &&
+          normalizeProviderId(provider) !== normalizeProviderId(defaultProvider)
+        ) {
+          authProfileId = undefined;
+        } else if (useFastReplyRuntime) {
+          authProfileId = preparedSessionState.sessionEntry?.authProfileOverride;
+        } else {
+          authProfileId = await resolveSessionAuthProfileOverride({
+            cfg,
+            provider,
+            acceptedProviderIds: resolveAcceptedAuthProfileProviders(),
+            agentDir,
+            sessionEntry: preparedSessionState.sessionEntry,
+            sessionStore,
+            sessionKey,
+            storePath,
+            isNewSession,
+          });
+        }
         preparedSessionState = resolvePreparedSessionState();
         ({ prefixedCommandBody, queuedBody, transcriptCommandBody, currentTurnContext } =
           await traceRunPhase("reply.build_prompt_bodies", () => rebuildPromptBodies()));

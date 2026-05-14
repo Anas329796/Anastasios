@@ -172,6 +172,7 @@ export async function resolveReplyDirectives(params: {
   provider: string;
   model: string;
   hasResolvedHeartbeatModelOverride: boolean;
+  hasAppliedImageModelOverride?: boolean;
   typing: TypingController;
   opts?: GetReplyOptions;
   skillFilter?: string[];
@@ -201,6 +202,7 @@ export async function resolveReplyDirectives(params: {
     provider: initialProvider,
     model: initialModel,
     hasResolvedHeartbeatModelOverride,
+    hasAppliedImageModelOverride,
     typing,
     opts,
     skillFilter,
@@ -502,6 +504,7 @@ export async function resolveReplyDirectives(params: {
   const useFastModelSelection =
     useFastReplyRuntime &&
     !hasResolvedHeartbeatModelOverride &&
+    !hasAppliedImageModelOverride &&
     !(agentCfg?.models && Object.keys(agentCfg.models).length > 0) &&
     !normalizeOptionalString(targetSessionEntry?.modelOverride) &&
     !normalizeOptionalString(targetSessionEntry?.providerOverride) &&
@@ -537,6 +540,7 @@ export async function resolveReplyDirectives(params: {
         hasModelDirective: directives.hasModelDirective,
         hasResolvedHeartbeatModelOverride,
         isHeartbeat: opts?.isHeartbeat === true,
+        hasAppliedImageModelOverride,
       });
   provider = modelState.provider;
   model = modelState.model;

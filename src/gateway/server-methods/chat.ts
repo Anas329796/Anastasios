@@ -5,15 +5,29 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { CURRENT_SESSION_VERSION } from "@earendil-works/pi-coding-agent";
 import { resolveSendableOutboundReplyParts } from "openclaw/plugin-sdk/reply-payload";
 import { resolveAgentWorkspaceDir, resolveSessionAgentId } from "../../agents/agent-scope.js";
+import {
+  buildModelAliasIndex,
+  modelKey,
+  resolveModelRefFromString,
+} from "../../agents/model-selection.js";
 import { rewriteTranscriptEntriesInSessionFile } from "../../agents/pi-embedded-runner/transcript-rewrite.js";
 import { ensureSandboxWorkspaceForSession } from "../../agents/sandbox/context.js";
 import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
 import { dispatchInboundMessage } from "../../auto-reply/dispatch.js";
 import type { ReplyPayload } from "../../auto-reply/reply-payload.js";
+import {
+  collectImageModelKeys,
+  prepareImageModelFallbacks,
+  resolveModelSupportsVision,
+} from "../../auto-reply/reply/image-model-helpers.js";
 import { createReplyDispatcher } from "../../auto-reply/reply/reply-dispatcher.js";
 import { stageSandboxMedia } from "../../auto-reply/reply/stage-sandbox-media.js";
 import type { MsgContext, TemplateContext } from "../../auto-reply/templating.js";
 import { extractCanvasFromText } from "../../chat/canvas-render.js";
+import {
+  resolveAgentModelFallbackValues,
+  resolveAgentModelPrimaryValue,
+} from "../../config/model-input.js";
 import { resolveSessionFilePath } from "../../config/sessions.js";
 import { streamSessionTranscriptLines } from "../../config/sessions/transcript-stream.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
@@ -30,8 +44,9 @@ import {
   appendLocalMediaParentRoots,
   getAgentScopedMediaLocalRoots,
 } from "../../media/local-roots.js";
-import { isAudioFileName } from "../../media/mime.js";
+import { isAudioFileName, mimeTypeFromFilePath } from "../../media/mime.js";
 import type { PromptImageOrderEntry } from "../../media/prompt-image-order.js";
+import { sniffMimeFromBase64 } from "../../media/sniff-mime-from-base64.js";
 import {
   deleteMediaBuffer,
   MEDIA_MAX_BYTES,
@@ -175,6 +190,93 @@ function isTtsSupplementPayload(payload: ReplyPayload): boolean {
 
 function stripVisibleTextFromTtsSupplement(payload: ReplyPayload): ReplyPayload {
   return isTtsSupplementPayload(payload) ? { ...payload, text: undefined } : payload;
+}
+
+function normalizeAttachmentMime(mime?: string | null): string | undefined {
+  const cleaned = normalizeOptionalText(mime?.split(";")[0])?.toLowerCase();
+  return cleaned || undefined;
+}
+
+function isGenericAttachmentMime(mime?: string): boolean {
+  return mime === "application/zip" || mime === "application/octet-stream";
+}
+
+function shouldIgnoreProvidedImageMime(params: {
+  sniffedMime?: string;
+  providedMime?: string;
+}): boolean {
+  return (
+    isGenericAttachmentMime(params.sniffedMime) &&
+    Boolean(params.providedMime?.startsWith("image/"))
+  );
+}
+
+function extractAttachmentBase64Content(content: unknown): string | undefined {
+  if (typeof content !== "string") {
+    return undefined;
+  }
+  const trimmed = content.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const dataUrlMatch = /^data:[^;]+;base64,(.*)$/i.exec(trimmed);
+  return dataUrlMatch?.[1] ?? trimmed;
+}
+
+async function resolveAttachmentLooksLikeImage(
+  attachment: Partial<{
+    type: string;
+    mimeType: string;
+    fileName: string;
+    content: unknown;
+  }>,
+): Promise<boolean> {
+  const content = extractAttachmentBase64Content(attachment.content);
+  const sniffedMime = content
+    ? normalizeAttachmentMime(await sniffMimeFromBase64(content))
+    : undefined;
+  const providedMime = normalizeAttachmentMime(attachment.mimeType);
+  const trustedProvidedMime = shouldIgnoreProvidedImageMime({ sniffedMime, providedMime })
+    ? undefined
+    : providedMime;
+  const fileNameMime = normalizeAttachmentMime(
+    mimeTypeFromFilePath(normalizeOptionalText(attachment.fileName)),
+  );
+  // When content sniffing detects a generic container AND the file name
+  // claims an image type, the name is untrusted — a DOCX/ZIP uploaded as
+  // "report.png" would otherwise pass as an image through fileNameMime.
+  // But specific non-image filenames (e.g., .xlsx) should be preserved.
+  const shouldIgnoreFileNameMime =
+    sniffedMime &&
+    isGenericAttachmentMime(sniffedMime) &&
+    Boolean(fileNameMime?.startsWith("image/"));
+  const trustedFileNameMime = shouldIgnoreFileNameMime ? undefined : fileNameMime;
+  const finalMime =
+    (sniffedMime && !isGenericAttachmentMime(sniffedMime) && sniffedMime) ||
+    (trustedProvidedMime && !isGenericAttachmentMime(trustedProvidedMime) && trustedProvidedMime) ||
+    (trustedFileNameMime && !isGenericAttachmentMime(trustedFileNameMime) && trustedFileNameMime) ||
+    sniffedMime ||
+    trustedProvidedMime ||
+    trustedFileNameMime;
+  return finalMime?.startsWith("image/") ?? false;
+}
+
+async function hasImageAttachments(
+  attachments: Array<
+    Partial<{
+      type: string;
+      mimeType: string;
+      fileName: string;
+      content: unknown;
+    }>
+  >,
+): Promise<boolean> {
+  for (const attachment of attachments) {
+    if (await resolveAttachmentLooksLikeImage(attachment)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 async function buildWebchatAssistantMediaMessage(
@@ -2108,24 +2210,135 @@ export const chatHandlers: GatewayRequestHandlers = {
     const explicitOriginTargetsPlugin = explicitOriginTargetsPluginBinding(
       explicitOriginResult.value,
     );
+    let modelOverride: string | undefined;
+    let modelOverrideFallbacks: string[] | undefined;
+
     if (normalizedAttachments.length > 0) {
+      const modelRef = resolveSessionModelRef(cfg, entry, agentId);
+      const hasInboundImageAttachments = await hasImageAttachments(normalizedAttachments);
+      let supportsImages =
+        explicitOriginTargetsAcpSession(explicitOriginResult.value) || explicitOriginTargetsPlugin;
+      let routeImageOffloadsAsMediaPaths = !supportsImages;
+
+      if (hasInboundImageAttachments) {
+        // Image model override: switch to a configured vision-capable model only
+        // when the inbound attachment set includes images AND the session model
+        // does not already support images. Per the models docs, imageModel is used
+        // "only when the primary model can't accept images."
+        const aliasIndex = buildModelAliasIndex({ cfg, defaultProvider: modelRef.provider });
+        const imageModelConfig = cfg.agents?.defaults?.imageModel;
+        const imageModelPrimary = resolveAgentModelPrimaryValue(imageModelConfig);
+        const imageModelFallbacks = resolveAgentModelFallbackValues(imageModelConfig);
+        // Derive the image model's provider context upfront so that providerless
+        // imageModel aliases resolve against the correct provider, not the session
+        // model's provider.
+        const { imageModelDefaultProvider } = collectImageModelKeys({
+          imageModelConfig,
+          aliasIndex,
+          defaultProvider: modelRef.provider,
+        });
+        const imageModelProvider = imageModelDefaultProvider || undefined;
+        let parseProvider = modelRef.provider;
+        let parseModel = modelRef.model;
+
+        // First check if the session model already supports images — if so, skip
+        // the override entirely and let the session model handle images natively.
+        const sessionModelSupportsImages = await resolveGatewayModelSupportsImages({
+          loadGatewayModelCatalog: context.loadGatewayModelCatalog,
+          provider: modelRef.provider,
+          model: modelRef.model,
+        });
+
+        if (!sessionModelSupportsImages && (imageModelPrimary || imageModelFallbacks.length > 0)) {
+          // Session model is text-only; apply imageModel override.
+          if (imageModelPrimary) {
+            modelOverride = imageModelPrimary;
+          } else if (imageModelFallbacks.length > 0) {
+            modelOverride = imageModelFallbacks[0];
+          }
+
+          if (modelOverride) {
+            // When imageModelPrimary is providerless, resolve against the image
+            // model's own provider context (derived from the primary or fallbacks),
+            // not the session model's provider, so catalog lookups and alias
+            // resolution use the correct provider.
+            const overrideDefaultProvider = imageModelProvider ?? modelRef.provider;
+            const overrideRef = resolveModelRefFromString({
+              raw: modelOverride,
+              defaultProvider: overrideDefaultProvider,
+              aliasIndex,
+            });
+            if (overrideRef) {
+              parseProvider = overrideRef.ref.provider;
+              parseModel = overrideRef.ref.model;
+              // Canonicalize modelOverride so downstream getReplyFromConfig
+              // receives "provider/model" and resolves against the correct
+              // provider context, not the session model's defaultProvider.
+              modelOverride = modelKey(overrideRef.ref.provider, overrideRef.ref.model);
+            } else {
+              // Alias resolution failed; use the raw modelOverride string as parseModel
+              // so that resolveModelSupportsVision can still match it against imageModelConfig.
+              // Use the image model's provider context for catalog lookups.
+              parseProvider = overrideDefaultProvider;
+              parseModel = modelOverride;
+            }
+          }
+        }
+
+        if (imageModelFallbacks.length > 0 && modelOverride) {
+          // When imageModelPrimary is not configured, the first fallback was already
+          // used as modelOverride — skip it to avoid redundant resolution.
+          const fallbacksForOverride = imageModelPrimary
+            ? imageModelFallbacks
+            : imageModelFallbacks.slice(1);
+          modelOverrideFallbacks = prepareImageModelFallbacks({
+            fallbacks: fallbacksForOverride,
+            cfg,
+            agentId,
+            aliasIndex,
+            defaultProvider: modelRef.provider,
+            defaultModel: modelRef.model,
+            imageModelProvider,
+          });
+        }
+
+        const imageModelSupportsImages =
+          modelOverride || imageModelFallbacks.length > 0
+            ? await resolveModelSupportsVision({
+                provider: parseProvider,
+                model: parseModel,
+                imageModelConfig,
+                defaultProvider: imageModelProvider ?? modelRef.provider,
+                cfg,
+                loadModelCatalog: () => context.loadGatewayModelCatalog(),
+              })
+            : sessionModelSupportsImages;
+
+        // If vision validation failed, clear the override so the turn runs on
+        // the default model with the safer media-understanding path instead of
+        // a misconfigured text-only imageModel.
+        if (!imageModelSupportsImages && modelOverride) {
+          modelOverride = undefined;
+          modelOverrideFallbacks = undefined;
+        }
+
+        // Bound plugin sessions own the real recipient model, so keep image
+        // attachments even when the parent OpenClaw session model is text-only.
+        supportsImages ||= imageModelSupportsImages;
+        routeImageOffloadsAsMediaPaths = !supportsImages;
+      } else {
+        const supportsSessionModelImages = await resolveGatewayModelSupportsImages({
+          loadGatewayModelCatalog: context.loadGatewayModelCatalog,
+          provider: modelRef.provider,
+          model: modelRef.model,
+        });
+        supportsImages ||= supportsSessionModelImages;
+        routeImageOffloadsAsMediaPaths = !supportsImages;
+      }
       try {
         await measureDiagnosticsTimelineSpan(
           "gateway.chat_send.prepare_attachments",
           async () => {
-            const modelRef = resolveSessionModelRef(cfg, entry, agentId);
-            const supportsSessionModelImages = await resolveGatewayModelSupportsImages({
-              loadGatewayModelCatalog: context.loadGatewayModelCatalog,
-              provider: modelRef.provider,
-              model: modelRef.model,
-            });
-            // Bound plugin sessions own the real recipient model, so keep image
-            // attachments even when the parent OpenClaw session model is text-only.
-            const supportsImages =
-              supportsSessionModelImages ||
-              explicitOriginTargetsAcpSession(explicitOriginResult.value) ||
-              explicitOriginTargetsPlugin;
-            const routeImageOffloadsAsMediaPaths = !supportsImages;
             const parsed = await parseMessageWithAttachments(
               inboundMessage,
               normalizedAttachments,
@@ -2171,6 +2384,10 @@ export const chatHandlers: GatewayRequestHandlers = {
             },
           },
         );
+        if (parsedImages.length === 0 && offloadedRefs.length === 0) {
+          modelOverride = undefined;
+          modelOverrideFallbacks = undefined;
+        }
       } catch (err) {
         logAttachmentFailure(context.logGateway, "chat.send attachment parse/stage failed", err);
         respond(
@@ -2510,6 +2727,8 @@ export const chatHandlers: GatewayRequestHandlers = {
               imageOrder: imageOrder.length > 0 ? imageOrder : undefined,
               thinkingLevelOverride: p.thinking,
               fastModeOverride: p.fastMode,
+              modelOverride,
+              modelOverrideFallbacks,
               onAgentRunStart: (runId) => {
                 agentRunStarted = true;
                 if (!hasBeforeAgentRunGate) {
