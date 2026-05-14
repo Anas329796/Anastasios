@@ -255,6 +255,67 @@ describe("managed npm root", () => {
     });
   });
 
+  it("keeps existing managed peer dependency pins during unrelated plugin installs", async () => {
+    const npmRoot = await makeTempRoot();
+    await fs.writeFile(
+      path.join(npmRoot, "package.json"),
+      `${JSON.stringify(
+        {
+          private: true,
+          dependencies: {
+            "fixture-runtime": "^2.0.0",
+          },
+          openclaw: {
+            managedPeerDependencies: ["fixture-runtime"],
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    await fs.mkdir(path.join(npmRoot, "node_modules", "fixture-alpha"), { recursive: true });
+    await fs.mkdir(path.join(npmRoot, "node_modules", "fixture-beta"), { recursive: true });
+    await fs.writeFile(
+      path.join(npmRoot, "node_modules", "fixture-alpha", "package.json"),
+      `${JSON.stringify({
+        name: "fixture-alpha",
+        version: "1.0.0",
+        peerDependencies: {
+          "fixture-runtime": "^1.0.0",
+        },
+      })}\n`,
+    );
+    await fs.writeFile(
+      path.join(npmRoot, "node_modules", "fixture-beta", "package.json"),
+      `${JSON.stringify({
+        name: "fixture-beta",
+        version: "1.0.0",
+        peerDependencies: {
+          "fixture-runtime": "^2.0.0",
+        },
+      })}\n`,
+    );
+
+    await expect(
+      syncManagedNpmRootPeerDependencies({
+        npmRoot,
+        preferredPackageName: "fixture-unrelated",
+      }),
+    ).resolves.toBe(false);
+
+    await expect(
+      fs.readFile(path.join(npmRoot, "package.json"), "utf8").then((raw) => JSON.parse(raw)),
+    ).resolves.toEqual({
+      private: true,
+      dependencies: {
+        "fixture-runtime": "^2.0.0",
+      },
+      openclaw: {
+        managedPeerDependencies: ["fixture-runtime"],
+      },
+    });
+  });
+
   it("preserves user-owned peer dependency pins while scanning plugin peers", async () => {
     const npmRoot = await makeTempRoot();
     await fs.writeFile(

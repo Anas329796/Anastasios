@@ -394,6 +394,7 @@ async function collectManagedNpmRootPeerDependencyPins(params: {
   npmRoot: string;
   preferredPackageName?: string;
   previousManagedPeerDependencySet?: ReadonlySet<string>;
+  previousManagedPeerDependencySpecs?: ReadonlyMap<string, string>;
 }): Promise<Record<string, string>> {
   const pins = new Map<string, string>();
   const limits = resolveManagedNpmPeerTraversalLimits();
@@ -454,9 +455,11 @@ async function collectManagedNpmRootPeerDependencyPins(params: {
         if (!installedVersion && isOptionalPeerDependency(manifest, peerName)) {
           continue;
         }
-        const shouldUsePeerRange =
-          isPreferredPackage || params.previousManagedPeerDependencySet?.has(peerName) === true;
-        pins.set(peerName, shouldUsePeerRange ? peerRange : (installedVersion ?? peerRange));
+        const previousManagedSpec = params.previousManagedPeerDependencySpecs?.get(peerName);
+        pins.set(
+          peerName,
+          isPreferredPackage ? peerRange : (previousManagedSpec ?? installedVersion ?? peerRange),
+        );
       }
     }
     queue.push(
@@ -533,10 +536,17 @@ export async function syncManagedNpmRootPeerDependencies(params: {
   const dependencies = readDependencyRecord(manifest.dependencies);
   const previousManagedPeerDependencies = readManagedPeerDependencyKeys(manifest.openclaw);
   const previousManagedPeerDependencySet = new Set(previousManagedPeerDependencies);
+  const previousManagedPeerDependencySpecs = new Map(
+    previousManagedPeerDependencies.flatMap((packageName) => {
+      const dependencySpec = dependencies[packageName];
+      return dependencySpec ? [[packageName, dependencySpec] as const] : [];
+    }),
+  );
   const peerPins = await collectManagedNpmRootPeerDependencyPins({
     npmRoot: params.npmRoot,
     preferredPackageName: params.preferredPackageName,
     previousManagedPeerDependencySet,
+    previousManagedPeerDependencySpecs,
   });
   const nextDependencies = { ...dependencies };
   for (const packageName of previousManagedPeerDependencies) {
