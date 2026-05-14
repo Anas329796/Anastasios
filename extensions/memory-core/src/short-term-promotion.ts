@@ -297,7 +297,7 @@ function hasDreamingNarrativeLead(snippet: string): boolean {
   return /\b(?:Candidate|Reflections?):/i.test(head);
 }
 
-function isContaminatedDreamingSnippet(raw: string): boolean {
+export function isContaminatedDreamingSnippet(raw: string): boolean {
   const snippet = normalizeSnippet(raw);
   if (!snippet) {
     return false;

@@ -60,6 +60,10 @@ type Logger = {
   error: (message: string) => void;
 };
 
+export type DreamNarrativeResult = {
+  fallbackUsed: boolean;
+};
+
 // ── Constants ──────────────────────────────────────────────────────────
 
 const NARRATIVE_SYSTEM_PROMPT = [
@@ -206,7 +210,7 @@ async function startNarrativeRunOrFallback(params: {
   timezone?: string;
   model?: string;
   logger: Logger;
-}): Promise<string | null> {
+}): Promise<{ runId: string | null; fallbackUsed: boolean }> {
   try {
     const run = await params.subagent.run({
       idempotencyKey: params.sessionKey,
@@ -218,7 +222,7 @@ async function startNarrativeRunOrFallback(params: {
       lightContext: true,
       deliver: false,
     });
-    return run.runId;
+    return { runId: run.runId, fallbackUsed: false };
   } catch (runErr) {
     if (!isRequestScopedSubagentRuntimeError(runErr)) {
       throw runErr;
@@ -237,8 +241,9 @@ async function startNarrativeRunOrFallback(params: {
       params.logger.warn(
         `memory-core: narrative fallback failed for ${params.data.phase} phase (${formatFallbackWriteFailure(fallbackErr)})`,
       );
+      return { runId: null, fallbackUsed: false };
     }
-    return null;
+    return { runId: null, fallbackUsed: true };
   }
 }
 
@@ -884,11 +889,11 @@ export async function generateAndAppendDreamNarrative(params: {
   timezone?: string;
   model?: string;
   logger: Logger;
-}): Promise<void> {
+}): Promise<DreamNarrativeResult> {
   const nowMs = Number.isFinite(params.nowMs) ? (params.nowMs as number) : Date.now();
 
   if (params.data.snippets.length === 0 && !params.data.promotions?.length) {
-    return;
+    return { fallbackUsed: false };
   }
 
   const sessionKey = buildNarrativeSessionKey({
@@ -908,7 +913,7 @@ export async function generateAndAppendDreamNarrative(params: {
       attempts.push(attempt);
 
       try {
-        const runId = await startNarrativeRunOrFallback({
+        const startResult = await startNarrativeRunOrFallback({
           subagent: params.subagent,
           sessionKey: attemptSessionKey,
           message,
@@ -919,8 +924,9 @@ export async function generateAndAppendDreamNarrative(params: {
           model: attemptModel,
           logger: params.logger,
         });
+        const runId = startResult.runId;
         if (!runId) {
-          return;
+          return { fallbackUsed: startResult.fallbackUsed };
         }
         attempt.runId = runId;
 
@@ -954,7 +960,7 @@ export async function generateAndAppendDreamNarrative(params: {
             error: result.error,
           })} for ${params.data.phase} phase.`,
         );
-        return;
+        return { fallbackUsed: false };
       } catch (err) {
         if (attemptModel && isConfiguredModelUnavailableNarrativeError(formatErrorMessage(err))) {
           params.logger.warn(
@@ -967,7 +973,7 @@ export async function generateAndAppendDreamNarrative(params: {
     }
 
     if (!successfulSessionKey) {
-      return;
+      return { fallbackUsed: false };
     }
 
     const { messages } = await params.subagent.getSessionMessages({
@@ -980,7 +986,7 @@ export async function generateAndAppendDreamNarrative(params: {
       params.logger.warn(
         `memory-core: narrative generation produced no text for ${params.data.phase} phase.`,
       );
-      return;
+      return { fallbackUsed: false };
     }
 
     await appendNarrativeEntry({
@@ -993,11 +999,13 @@ export async function generateAndAppendDreamNarrative(params: {
     params.logger.info(
       `memory-core: dream diary entry written for ${params.data.phase} phase [workspace=${params.workspaceDir}].`,
     );
+    return { fallbackUsed: false };
   } catch (err) {
     // Narrative generation is best-effort — never fail the parent phase.
     params.logger.warn(
       `memory-core: narrative generation failed for ${params.data.phase} phase: ${formatErrorMessage(err)}`,
     );
+    return { fallbackUsed: false };
   } finally {
     // Only cleanup after a run was accepted. Request-scoped fallback writes a
     // local diary entry without creating a subagent session.
