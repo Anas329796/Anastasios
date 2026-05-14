@@ -1,7 +1,10 @@
 import fs from "node:fs";
 import { describe, expect, it } from "vitest";
 import { onSessionTranscriptUpdate } from "../../sessions/transcript-events.js";
-import { appendInjectedAssistantMessageToTranscript } from "./chat-transcript-inject.js";
+import {
+  appendInjectedAssistantMessageToTranscript,
+  appendInjectedUserMessageToTranscript,
+} from "./chat-transcript-inject.js";
 import { createTranscriptFixtureSync } from "./chat.test-helpers.js";
 
 function readTranscriptLines(transcriptPath: string): string[] {
@@ -122,6 +125,81 @@ describe("gateway chat.inject transcript writes", () => {
       expect(JSON.stringify(updates[0]?.message)).not.toContain(fakeApiKey);
     } finally {
       unsubscribe();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("appends an injected user message", async () => {
+    const { dir, transcriptPath } = createTranscriptFixtureSync({
+      prefix: "openclaw-chat-inject-user-",
+      sessionId: "sess-user",
+    });
+
+    try {
+      const appended = await appendInjectedUserMessageToTranscript({
+        transcriptPath,
+        message: "hello from user",
+      });
+
+      expect(appended.ok).toBe(true);
+      expect(appended.messageId).toBeTypeOf("string");
+
+      const lines = readTranscriptLines(transcriptPath);
+      const last = JSON.parse(lines.at(-1) as string) as {
+        message?: { role?: string; content?: Array<{ type?: string; text?: string }> };
+      };
+      expect(last.message?.role).toBe("user");
+      expect(last.message?.content?.[0]?.type).toBe("text");
+      expect(last.message?.content?.[0]?.text).toBe("hello from user");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("dedupes concurrent identical idempotent injects (race-safe)", async () => {
+    const { dir, transcriptPath } = createTranscriptFixtureSync({
+      prefix: "openclaw-chat-inject-race-",
+      sessionId: "sess-race",
+    });
+
+    try {
+      const idempotencyKey = "race-key-001";
+      const concurrency = 16;
+      const results = await Promise.all(
+        Array.from({ length: concurrency }, () =>
+          appendInjectedUserMessageToTranscript({
+            transcriptPath,
+            message: "concurrent hello",
+            idempotencyKey,
+          }),
+        ),
+      );
+
+      // Every call must succeed and return the same canonical messageId.
+      const messageIds = new Set<string>();
+      let dedupedCount = 0;
+      for (const r of results) {
+        expect(r.ok).toBe(true);
+        expect(r.messageId).toBeTypeOf("string");
+        messageIds.add(r.messageId as string);
+        if (r.deduped) dedupedCount += 1;
+      }
+      expect(messageIds.size).toBe(1);
+      // Exactly one call writes; the rest must be deduped.
+      expect(dedupedCount).toBe(concurrency - 1);
+
+      // Disk state must reflect a single persisted entry for the key.
+      const lines = readTranscriptLines(transcriptPath);
+      const matches = lines.filter((line) => {
+        try {
+          const parsed = JSON.parse(line) as { message?: { idempotencyKey?: unknown } };
+          return parsed?.message?.idempotencyKey === idempotencyKey;
+        } catch {
+          return false;
+        }
+      });
+      expect(matches).toHaveLength(1);
+    } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });

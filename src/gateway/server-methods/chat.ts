@@ -15,7 +15,6 @@ import { stageSandboxMedia } from "../../auto-reply/reply/stage-sandbox-media.js
 import type { MsgContext, TemplateContext } from "../../auto-reply/templating.js";
 import { extractCanvasFromText } from "../../chat/canvas-render.js";
 import { resolveSessionFilePath } from "../../config/sessions.js";
-import { streamSessionTranscriptLines } from "../../config/sessions/transcript-stream.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import {
   measureDiagnosticsTimelineSpan,
@@ -118,7 +117,10 @@ import { injectTimestamp, timestampOptsFromConfig } from "./agent-timestamp.js";
 import { setGatewayDedupeEntry } from "./agent-wait-dedupe.js";
 import { normalizeRpcAttachmentsToChatAttachments } from "./attachment-normalize.js";
 import { normalizeWebchatReplyMediaPathsForDisplay } from "./chat-reply-media.js";
-import { appendInjectedAssistantMessageToTranscript } from "./chat-transcript-inject.js";
+import {
+  appendInjectedAssistantMessageToTranscript,
+  appendInjectedUserMessageToTranscript,
+} from "./chat-transcript-inject.js";
 import {
   buildWebchatAssistantMessageFromReplyPayloads,
   buildWebchatAudioContentBlocksFromReplyPayloads,
@@ -133,6 +135,8 @@ type TranscriptAppendResult = {
   ok: boolean;
   messageId?: string;
   message?: Record<string, unknown>;
+  /** True when an existing entry with matching idempotencyKey was returned. */
+  deduped?: boolean;
   error?: string;
 };
 
@@ -1352,27 +1356,6 @@ function ensureTranscriptFile(params: { transcriptPath: string; sessionId: strin
   }
 }
 
-async function transcriptHasIdempotencyKey(
-  transcriptPath: string,
-  idempotencyKey: string,
-): Promise<boolean> {
-  try {
-    for await (const line of streamSessionTranscriptLines(transcriptPath)) {
-      try {
-        const parsed = JSON.parse(line) as { message?: { idempotencyKey?: unknown } };
-        if (parsed?.message?.idempotencyKey === idempotencyKey) {
-          return true;
-        }
-      } catch {
-        continue;
-      }
-    }
-    return false;
-  } catch {
-    return false;
-  }
-}
-
 async function appendAssistantTranscriptMessage(params: {
   message: string;
   label?: string;
@@ -1413,13 +1396,10 @@ async function appendAssistantTranscriptMessage(params: {
     }
   }
 
-  if (
-    params.idempotencyKey &&
-    (await transcriptHasIdempotencyKey(transcriptPath, params.idempotencyKey))
-  ) {
-    return { ok: true };
-  }
-
+  // NOTE: Idempotency dedupe is enforced atomically inside
+  // appendSessionTranscriptMessage (locked critical section). Performing the
+  // check here would re-introduce a TOCTOU race where two concurrent identical
+  // requests could both pass the precheck and write duplicates.
   return await appendInjectedAssistantMessageToTranscript({
     transcriptPath,
     message: params.message,
@@ -1427,6 +1407,50 @@ async function appendAssistantTranscriptMessage(params: {
     content: params.content,
     idempotencyKey: params.idempotencyKey,
     abortMeta: params.abortMeta,
+    config: params.cfg,
+  });
+}
+
+async function appendUserTranscriptMessage(params: {
+  message: string;
+  content?: Array<Record<string, unknown>>;
+  sessionId: string;
+  storePath: string | undefined;
+  sessionFile?: string;
+  agentId?: string;
+  createIfMissing?: boolean;
+  idempotencyKey?: string;
+  cfg?: OpenClawConfig;
+}): Promise<TranscriptAppendResult> {
+  const transcriptPath = resolveTranscriptPath({
+    sessionId: params.sessionId,
+    storePath: params.storePath,
+    sessionFile: params.sessionFile,
+    agentId: params.agentId,
+  });
+  if (!transcriptPath) {
+    return { ok: false, error: "transcript path not resolved" };
+  }
+
+  if (!fs.existsSync(transcriptPath)) {
+    if (!params.createIfMissing) {
+      return { ok: false, error: "transcript file not found" };
+    }
+    const ensured = ensureTranscriptFile({
+      transcriptPath,
+      sessionId: params.sessionId,
+    });
+    if (!ensured.ok) {
+      return { ok: false, error: ensured.error ?? "failed to create transcript file" };
+    }
+  }
+
+  // Idempotency is enforced atomically by appendSessionTranscriptMessage.
+  return await appendInjectedUserMessageToTranscript({
+    transcriptPath,
+    message: params.message,
+    content: params.content,
+    idempotencyKey: params.idempotencyKey,
     config: params.cfg,
   });
 }
@@ -2838,7 +2862,10 @@ export const chatHandlers: GatewayRequestHandlers = {
       sessionKey: string;
       message: string;
       label?: string;
+      role?: "assistant" | "user";
+      idempotencyKey?: string;
     };
+    const injectRole = p.role === "user" ? "user" : "assistant";
 
     // Load session to find transcript file
     const rawSessionKey = p.sessionKey;
@@ -2849,17 +2876,21 @@ export const chatHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const appended = await appendAssistantTranscriptMessage({
+    const appendCommon = {
       message: p.message,
-      label: p.label,
       sessionId,
       storePath,
       sessionFile: entry?.sessionFile,
       agentId: resolveSessionAgentId({ sessionKey, config: cfg }),
       createIfMissing: true,
+      idempotencyKey: p.idempotencyKey,
       cfg,
-    });
-    if (!appended.ok || !appended.messageId || !appended.message) {
+    };
+    const appended =
+      injectRole === "user"
+        ? await appendUserTranscriptMessage(appendCommon)
+        : await appendAssistantTranscriptMessage({ ...appendCommon, label: p.label });
+    if (!appended.ok) {
       respond(
         false,
         undefined,
@@ -2868,6 +2899,18 @@ export const chatHandlers: GatewayRequestHandlers = {
           `failed to write transcript: ${appended.error ?? "unknown error"}`,
         ),
       );
+      return;
+    }
+    if (!appended.messageId || !appended.message) {
+      respond(true, { ok: true, deduped: true });
+      return;
+    }
+
+    if (appended.deduped) {
+      // Replay of a previously-persisted idempotent inject: skip broadcast to
+      // avoid duplicate UI events, but return the canonical messageId so the
+      // caller can correlate.
+      respond(true, { ok: true, deduped: true, messageId: appended.messageId });
       return;
     }
 
