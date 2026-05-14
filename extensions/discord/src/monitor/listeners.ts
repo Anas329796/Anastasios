@@ -5,24 +5,28 @@ import {
   InteractionCreateListener,
   MessageCreateListener,
   PresenceUpdateListener,
+  ReadyListener,
+  ResumedListener,
   ThreadUpdateListener,
 } from "../internal/discord.js";
 import { discordEventQueueLog, runDiscordListenerWithSlowLog } from "./listeners.queue.js";
+import type {
+  DiscordInteractionEvent,
+  DiscordMessageEvent,
+  DiscordMessageHandler,
+} from "./listeners.types.js";
+export type {
+  DiscordInteractionEvent,
+  DiscordMessageEvent,
+  DiscordMessageHandler,
+} from "./listeners.types.js";
+import { backfillRecentDiscordInboundMessages } from "./reconnect-backfill.js";
 export { DiscordReactionListener, DiscordReactionRemoveListener } from "./listeners.reactions.js";
 import { setPresence } from "./presence-cache.js";
 import { isThreadArchived } from "./thread-bindings.discord-api.js";
 import { closeDiscordThreadSessions } from "./thread-session-close.js";
 
 type Logger = ReturnType<typeof import("openclaw/plugin-sdk/runtime-env").createSubsystemLogger>;
-
-export type DiscordMessageEvent = Parameters<MessageCreateListener["handle"]>[0];
-export type DiscordInteractionEvent = Parameters<InteractionCreateListener["handle"]>[0];
-
-export type DiscordMessageHandler = (
-  data: DiscordMessageEvent,
-  client: Client,
-  options?: { abortSignal?: AbortSignal },
-) => Promise<void>;
 
 export function registerDiscordListener(listeners: Array<object>, listener: object) {
   if (listeners.some((existing) => existing.constructor === listener.constructor)) {
@@ -51,6 +55,56 @@ export class DiscordMessageListener extends MessageCreateListener {
         const logger = this.logger ?? discordEventQueueLog;
         logger.error(danger(`discord handler failed: ${String(err)}`));
       });
+  }
+}
+
+export class DiscordReconnectBackfillReadyListener extends ReadyListener {
+  constructor(
+    private params: {
+      accountId: string;
+      messageHandler: DiscordMessageHandler;
+      botUserId?: string;
+      logger?: Logger;
+      onEvent?: () => void;
+    },
+  ) {
+    super();
+  }
+
+  async handle(_data: unknown, client: Client) {
+    void backfillRecentDiscordInboundMessages({
+      accountId: this.params.accountId,
+      client,
+      messageHandler: this.params.messageHandler,
+      botUserId: this.params.botUserId,
+      logger: this.params.logger,
+      onEvent: this.params.onEvent,
+    });
+  }
+}
+
+export class DiscordReconnectBackfillResumedListener extends ResumedListener {
+  constructor(
+    private params: {
+      accountId: string;
+      messageHandler: DiscordMessageHandler;
+      botUserId?: string;
+      logger?: Logger;
+      onEvent?: () => void;
+    },
+  ) {
+    super();
+  }
+
+  async handle(_data: unknown, client: Client) {
+    void backfillRecentDiscordInboundMessages({
+      accountId: this.params.accountId,
+      client,
+      messageHandler: this.params.messageHandler,
+      botUserId: this.params.botUserId,
+      logger: this.params.logger,
+      onEvent: this.params.onEvent,
+    });
   }
 }
 

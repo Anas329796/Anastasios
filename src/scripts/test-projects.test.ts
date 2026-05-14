@@ -947,6 +947,7 @@ describe("test-projects args", () => {
           "extensions/discord/src/monitor/message-handler.queue.test.ts",
           "extensions/discord/src/monitor/provider.skill-dedupe.test.ts",
           "extensions/discord/src/monitor/provider.test.ts",
+          "extensions/discord/src/monitor/reconnect-backfill.test.ts",
         ],
         watchMode: false,
       },
