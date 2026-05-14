@@ -401,6 +401,32 @@ function fallbackFailureToCompactionResult(err: unknown): EmbeddedPiCompactResul
   };
 }
 
+function shouldSkipCompactionForNoRealConversation(params: {
+  messages: AgentMessage[];
+  observedTokenCount?: number;
+  contextWindowTokens: number;
+  callerContextWindowTokens?: number;
+  reserveTokens: number;
+}): boolean {
+  if (containsRealConversationMessages(params.messages)) {
+    return false;
+  }
+  const observedTokenCount = normalizeObservedTokenCount(params.observedTokenCount);
+  if (observedTokenCount === undefined) {
+    return true;
+  }
+  const thresholdContextWindowTokens = Math.max(
+    1,
+    Math.floor(params.callerContextWindowTokens ?? params.contextWindowTokens),
+  );
+  const reserveTokens =
+    params.callerContextWindowTokens === undefined
+      ? Math.max(0, Math.floor(params.reserveTokens))
+      : 0;
+  const threshold = Math.max(1, thresholdContextWindowTokens - reserveTokens);
+  return observedTokenCount < threshold;
+}
+
 /**
  * Core compaction logic without lane queueing.
  * Use this when already inside a session/global lane to avoid deadlocks.
@@ -1170,7 +1196,19 @@ async function compactEmbeddedPiSessionDirectOnce(
             );
           }
 
-          if (!containsRealConversationMessages(session.messages)) {
+          if (
+            shouldSkipCompactionForNoRealConversation({
+              messages: session.messages,
+              observedTokenCount,
+              contextWindowTokens: ctxInfo.tokens,
+              callerContextWindowTokens:
+                params.callerContextTokenBudget ?? params.contextTokenBudget,
+              reserveTokens:
+                typeof settingsManager.getCompactionReserveTokens === "function"
+                  ? settingsManager.getCompactionReserveTokens()
+                  : 0,
+            })
+          ) {
             log.info(
               `[compaction] skipping — no real conversation messages (sessionKey=${params.sessionKey ?? params.sessionId})`,
             );
@@ -1413,6 +1451,7 @@ export const __testing = {
   hasRealConversationContent,
   hasMeaningfulConversationContent,
   containsRealConversationMessages,
+  shouldSkipCompactionForNoRealConversation,
   estimateTokensAfterCompaction,
   buildBeforeCompactionHookMetrics,
   hardenManualCompactionBoundary,
