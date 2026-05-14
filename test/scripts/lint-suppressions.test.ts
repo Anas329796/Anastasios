@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -7,6 +8,15 @@ const CODE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]);
 const IGNORED_DIRS = new Set([".cache", ".git", "build", "coverage", "dist", "node_modules"]);
 const ROOTS = ["src", "extensions", "scripts", "ui"] as const;
 const SUPPRESSION_PATTERN = /(?:oxlint|eslint)-disable(?:-next-line)?\s+([@/\w-]+)(?:\s+--|$)/u;
+const GENERATED_CODE_FILES = new Set([
+  "extensions/telegram/src/telegram-ingress-worker.runtime.ts",
+  "extensions/telegram/src/telegram-ingress-worker.ts",
+]);
+const TRACKED_CODE_FILES = new Set(
+  execFileSync("git", ["ls-files", "-z", ...ROOTS], { cwd: repoRoot, encoding: "utf8" })
+    .split("\0")
+    .filter(Boolean),
+);
 
 type SuppressionEntry = {
   file: string;
@@ -40,6 +50,12 @@ function walkCodeFiles(dir: string, files: string[] = []): string[] {
       relativePath.endsWith(".spec.ts") ||
       relativePath.endsWith(".spec.tsx")
     ) {
+      continue;
+    }
+    if (!TRACKED_CODE_FILES.has(relativePath)) {
+      continue;
+    }
+    if (GENERATED_CODE_FILES.has(relativePath)) {
       continue;
     }
     files.push(relativePath);
