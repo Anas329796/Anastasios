@@ -47,6 +47,8 @@ async function formatSnapshotFiles(root: string, files: PromptSnapshotFile[]) {
   }
   await execFileAsync(oxfmtPath, ["--write", "--threads=1", ...filePaths], {
     cwd: repoRoot,
+    // Windows `.cmd` shims require a shell; otherwise `execFile` can fail with `EINVAL`.
+    ...(process.platform === "win32" ? { shell: true } : {}),
   });
 }
 

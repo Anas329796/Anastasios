@@ -94,6 +94,7 @@ export type DiagnosticMessageQueuedEvent = DiagnosticBaseEvent & {
 
 export type DiagnosticMessageProcessedEvent = DiagnosticBaseEvent & {
   type: "message.processed";
+  runId?: string;
   channel: string;
   messageId?: number | string;
   chatId?: number | string;
@@ -103,6 +104,32 @@ export type DiagnosticMessageProcessedEvent = DiagnosticBaseEvent & {
   outcome: "completed" | "skipped" | "error";
   reason?: string;
   error?: string;
+};
+
+type DiagnosticMessageProcessingBaseEvent = DiagnosticBaseEvent & {
+  type: "message.processing.started" | "message.processing.completed" | "message.processing.error";
+  runId: string;
+  channel: string;
+  phase?: "start" | "run" | "delivery" | "end" | "error";
+  messageId?: number | string;
+  chatId?: number | string;
+  sessionKey?: string;
+  sessionId?: string;
+};
+
+export type DiagnosticMessageProcessingStartedEvent = DiagnosticMessageProcessingBaseEvent & {
+  type: "message.processing.started";
+};
+
+export type DiagnosticMessageProcessingCompletedEvent = DiagnosticMessageProcessingBaseEvent & {
+  type: "message.processing.completed";
+  durationMs: number;
+};
+
+export type DiagnosticMessageProcessingErrorEvent = DiagnosticMessageProcessingBaseEvent & {
+  type: "message.processing.error";
+  durationMs: number;
+  errorCategory: string;
 };
 
 export type DiagnosticMessageDeliveryKind = "text" | "media" | "edit" | "reaction" | "other";
@@ -364,6 +391,32 @@ export type DiagnosticToolExecutionBlockedEvent = DiagnosticToolExecutionBaseEve
   reason: string;
 };
 
+type DiagnosticSkillExecutionBaseEvent = DiagnosticBaseEvent & {
+  runId: string;
+  sessionKey?: string;
+  sessionId?: string;
+  skillName: string;
+  skillPath?: string;
+  skillScope?: "snapshot" | "workspace" | "disabled";
+};
+
+export type DiagnosticSkillExecutionStartedEvent = DiagnosticSkillExecutionBaseEvent & {
+  type: "skill.execution.started";
+};
+
+export type DiagnosticSkillExecutionCompletedEvent = DiagnosticSkillExecutionBaseEvent & {
+  type: "skill.execution.completed";
+  durationMs: number;
+  loadedCount: number;
+  promptChars?: number;
+};
+
+export type DiagnosticSkillExecutionErrorEvent = DiagnosticSkillExecutionBaseEvent & {
+  type: "skill.execution.error";
+  durationMs: number;
+  errorCategory: string;
+};
+
 export type DiagnosticExecProcessCompletedEvent = DiagnosticBaseEvent & {
   type: "exec.process.completed";
   sessionKey?: string;
@@ -576,6 +629,9 @@ export type DiagnosticEventPayload =
   | DiagnosticWebhookErrorEvent
   | DiagnosticMessageQueuedEvent
   | DiagnosticMessageProcessedEvent
+  | DiagnosticMessageProcessingStartedEvent
+  | DiagnosticMessageProcessingCompletedEvent
+  | DiagnosticMessageProcessingErrorEvent
   | DiagnosticMessageDeliveryStartedEvent
   | DiagnosticMessageDeliveryCompletedEvent
   | DiagnosticMessageDeliveryErrorEvent
@@ -598,6 +654,9 @@ export type DiagnosticEventPayload =
   | DiagnosticToolExecutionCompletedEvent
   | DiagnosticToolExecutionErrorEvent
   | DiagnosticToolExecutionBlockedEvent
+  | DiagnosticSkillExecutionStartedEvent
+  | DiagnosticSkillExecutionCompletedEvent
+  | DiagnosticSkillExecutionErrorEvent
   | DiagnosticExecProcessCompletedEvent
   | DiagnosticRunStartedEvent
   | DiagnosticRunCompletedEvent
@@ -653,6 +712,12 @@ const ASYNC_DIAGNOSTIC_EVENT_TYPES = new Set<DiagnosticEventPayload["type"]>([
   "tool.execution.completed",
   "tool.execution.error",
   "tool.execution.blocked",
+  "message.processing.started",
+  "message.processing.completed",
+  "message.processing.error",
+  "skill.execution.started",
+  "skill.execution.completed",
+  "skill.execution.error",
   "exec.process.completed",
   "message.delivery.started",
   "message.delivery.completed",
