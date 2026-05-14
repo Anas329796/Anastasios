@@ -1,4 +1,5 @@
 import type { Command } from "commander";
+import { collectConfiguredAgentHarnessRuntimes } from "../agents/harness-runtimes.js";
 import {
   assertConfigWriteAllowedInCurrentMode,
   getRuntimeConfig,
@@ -88,6 +89,44 @@ function isErroredConfigSelectedShadowDiagnostic(params: {
       plugin.origin === "config" &&
       plugin.status === "error",
   );
+}
+
+const CONFIGURED_RUNTIME_PLUGIN_INSTALL_HINTS = new Map<
+  string,
+  { label: string; packageName: string; manualInstallCommand: string }
+>([
+  [
+    "codex",
+    {
+      label: "Codex",
+      packageName: "@openclaw/codex",
+      manualInstallCommand: "openclaw plugins install clawhub:@openclaw/codex",
+    },
+  ],
+]);
+
+function collectConfiguredRuntimePluginWarnings(params: {
+  cfg: OpenClawConfig;
+  env: NodeJS.ProcessEnv;
+  plugins: readonly { enabled?: boolean; id: string; status?: string }[];
+}): string[] {
+  const enabledPluginIds = new Set(
+    params.plugins
+      .filter((plugin) => plugin.enabled !== false && plugin.status !== "disabled")
+      .map((plugin) => plugin.id),
+  );
+  return collectConfiguredAgentHarnessRuntimes(params.cfg, params.env, {
+    includeEnvRuntime: false,
+    includeLegacyAgentRuntimes: false,
+  }).flatMap((runtimeId) => {
+    const hint = CONFIGURED_RUNTIME_PLUGIN_INSTALL_HINTS.get(runtimeId);
+    if (!hint || enabledPluginIds.has(runtimeId)) {
+      return [];
+    }
+    return [
+      `- Configured agentRuntime.id="${runtimeId}" requires the ${hint.label} plugin, but no enabled "${runtimeId}" plugin was found. Run "openclaw doctor --fix" to install ${hint.packageName}, or install it manually with "${hint.manualInstallCommand}".`,
+    ];
+  });
 }
 
 export function registerPluginsCli(program: Command) {
@@ -388,10 +427,19 @@ export function registerPluginsCli(program: Command) {
         doctorFixCommand: "openclaw doctor --fix",
         autoRepairBlocked: isStalePluginAutoRepairBlocked(sourceCfg ?? cfg, process.env),
       });
+      const configuredRuntimePluginWarnings = collectConfiguredRuntimePluginWarnings({
+        cfg: sourceCfg ?? cfg,
+        env: process.env,
+        plugins: report.plugins,
+      });
       const hasInstallTreeIssues =
         errors.length > 0 || diags.length > 0 || shadowed.length > 0 || compatibility.length > 0;
+      const pluginConfigWarnings = [
+        ...stalePluginConfigWarnings,
+        ...configuredRuntimePluginWarnings,
+      ];
 
-      if (!hasInstallTreeIssues && stalePluginConfigWarnings.length === 0) {
+      if (!hasInstallTreeIssues && pluginConfigWarnings.length === 0) {
         defaultRuntime.log("No plugin issues detected.");
         return;
       }
@@ -449,14 +497,14 @@ export function registerPluginsCli(program: Command) {
           lines.push(`- ${formatPluginCompatibilityNotice(notice)} [${marker}]`);
         }
       }
-      if (stalePluginConfigWarnings.length > 0) {
+      if (pluginConfigWarnings.length > 0) {
         if (lines.length > 0) {
           lines.push("");
         }
         lines.push(theme.warn("Plugin configuration:"));
-        lines.push(...stalePluginConfigWarnings);
+        lines.push(...pluginConfigWarnings);
       }
-      if (!hasInstallTreeIssues && stalePluginConfigWarnings.length > 0) {
+      if (!hasInstallTreeIssues && pluginConfigWarnings.length > 0) {
         if (lines.length > 0) {
           lines.push("");
         }
