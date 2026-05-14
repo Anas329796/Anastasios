@@ -169,6 +169,54 @@ export function registerStatusHealthSessionsCommands(program: Command) {
     });
   sessionsCmd.enablePositionalOptions();
 
+  // Backward-compatible `sessions list` alias. Every other list-style parent
+  // command (cron, commitments, devices, mcp, plugins, agents, tasks) accepts
+  // a bare `list` subcommand; without this alias, `openclaw sessions list`
+  // hits the generic parser's "Too many arguments" path and the recovery
+  // suggestion (`sessions list --help`) silently drops the extra argument.
+  // See #81139.
+  //
+  // The action merges its own `opts` with `command.parent.opts()` so flags
+  // work both before and after `list` (e.g. `sessions --json list` and
+  // `sessions list --json`). This matches the parentOpts pattern used by the
+  // sibling `cleanup` subcommand below and by `commitments list` / `tasks
+  // list` elsewhere in this file.
+  sessionsCmd
+    .command("list")
+    .description("List stored conversation sessions (alias for `openclaw sessions`)")
+    .option("--json", "Output as JSON", false)
+    .option("--verbose", "Verbose logging", false)
+    .option("--store <path>", "Path to session store (default: resolved from config)")
+    .option("--agent <id>", "Agent id to inspect (default: configured default agent)")
+    .option("--all-agents", "Aggregate sessions across all configured agents", false)
+    .option("--active <minutes>", "Only show sessions updated within the past N minutes")
+    .option("--limit <count>", 'Max sessions to show (default: 100; use "all" for full output)')
+    .action(async (opts, command) => {
+      const parentOpts = command.parent?.opts() as
+        | {
+            json?: boolean;
+            verbose?: boolean;
+            store?: string;
+            agent?: string;
+            allAgents?: boolean;
+            active?: string;
+            limit?: string;
+          }
+        | undefined;
+      setVerbose(Boolean(opts.verbose || parentOpts?.verbose));
+      await sessionsCommand(
+        {
+          json: Boolean(opts.json || parentOpts?.json),
+          store: (opts.store as string | undefined) ?? parentOpts?.store,
+          agent: (opts.agent as string | undefined) ?? parentOpts?.agent,
+          allAgents: Boolean(opts.allAgents || parentOpts?.allAgents),
+          active: (opts.active as string | undefined) ?? parentOpts?.active,
+          limit: (opts.limit as string | undefined) ?? parentOpts?.limit,
+        },
+        defaultRuntime,
+      );
+    });
+
   sessionsCmd
     .command("cleanup")
     .description("Run session-store maintenance now")

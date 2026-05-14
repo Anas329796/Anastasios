@@ -241,6 +241,98 @@ describe("registerStatusHealthSessionsCommands", () => {
     });
   });
 
+  it("dispatches sessions list as an alias for bare sessions (regression for #81139)", async () => {
+    await runCli(["sessions", "list"]);
+
+    expect(sessionsCommand).toHaveBeenCalledTimes(1);
+    expectCommandOptions(sessionsCommand, {
+      json: false,
+      allAgents: false,
+      agent: undefined,
+      store: undefined,
+    });
+  });
+
+  it("forwards sessions parent options through the list alias (flags before list)", async () => {
+    await runCli([
+      "sessions",
+      "--json",
+      "--verbose",
+      "--store",
+      "/tmp/sessions.json",
+      "--active",
+      "120",
+      "--limit",
+      "25",
+      "list",
+    ]);
+
+    expect(setVerbose).toHaveBeenCalledWith(true);
+    expectCommandOptions(sessionsCommand, {
+      json: true,
+      store: "/tmp/sessions.json",
+      active: "120",
+      limit: "25",
+    });
+  });
+
+  it("forwards sessions list-side options (flags after list)", async () => {
+    await runCli([
+      "sessions",
+      "list",
+      "--json",
+      "--verbose",
+      "--store",
+      "/tmp/sessions.json",
+      "--active",
+      "120",
+      "--limit",
+      "25",
+    ]);
+
+    expect(setVerbose).toHaveBeenCalledWith(true);
+    expectCommandOptions(sessionsCommand, {
+      json: true,
+      store: "/tmp/sessions.json",
+      active: "120",
+      limit: "25",
+    });
+  });
+
+  it("forwards --agent through the list alias (flag before list)", async () => {
+    await runCli(["sessions", "--agent", "work", "list"]);
+
+    expectCommandOptions(sessionsCommand, {
+      agent: "work",
+      allAgents: false,
+    });
+  });
+
+  it("forwards --agent through the list alias (flag after list)", async () => {
+    await runCli(["sessions", "list", "--agent", "work"]);
+
+    expectCommandOptions(sessionsCommand, {
+      agent: "work",
+      allAgents: false,
+    });
+  });
+
+  it("forwards --all-agents through the list alias (flag before list)", async () => {
+    await runCli(["sessions", "--all-agents", "list"]);
+
+    expectCommandOptions(sessionsCommand, {
+      allAgents: true,
+    });
+  });
+
+  it("forwards --all-agents through the list alias (flag after list)", async () => {
+    await runCli(["sessions", "list", "--all-agents"]);
+
+    expectCommandOptions(sessionsCommand, {
+      allAgents: true,
+    });
+  });
+
   it("runs sessions cleanup subcommand with forwarded options", async () => {
     await runCli([
       "sessions",
