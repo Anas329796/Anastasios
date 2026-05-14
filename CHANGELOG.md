@@ -318,6 +318,7 @@ Docs: https://docs.openclaw.ai
 - Docs: clarify that `/model provider/model` is an exact session route, while duplicate bare model ids only use configured fallback order on non-session override paths. Refs #80562. Thanks @gaodaabao.
 - Redact persisted secret-shaped payloads [AI]. (#79006) Thanks @pgondhi987.
 - Agents: label `.openclaw/sandboxes` exec workdirs as sandbox runs in compact tool summaries instead of showing the full path.
+- Backup: write temporary archive to the system temp directory and register SIGINT/SIGTERM cleanup so interrupted `openclaw backup create` runs do not leave `.tmp` files behind in the output directory. Fixes #50442.
 - OpenAI Codex: surface browser OAuth and device-code login failures instead of treating failed logins as empty successful auth results. Refs #80363.
 - CLI agents: carry runtime-only current-turn sender/reply context into CLI model prompts while keeping prompt-build hook input and transcript text clean.
 - Control UI: keep workspace file presence checks from treating `fs-safe` stat helper failures as missing files, restoring Agents file status for existing Windows workspace files. Fixes #79953. Thanks @lovelefeng-glitch.
