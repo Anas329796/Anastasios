@@ -5,12 +5,12 @@
     "chat.autoScrollNearBottom",
     "chat.autoScrollOff"
   ],
-  "generatedAt": "2026-05-14T06:33:30.550Z",
+  "generatedAt": "2026-05-14T08:44:33.717Z",
   "locale": "fa",
   "model": "gpt-5.5",
   "provider": "openai",
-  "sourceHash": "6da02970883598bb497ff7aab5522e0cf18c9b37332e104e7c5a47ad7675e016",
-  "totalKeys": 1134,
-  "translatedKeys": 1130,
+  "sourceHash": "5a3447b871dd72bf41dfcc03fb726a984ddcac61b494d15686d4b898f87408c6",
+  "totalKeys": 1206,
+  "translatedKeys": 1202,
   "workflow": 1
 }
