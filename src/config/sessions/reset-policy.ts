@@ -1,7 +1,7 @@
 import type { SessionConfig, SessionResetConfig } from "../types.base.js";
 import { DEFAULT_IDLE_MINUTES } from "./types.js";
 
-export type SessionResetMode = "daily" | "idle";
+export type SessionResetMode = "daily" | "idle" | "adaptive";
 export type SessionResetType = "direct" | "group" | "thread";
 
 export type SessionResetPolicy = {
@@ -15,6 +15,8 @@ export type SessionFreshness = {
   fresh: boolean;
   dailyResetAt?: number;
   idleExpiresAt?: number;
+  staleDaily?: boolean;
+  staleIdle?: boolean;
 };
 
 export const DEFAULT_RESET_MODE: SessionResetMode = "daily";
@@ -62,7 +64,7 @@ export function resolveSessionResetPolicy(params: {
     if (Number.isFinite(normalized)) {
       idleMinutes = Math.max(normalized, 0);
     }
-  } else if (mode === "idle") {
+  } else if (mode === "idle" || mode === "adaptive") {
     idleMinutes = DEFAULT_IDLE_MINUTES;
   }
 
@@ -81,7 +83,7 @@ export function evaluateSessionFreshness(params: {
   const lastInteractionAt =
     resolveTimestamp(params.lastInteractionAt, params.now) ?? sessionStartedAt;
   const dailyResetAt =
-    params.policy.mode === "daily"
+    params.policy.mode === "daily" || params.policy.mode === "adaptive"
       ? resolveDailyResetAtMs(params.now, params.policy.atHour)
       : undefined;
   const idleExpiresAt =
@@ -90,10 +92,15 @@ export function evaluateSessionFreshness(params: {
       : undefined;
   const staleDaily = dailyResetAt != null && sessionStartedAt < dailyResetAt;
   const staleIdle = idleExpiresAt != null && params.now > idleExpiresAt;
+  // adaptive: only stale when BOTH daily boundary has passed AND the session is idle
+  const stale =
+    params.policy.mode === "adaptive" ? staleDaily && staleIdle : staleDaily || staleIdle;
   return {
-    fresh: !(staleDaily || staleIdle),
+    fresh: !stale,
     dailyResetAt,
     idleExpiresAt,
+    staleDaily,
+    staleIdle,
   };
 }
 
