@@ -324,6 +324,7 @@ export function createOAuthManager(adapter: OAuthManagerAdapter) {
     provider: string;
     agentDir?: string;
     cfg?: OpenClawConfig;
+    forceRefresh?: boolean;
   }): Promise<ResolvedOAuthAccess | null> {
     const ownerAgentDir = resolvePersistedAuthProfileOwnerAgentDir(params);
     const authPath = resolveAuthStorePath(ownerAgentDir);
@@ -340,7 +341,7 @@ export function createOAuthManager(adapter: OAuthManagerAdapter) {
           }
           let credentialToRefresh = cred;
 
-          if (hasUsableOAuthCredential(cred)) {
+          if (!params.forceRefresh && hasUsableOAuthCredential(cred)) {
             return {
               apiKey: await adapter.buildApiKey(cred.provider, cred, {
                 cfg: params.cfg,
@@ -358,6 +359,7 @@ export function createOAuthManager(adapter: OAuthManagerAdapter) {
                 mainCred?.type === "oauth" &&
                 mainCred.provider === cred.provider &&
                 hasUsableOAuthCredential(mainCred) &&
+                !params.forceRefresh &&
                 isSafeToAdoptMainStoreOAuthIdentity(cred, mainCred)
               ) {
                 store.profiles[params.profileId] = { ...mainCred };
@@ -419,7 +421,7 @@ export function createOAuthManager(adapter: OAuthManagerAdapter) {
                 saveAuthProfileStore(store, ownerAgentDir);
               }
               credentialToRefresh = externallyManaged;
-              if (hasUsableOAuthCredential(externallyManaged)) {
+              if (!params.forceRefresh && hasUsableOAuthCredential(externallyManaged)) {
                 return {
                   apiKey: await adapter.buildApiKey(externallyManaged.provider, externallyManaged, {
                     cfg: params.cfg,
@@ -485,6 +487,7 @@ export function createOAuthManager(adapter: OAuthManagerAdapter) {
     provider: string;
     agentDir?: string;
     cfg?: OpenClawConfig;
+    forceRefresh?: boolean;
   }): Promise<ResolvedOAuthAccess | null> {
     const key = refreshQueueKey(params.provider, params.profileId);
     const prev = refreshQueues.get(key) ?? Promise.resolve();
@@ -510,6 +513,7 @@ export function createOAuthManager(adapter: OAuthManagerAdapter) {
     credential: OAuthCredential;
     agentDir?: string;
     cfg?: OpenClawConfig;
+    forceRefresh?: boolean;
   }): Promise<ResolvedOAuthAccess | null> {
     const adoptedCredential =
       adoptNewerMainOAuthCredential({
@@ -524,7 +528,7 @@ export function createOAuthManager(adapter: OAuthManagerAdapter) {
       readBootstrapCredential: adapter.readBootstrapCredential,
     });
 
-    if (hasUsableOAuthCredential(effectiveCredential)) {
+    if (!params.forceRefresh && hasUsableOAuthCredential(effectiveCredential)) {
       return {
         apiKey: await adapter.buildApiKey(effectiveCredential.provider, effectiveCredential, {
           cfg: params.cfg,
@@ -540,12 +544,17 @@ export function createOAuthManager(adapter: OAuthManagerAdapter) {
         provider: params.credential.provider,
         agentDir: params.agentDir,
         cfg: params.cfg,
+        forceRefresh: params.forceRefresh,
       });
       return refreshed;
     } catch (error) {
       const refreshedStore = loadAuthProfileStoreWithoutExternalProfiles(params.agentDir);
       const refreshed = refreshedStore.profiles[params.profileId];
-      if (refreshed?.type === "oauth" && hasUsableOAuthCredential(refreshed)) {
+      if (
+        refreshed?.type === "oauth" &&
+        hasUsableOAuthCredential(refreshed) &&
+        (!params.forceRefresh || hasOAuthCredentialChanged(params.credential, refreshed))
+      ) {
         return {
           apiKey: await adapter.buildApiKey(refreshed.provider, refreshed, {
             cfg: params.cfg,
@@ -582,6 +591,7 @@ export function createOAuthManager(adapter: OAuthManagerAdapter) {
             provider: params.credential.provider,
             agentDir: params.agentDir,
             cfg: params.cfg,
+            forceRefresh: params.forceRefresh,
           });
           if (retried) {
             return retried;
