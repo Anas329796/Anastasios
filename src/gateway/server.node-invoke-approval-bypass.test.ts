@@ -64,29 +64,25 @@ function requireRecord(
   return value;
 }
 
-async function getConnectedNodeId(ws: WebSocket): Promise<string> {
-  const nodes = await rpcReq<{ nodes?: Array<{ nodeId: string; connected?: boolean }> }>(
-    ws,
-    "node.list",
-    {},
-  );
+async function getConnectedNodeId(ws: WebSocket, command = "system.run"): Promise<string> {
+  const nodes = await rpcReq<{
+    nodes?: Array<{ nodeId: string; connected?: boolean; commands?: string[] }>;
+  }>(ws, "node.list", {});
   expect(nodes.ok).toBe(true);
-  return requireNonEmptyString(
-    nodes.payload?.nodes?.find((n) => n.connected)?.nodeId,
-    "connected node id",
+  const matchingNode = nodes.payload?.nodes?.find(
+    (n) => n.connected && n.commands?.includes(command),
   );
+  return requireNonEmptyString(matchingNode?.nodeId, `connected ${command} node id`);
 }
 
 async function getConnectedNodeIds(ws: WebSocket): Promise<string[]> {
-  const nodes = await rpcReq<{ nodes?: Array<{ nodeId: string; connected?: boolean }> }>(
-    ws,
-    "node.list",
-    {},
-  );
+  const nodes = await rpcReq<{
+    nodes?: Array<{ nodeId: string; connected?: boolean; commands?: string[] }>;
+  }>(ws, "node.list", {});
   expect(nodes.ok).toBe(true);
   const nodeIds: string[] = [];
   for (const node of nodes.payload?.nodes ?? []) {
-    if (node.connected) {
+    if (node.connected && node.commands?.includes("system.run")) {
       nodeIds.push(node.nodeId);
     }
   }
@@ -445,7 +441,7 @@ describe("node.invoke approval bypass", () => {
       }
     } finally {
       ws.close();
-      node.stop();
+      await node.stopAndWait();
     }
   });
 
@@ -460,7 +456,7 @@ describe("node.invoke approval bypass", () => {
     );
     const ws = await connectOperator(["operator.write"]);
     try {
-      const nodeId = await getConnectedNodeId(ws);
+      const nodeId = await getConnectedNodeId(ws, "browser.proxy");
       const res = await rpcReq(ws, "node.invoke", {
         nodeId,
         command: "browser.proxy",
@@ -478,7 +474,7 @@ describe("node.invoke approval bypass", () => {
       await expectNoForwardedInvoke(() => sawInvoke);
     } finally {
       ws.close();
-      node.stop();
+      await node.stopAndWait();
     }
   });
 
@@ -556,7 +552,7 @@ describe("node.invoke approval bypass", () => {
       wsApprover.close();
       wsCaller.close();
       wsOtherDevice.close();
-      node.stop();
+      await node.stopAndWait();
     }
   });
 
@@ -656,7 +652,7 @@ describe("node.invoke approval bypass", () => {
     } finally {
       wsRequest.close();
       wsReplay.close();
-      node.stop();
+      await node.stopAndWait();
     }
   });
 
@@ -715,8 +711,7 @@ describe("node.invoke approval bypass", () => {
     } finally {
       wsApprover.close();
       wsCaller.close();
-      nodeA.stop();
-      nodeB.stop();
+      await Promise.all([nodeA.stopAndWait(), nodeB.stopAndWait()]);
     }
   });
 });
