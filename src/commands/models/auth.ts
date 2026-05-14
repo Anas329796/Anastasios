@@ -486,6 +486,7 @@ export async function modelsAuthPasteTokenCommand(
     profileId?: string;
     expiresIn?: string;
     agent?: string;
+    token?: string;
   },
   runtime: RuntimeEnv,
 ) {
@@ -500,19 +501,33 @@ export async function modelsAuthPasteTokenCommand(
   const profileId =
     normalizeOptionalString(opts.profileId) || resolveDefaultTokenProfileId(provider);
 
-  const tokenInput = await text({
-    message: `Paste token for ${provider}`,
-    validate: (value) => {
-      const trimmed = value?.trim();
-      if (!trimmed) {
-        return "Required";
+  const rawToken = normalizeOptionalString(opts.token);
+  if (opts.token !== undefined && !rawToken) {
+    throw new Error("--token value must not be empty");
+  }
+  if (rawToken !== undefined) {
+    if (provider === "anthropic") {
+      const validationError = validateAnthropicSetupToken(rawToken.replaceAll(/\s+/g, ""));
+      if (validationError) {
+        throw new Error(validationError);
       }
-      if (provider === "anthropic") {
-        return validateAnthropicSetupToken(trimmed.replaceAll(/\s+/g, ""));
-      }
-      return undefined;
-    },
-  });
+    }
+  }
+  const tokenInput =
+    rawToken ??
+    (await text({
+      message: `Paste token for ${provider}`,
+      validate: (value) => {
+        const trimmed = value?.trim();
+        if (!trimmed) {
+          return "Required";
+        }
+        if (provider === "anthropic") {
+          return validateAnthropicSetupToken(trimmed.replaceAll(/\s+/g, ""));
+        }
+        return undefined;
+      },
+    }));
   const token =
     provider === "anthropic"
       ? tokenInput.replaceAll(/\s+/g, "").trim()
