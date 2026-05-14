@@ -75,7 +75,7 @@ import {
   shouldAttemptTtsPayload,
 } from "../../tts/tts-config.js";
 import { INTERNAL_MESSAGE_CHANNEL, normalizeMessageChannel } from "../../utils/message-channel.js";
-import type { BlockReplyContext } from "../get-reply-options.types.js";
+import type { BlockReplyContext, BlockReplyResult } from "../get-reply-options.types.js";
 import { getReplyPayloadMetadata, type ReplyPayload } from "../reply-payload.js";
 import type { FinalizedMsgContext } from "../templating.js";
 import { normalizeVerboseLevel } from "../thinking.js";
@@ -1427,7 +1427,7 @@ export async function dispatchReplyFromConfig(
           },
           onBlockReply: (payload: ReplyPayload, context?: BlockReplyContext) => {
             markProgress();
-            const run = async () => {
+            const run = async (): Promise<BlockReplyResult | void> => {
               if (
                 payload.isReasoning !== true &&
                 resolveSendableOutboundReplyParts(payload).hasContent
@@ -1494,12 +1494,16 @@ export async function dispatchReplyFromConfig(
                 accountId: replyRoute.accountId,
               });
               const normalizedPayload = await normalizeReplyMediaPayload(ttsPayload);
+              const reply = resolveSendableOutboundReplyParts(normalizedPayload);
+              const confirmedMedia =
+                reply.mediaUrls.length > 0 ? { sentMediaUrls: reply.mediaUrls } : undefined;
               if (shouldRouteToOriginating) {
                 await sendPayloadAsync(normalizedPayload, context?.abortSignal, false);
               } else {
                 markInboundDedupeReplayUnsafe();
                 dispatcher.sendBlockReply(normalizedPayload);
               }
+              return confirmedMedia;
             };
             return run();
           },
