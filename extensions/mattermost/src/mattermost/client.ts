@@ -531,6 +531,13 @@ export async function fetchMattermostUserTeams(
   return await client.request<MattermostTeam[]>(`/users/${userId}/teams`);
 }
 
+export async function fetchMattermostPost(
+  client: MattermostClient,
+  postId: string,
+): Promise<MattermostPost> {
+  return await client.request<MattermostPost>(`/posts/${postId}`);
+}
+
 export async function updateMattermostPost(
   client: MattermostClient,
   postId: string,
