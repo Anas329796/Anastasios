@@ -548,6 +548,20 @@ export async function dispatchCronDelivery(
       ...params.telemetry,
     });
   };
+  const failEmptyDescendantFollowup = async (): Promise<RunCronAgentTurnResult> => {
+    deliveryAttempted = true;
+    await cleanupDirectCronSessionIfNeeded();
+    return params.withRunSession({
+      status: "error",
+      error:
+        "cron produced no deliverable text after sanitization and descendant follow-up did not recover a final reply",
+      summary,
+      outputText,
+      delivered: false,
+      deliveryAttempted: true,
+      ...params.telemetry,
+    });
+  };
 
   const deliverViaDirect = async (
     delivery: SuccessfulDeliveryTarget,
@@ -850,6 +864,9 @@ export async function dispatchCronDelivery(
         deliveryAttempted,
         ...params.telemetry,
       });
+    }
+    if (hadDescendants && !synthesizedText?.trim()) {
+      return await failEmptyDescendantFollowup();
     }
     const normalizedSynthesizedText = normalizeSilentReplyText(synthesizedText);
     if (
