@@ -260,6 +260,15 @@ export type ProviderRuntimeFailureKind =
   | "callback_timeout"
   | "callback_validation"
   | "auth_html_403"
+  /**
+   * Plain HTTP 401 with an "Invalid token" / "expired" / "Unauthorized"
+   * message body, classified by `classifyFailoverSignal` as `auth` rather
+   * than by an explicit OAuth-refresh signal. Provider plugins for plain
+   * API-key auth (e.g. Z.AI/AutoGLM) emit this when their JWT expires
+   * mid-session; surfacing the raw "HTTP 401: Invalid token" to the end
+   * user is the symptom captured by [Github #56197].
+   */
+  | "auth_invalid_token"
   | "upstream_html"
   | "proxy"
   | "rate_limit"
@@ -974,6 +983,44 @@ export function classifyProviderRuntimeFailureKind(
   if (message && isSchemaErrorMessage(message)) {
     return "schema";
   }
+  // Plain HTTP 401 / "Invalid token" / "Unauthorized" — surface a friendly
+  // re-auth hint rather than the raw provider error. Distinct from
+  // `auth_refresh` (explicit OAuth-refresh failure messages) and
+  // `auth_html_403` (HTML 403 bodies). Reuses the existing
+  // `classifyFailoverSignal` `auth` reason instead of duplicating the
+  // message regex set. Placed AFTER replay-invalid / schema so 401s with
+  // structurally-meaningful bodies (e.g. "401 input item ID does not belong
+  // to this conversation" → `replay_invalid`) keep their existing copy.
+  //
+  // The 401-evidence gate is load-bearing: `classifyFailoverSignal` returns
+  // the same `auth` reason for two non-401 shapes that must NOT get the
+  // "HTTP 401" copy:
+  //   1. Plain HTTP 403 fall-through (key revoked, scope-missing) without
+  //      an HTML body or `permission_error` JSON — same branch at status
+  //      401/403 in `classifyFailoverClassificationFromHttpStatus`.
+  //   2. Message-only auth errors with no HTTP status prefix at all
+  //      (e.g. `{"error":{"code":"invalid_api_key"}}`) classified by
+  //      `isAuthErrorMessage(raw)`.
+  // We require positive 401 evidence: either `status === 401` (parsed from
+  // a leading HTTP status), or `status` is unknown AND the message embeds
+  // `401` at a word boundary while not also embedding `403`. The latter
+  // covers real-world variants like `'status code: 401, message: ...'`
+  // where `extractLeadingHttpStatus` cannot pick up the code because it
+  // is not at the start. Billing 401s (e.g. `{"code":401,"message":"Key
+  // limit exceeded"}`) are already caught upstream by the billing reason
+  // taking precedence over `auth` in the 401/403 branch, so they never
+  // reach this gate. See [Github #56197] and PR #77394 review.
+  const messageMentions401 = /\b401\b/.test(message);
+  const messageMentions403 = /\b403\b/.test(message);
+  const has401Evidence =
+    status === 401 || (status === undefined && messageMentions401 && !messageMentions403);
+  if (
+    failoverClassification?.kind === "reason" &&
+    failoverClassification.reason === "auth" &&
+    has401Evidence
+  ) {
+    return "auth_invalid_token";
+  }
   if (
     failoverClassification?.kind === "reason" &&
     (failoverClassification.reason === "timeout" || failoverClassification.reason === "overloaded")
@@ -1070,6 +1117,21 @@ export function formatAssistantErrorText(
     return (
       "Authentication failed with an HTML 403 response from the provider. " +
       "Re-authenticate and verify your provider account access."
+    );
+  }
+
+  if (providerRuntimeFailureKind === "auth_invalid_token") {
+    // Plain HTTP 401 path. Common on Z.AI/AutoGLM and other API-key providers
+    // when the upstream JWT expires mid-session and the provider plugin lacks
+    // a `prepareRuntimeAuth` refresh hook. Reply with a sanitized re-auth
+    // hint so end users on chat surfaces (Feishu, Telegram, etc.) do not
+    // see the raw "HTTP 401: Invalid token" string. The full retry-with-
+    // refresh path remains a provider-level follow-up per #56197 — this
+    // change only suppresses the raw error from user-visible replies.
+    return (
+      "Authentication failed (provider returned HTTP 401). " +
+      "Your provider token may have expired — try the request again in a moment. " +
+      "If the failure persists, re-authenticate this provider."
     );
   }
 
