@@ -184,10 +184,29 @@ describe("provider-usage.load", () => {
           now: usageNow,
           auth: [{ provider: "xiaomi", token: "token-x" }],
           fetch: undefined,
+          env: {},
         }),
       ).rejects.toThrow("fetch is not available");
     } finally {
       vi.stubGlobal("fetch", previousFetch);
     }
+  });
+
+  it("prefers proxy-aware fetch from env when HTTP_PROXY is set and no explicit fetch is supplied", async () => {
+    resolveProviderUsageSnapshotWithPluginMock.mockImplementation(async ({ provider }) => {
+      return {
+        provider: provider as any,
+        displayName: "OpenAI Codex",
+        windows: [{ label: "from-plugin", usedPercent: 50 }],
+      };
+    });
+
+    const summary = await loadProviderUsageSummary({
+      now: usageNow,
+      auth: [{ provider: "openai-codex" as any, token: "token-codex" }],
+      env: { HTTP_PROXY: "http://127.0.0.1:7890", HTTPS_PROXY: "http://127.0.0.1:7890" },
+    });
+
+    expect(summary.providers[0]?.windows).toEqual([{ label: "from-plugin", usedPercent: 50 }]);
   });
 });
