@@ -319,6 +319,16 @@ function mockNpmViewAndInstallMany(packages: MockNpmPackage[]) {
         const installedPackages: MockNpmPackage[] = [];
         prunePluginLocalOpenClawPeerLinks(npmRoot);
         for (const packageName of Object.keys(manifest.dependencies ?? {})) {
+          if (packageName === "openclaw") {
+            const openclawRoot = path.join(npmRoot, "node_modules", "openclaw");
+            fs.mkdirSync(openclawRoot, { recursive: true });
+            fs.writeFileSync(
+              path.join(openclawRoot, "package.json"),
+              JSON.stringify({ name: "openclaw", version: "0.0.0-test" }),
+              "utf8",
+            );
+            continue;
+          }
           const pkg = packagesByName.get(packageName);
           if (!pkg) {
             throw new Error(`unexpected managed npm dependency: ${packageName}`);
@@ -675,7 +685,7 @@ describe("installPluginFromNpmSpec", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error).toContain("plain-crypto-js");
-      expect(result.error).toContain("node_modules/plain-crypto-js");
+      expect(result.error).toContain(path.join("node_modules", "plain-crypto-js"));
     }
     expect(fs.existsSync(path.join(npmRoot, "node_modules", "hoisted-plugin"))).toBe(false);
     expect(fs.existsSync(path.join(npmRoot, "node_modules", "plain-crypto-js"))).toBe(false);
