@@ -2687,6 +2687,7 @@ public struct ConfigSchemaResponse: Codable, Sendable {
 public struct ConfigSchemaLookupResult: Codable, Sendable {
     public let path: String
     public let schema: AnyCodable
+    public let reloadkind: AnyCodable?
     public let hint: [String: AnyCodable]?
     public let hintpath: String?
     public let children: [[String: AnyCodable]]
@@ -2694,12 +2695,14 @@ public struct ConfigSchemaLookupResult: Codable, Sendable {
     public init(
         path: String,
         schema: AnyCodable,
+        reloadkind: AnyCodable?,
         hint: [String: AnyCodable]?,
         hintpath: String?,
         children: [[String: AnyCodable]])
     {
         self.path = path
         self.schema = schema
+        self.reloadkind = reloadkind
         self.hint = hint
         self.hintpath = hintpath
         self.children = children
@@ -2708,6 +2711,7 @@ public struct ConfigSchemaLookupResult: Codable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case path
         case schema
+        case reloadkind = "reloadKind"
         case hint
         case hintpath = "hintPath"
         case children
