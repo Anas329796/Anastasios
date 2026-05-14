@@ -6,7 +6,7 @@ import type {
   ImageGenerationResult,
 } from "openclaw/plugin-sdk/image-generation";
 import {
-  parseOpenAiCompatibleImageResponse,
+  parseOpenAiCompatibleImageResponseAsync,
   toImageDataUrl,
 } from "openclaw/plugin-sdk/image-generation";
 import { createSubsystemLogger } from "openclaw/plugin-sdk/logging-core";
@@ -879,9 +879,16 @@ export function buildOpenAIImageGenerationProvider(): ImageGenerationProvider {
 
         const data = (await response.json()) as OpenAIImageApiResponse;
         const output = resolveOutputMime(req.outputFormat);
-        const images = parseOpenAiCompatibleImageResponse(data, {
-          defaultMimeType: output.mimeType,
-        }).map((image, index) =>
+        const images = (
+          await parseOpenAiCompatibleImageResponseAsync(data, {
+            defaultMimeType: output.mimeType,
+            timeoutMs,
+            ssrfPolicy: req.ssrfPolicy,
+            allowPrivateNetwork,
+            dispatcherPolicy,
+            auditContext: "openai.image-url-download",
+          })
+        ).map((image, index) =>
           Object.assign(image, {
             fileName: `image-${index + 1}.${output.extension}`,
           }),
