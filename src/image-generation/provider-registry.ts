@@ -28,7 +28,7 @@ function resolvePluginImageGenerationProviders(
   });
 }
 
-function buildProviderMaps(cfg?: OpenClawConfig): {
+function buildProviderMaps(providers: Iterable<ImageGenerationProviderPlugin>): {
   canonical: Map<string, ImageGenerationProviderPlugin>;
   aliases: Map<string, ImageGenerationProviderPlugin>;
 } {
@@ -49,29 +49,50 @@ function buildProviderMaps(cfg?: OpenClawConfig): {
     }
   };
 
-  for (const provider of BUILTIN_IMAGE_GENERATION_PROVIDERS) {
-    register(provider);
-  }
-  for (const provider of resolvePluginImageGenerationProviders(cfg)) {
+  for (const provider of providers) {
     register(provider);
   }
 
   return { canonical, aliases };
 }
 
+export function createImageGenerationProviderRegistry(
+  providers: Iterable<ImageGenerationProviderPlugin>,
+): {
+  listProviders: () => ImageGenerationProviderPlugin[];
+  getProvider: (providerId: string | undefined) => ImageGenerationProviderPlugin | undefined;
+} {
+  const maps = buildProviderMaps(providers);
+  return {
+    listProviders: () => [...maps.canonical.values()],
+    getProvider: (providerId) => {
+      const normalized = normalizeImageGenerationProviderId(providerId);
+      if (!normalized) {
+        return undefined;
+      }
+      return maps.aliases.get(normalized);
+    },
+  };
+}
+
+function resolveImageGenerationProviderRegistry(
+  cfg?: OpenClawConfig,
+): ReturnType<typeof createImageGenerationProviderRegistry> {
+  return createImageGenerationProviderRegistry([
+    ...BUILTIN_IMAGE_GENERATION_PROVIDERS,
+    ...resolvePluginImageGenerationProviders(cfg),
+  ]);
+}
+
 export function listImageGenerationProviders(
   cfg?: OpenClawConfig,
 ): ImageGenerationProviderPlugin[] {
-  return [...buildProviderMaps(cfg).canonical.values()];
+  return resolveImageGenerationProviderRegistry(cfg).listProviders();
 }
 
 export function getImageGenerationProvider(
   providerId: string | undefined,
   cfg?: OpenClawConfig,
 ): ImageGenerationProviderPlugin | undefined {
-  const normalized = normalizeImageGenerationProviderId(providerId);
-  if (!normalized) {
-    return undefined;
-  }
-  return buildProviderMaps(cfg).aliases.get(normalized);
+  return resolveImageGenerationProviderRegistry(cfg).getProvider(providerId);
 }
