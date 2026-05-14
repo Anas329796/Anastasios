@@ -238,6 +238,11 @@ export const en: TranslationMap = {
     noSummary: "No summary captured.",
     branchFromCheckpoint: "Branch from checkpoint",
     restoreCheckpoint: "Restore checkpoint",
+    pagination: {
+      of: "of {count}",
+    },
+    perPage: "{size} per page",
+    minutesSeconds: "{minutes}m {seconds}s",
   },
   agents: {
     noAgents: "No agents",

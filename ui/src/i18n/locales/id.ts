@@ -240,6 +240,11 @@ export const id: TranslationMap = {
     noSummary: "Tidak ada ringkasan yang direkam.",
     branchFromCheckpoint: "Buat cabang dari checkpoint",
     restoreCheckpoint: "Pulihkan checkpoint",
+    pagination: {
+      of: "of {count}",
+    },
+    perPage: "{size} per page",
+    minutesSeconds: "{minutes}m {seconds}s",
   },
   agents: {
     noAgents: "No agents",

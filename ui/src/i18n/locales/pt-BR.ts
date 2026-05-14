@@ -240,6 +240,11 @@ export const pt_BR: TranslationMap = {
     noSummary: "Nenhum resumo capturado.",
     branchFromCheckpoint: "Criar ramificação a partir do checkpoint",
     restoreCheckpoint: "Restaurar checkpoint",
+    pagination: {
+      of: "of {count}",
+    },
+    perPage: "{size} per page",
+    minutesSeconds: "{minutes}m {seconds}s",
   },
   agents: {
     noAgents: "No agents",

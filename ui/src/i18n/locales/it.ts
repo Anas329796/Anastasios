@@ -240,6 +240,11 @@ export const it: TranslationMap = {
     noSummary: "Nessun riepilogo acquisito.",
     branchFromCheckpoint: "Crea ramo dal checkpoint",
     restoreCheckpoint: "Ripristina checkpoint",
+    pagination: {
+      of: "of {count}",
+    },
+    perPage: "{size} per page",
+    minutesSeconds: "{minutes}m {seconds}s",
   },
   agents: {
     noAgents: "Nessun agente",

@@ -242,6 +242,11 @@ export const nl: TranslationMap = {
     noSummary: "Geen samenvatting vastgelegd.",
     branchFromCheckpoint: "Vertakken vanaf controlepunt",
     restoreCheckpoint: "Controlepunt herstellen",
+    pagination: {
+      of: "of {count}",
+    },
+    perPage: "{size} per page",
+    minutesSeconds: "{minutes}m {seconds}s",
   },
   agents: {
     noAgents: "Geen agents",

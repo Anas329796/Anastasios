@@ -240,6 +240,11 @@ export const vi: TranslationMap = {
     noSummary: "Chưa ghi nhận bản tóm tắt.",
     branchFromCheckpoint: "Tạo nhánh từ điểm kiểm tra",
     restoreCheckpoint: "Khôi phục điểm kiểm tra",
+    pagination: {
+      of: "of {count}",
+    },
+    perPage: "{size} per page",
+    minutesSeconds: "{minutes}m {seconds}s",
   },
   agents: {
     noAgents: "Không có agent",

@@ -239,6 +239,11 @@ export const ar: TranslationMap = {
     noSummary: "لم يتم التقاط أي ملخص.",
     branchFromCheckpoint: "إنشاء فرع من نقطة التحقق",
     restoreCheckpoint: "استعادة نقطة التحقق",
+    pagination: {
+      of: "of {count}",
+    },
+    perPage: "{size} per page",
+    minutesSeconds: "{minutes}m {seconds}s",
   },
   agents: {
     noAgents: "لا توجد وكلاء",

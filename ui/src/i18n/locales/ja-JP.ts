@@ -243,6 +243,11 @@ export const ja_JP: TranslationMap = {
     noSummary: "要約は取得されていません。",
     branchFromCheckpoint: "チェックポイントからブランチ",
     restoreCheckpoint: "チェックポイントを復元",
+    pagination: {
+      of: "of {count}",
+    },
+    perPage: "{size} per page",
+    minutesSeconds: "{minutes}m {seconds}s",
   },
   agents: {
     noAgents: "No agents",

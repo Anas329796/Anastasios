@@ -241,6 +241,11 @@ export const uk: TranslationMap = {
     noSummary: "Підсумок не зафіксовано.",
     branchFromCheckpoint: "Створити гілку з контрольної точки",
     restoreCheckpoint: "Відновити контрольну точку",
+    pagination: {
+      of: "of {count}",
+    },
+    perPage: "{size} per page",
+    minutesSeconds: "{minutes}m {seconds}s",
   },
   agents: {
     noAgents: "No agents",

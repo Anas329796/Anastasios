@@ -238,6 +238,11 @@ export const th: TranslationMap = {
     noSummary: "ไม่มีสรุปที่บันทึกไว้",
     branchFromCheckpoint: "แตกแขนงจากเช็กพอยต์",
     restoreCheckpoint: "กู้คืนเช็กพอยต์",
+    pagination: {
+      of: "of {count}",
+    },
+    perPage: "{size} per page",
+    minutesSeconds: "{minutes}m {seconds}s",
   },
   agents: {
     noAgents: "No agents",

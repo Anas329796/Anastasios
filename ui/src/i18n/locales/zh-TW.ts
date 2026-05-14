@@ -238,6 +238,11 @@ export const zh_TW: TranslationMap = {
     noSummary: "未擷取摘要。",
     branchFromCheckpoint: "從檢查點建立分支",
     restoreCheckpoint: "還原檢查點",
+    pagination: {
+      of: "of {count}",
+    },
+    perPage: "{size} per page",
+    minutesSeconds: "{minutes}m {seconds}s",
   },
   agents: {
     noAgents: "No agents",

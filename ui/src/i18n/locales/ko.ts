@@ -239,6 +239,11 @@ export const ko: TranslationMap = {
     noSummary: "캡처된 요약이 없습니다.",
     branchFromCheckpoint: "체크포인트에서 브랜치 생성",
     restoreCheckpoint: "체크포인트 복원",
+    pagination: {
+      of: "of {count}",
+    },
+    perPage: "{size} per page",
+    minutesSeconds: "{minutes}m {seconds}s",
   },
   agents: {
     noAgents: "No agents",

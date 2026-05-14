@@ -241,6 +241,11 @@ export const pl: TranslationMap = {
     noSummary: "Nie zapisano podsumowania.",
     branchFromCheckpoint: "Utwórz gałąź z punktu kontrolnego",
     restoreCheckpoint: "Przywróć punkt kontrolny",
+    pagination: {
+      of: "of {count}",
+    },
+    perPage: "{size} per page",
+    minutesSeconds: "{minutes}m {seconds}s",
   },
   agents: {
     noAgents: "No agents",

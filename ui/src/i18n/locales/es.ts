@@ -240,6 +240,11 @@ export const es: TranslationMap = {
     noSummary: "No se capturó ningún resumen.",
     branchFromCheckpoint: "Crear rama desde el punto de control",
     restoreCheckpoint: "Restaurar punto de control",
+    pagination: {
+      of: "of {count}",
+    },
+    perPage: "{size} per page",
+    minutesSeconds: "{minutes}m {seconds}s",
   },
   agents: {
     noAgents: "No agents",

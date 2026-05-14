@@ -243,6 +243,11 @@ export const de: TranslationMap = {
     noSummary: "Keine Zusammenfassung erfasst.",
     branchFromCheckpoint: "Von Checkpoint verzweigen",
     restoreCheckpoint: "Checkpoint wiederherstellen",
+    pagination: {
+      of: "of {count}",
+    },
+    perPage: "{size} per page",
+    minutesSeconds: "{minutes}m {seconds}s",
   },
   agents: {
     noAgents: "No agents",

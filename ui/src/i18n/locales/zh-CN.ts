@@ -237,6 +237,11 @@ export const zh_CN: TranslationMap = {
     noSummary: "未捕获摘要。",
     branchFromCheckpoint: "从检查点创建分支",
     restoreCheckpoint: "恢复检查点",
+    pagination: {
+      of: "共 {count} 条",
+    },
+    perPage: "每页 {size} 条",
+    minutesSeconds: "{minutes}分 {seconds}秒",
   },
   agents: {
     noAgents: "无代理",

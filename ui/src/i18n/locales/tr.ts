@@ -242,6 +242,11 @@ export const tr: TranslationMap = {
     noSummary: "Özet yakalanmadı.",
     branchFromCheckpoint: "Kontrol noktasından dal oluştur",
     restoreCheckpoint: "Kontrol noktasını geri yükle",
+    pagination: {
+      of: "of {count}",
+    },
+    perPage: "{size} per page",
+    minutesSeconds: "{minutes}m {seconds}s",
   },
   agents: {
     noAgents: "No agents",

@@ -241,6 +241,11 @@ export const fa: TranslationMap = {
     noSummary: "هیچ خلاصه‌ای ثبت نشده است.",
     branchFromCheckpoint: "انشعاب از نقطهٔ وارسی",
     restoreCheckpoint: "بازیابی نقطهٔ وارسی",
+    pagination: {
+      of: "of {count}",
+    },
+    perPage: "{size} per page",
+    minutesSeconds: "{minutes}m {seconds}s",
   },
   agents: {
     noAgents: "هیچ عاملی وجود ندارد",
