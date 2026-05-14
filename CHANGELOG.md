@@ -1950,6 +1950,7 @@ Docs: https://docs.openclaw.ai
 - Cron: retry recurring wake-now main-session jobs through temporary heartbeat busy skips before recording success, so queued cron events no longer appear as ok ghost runs while the main lane is still busy. Fixes #75964. (#76083) Thanks @kshetrajna12 and @xuruiray.
 - Providers/Google: keep Gemini thinking-signature-only stream chunks active during reasoning, so Gemini 3.1 Pro Preview replies no longer hit idle timeouts before visible text. Fixes #76071. (#76080) Thanks @marcoschierhorn and @zhangguiping-xydt.
 - CLI/skills: show per-agent model and command visibility in `openclaw skills check --agent`, and let doctor report or disable unavailable skills allowed for the default agent. (#75983) Thanks @mbelinky.
+- Heartbeat/isolated-session: archive the previously stored transcript when an isolated heartbeat session rotates under the same key, using `reason: "reset"` and the existing live-reference protection, so cron heartbeats no longer orphan the prior session JSONL on restart. Refs #65564. (#73809) Thanks @truffle-dev.
 
 ## 2026.4.29
 
