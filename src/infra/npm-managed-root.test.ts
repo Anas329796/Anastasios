@@ -215,6 +215,7 @@ describe("managed npm root", () => {
       )}\n`,
     );
     await fs.mkdir(path.join(npmRoot, "node_modules", "fixture-plugin"), { recursive: true });
+    await fs.mkdir(path.join(npmRoot, "node_modules", "fixture-runtime"), { recursive: true });
     await fs.writeFile(
       path.join(npmRoot, "node_modules", "fixture-plugin", "package.json"),
       `${JSON.stringify({
@@ -226,8 +227,20 @@ describe("managed npm root", () => {
         peerDependenciesMeta: {},
       })}\n`,
     );
+    await fs.writeFile(
+      path.join(npmRoot, "node_modules", "fixture-runtime", "package.json"),
+      `${JSON.stringify({
+        name: "fixture-runtime",
+        version: "1.0.0",
+      })}\n`,
+    );
 
-    await expect(syncManagedNpmRootPeerDependencies({ npmRoot })).resolves.toBe(true);
+    await expect(
+      syncManagedNpmRootPeerDependencies({
+        npmRoot,
+        preferredPackageName: "fixture-plugin",
+      }),
+    ).resolves.toBe(true);
 
     await expect(
       fs.readFile(path.join(npmRoot, "package.json"), "utf8").then((raw) => JSON.parse(raw)),
