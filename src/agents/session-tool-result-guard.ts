@@ -1,3 +1,5 @@
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { SessionManager } from "@earendil-works/pi-coding-agent";
 import {
   boundedJsonUtf8Bytes,
   firstEnumerableOwnKeys,
@@ -15,7 +17,6 @@ import type {
 } from "../plugins/types.js";
 import { emitSessionTranscriptUpdate } from "../sessions/transcript-events.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
-import type { AgentMessage } from "./agent-core-contract.js";
 import { formatContextLimitTruncationNotice } from "./pi-embedded-runner/context-truncation-notice.js";
 import {
   DEFAULT_MAX_LIVE_TOOL_RESULT_CHARS,
@@ -28,7 +29,6 @@ import {
 import { createPendingToolCallState } from "./session-tool-result-state.js";
 import { makeMissingToolResult, sanitizeToolCallInputs } from "./session-transcript-repair.js";
 import { extractToolCallsFromAssistant, extractToolResultId } from "./tool-call-id.js";
-import type { SessionManager } from "./transcript/session-transcript-contract.js";
 
 /**
  * Truncate oversized text content blocks in a tool result message.
@@ -55,9 +55,55 @@ function isUserAgentMessage(message: AgentMessage): message is UserAgentMessage 
   return message.role === "user";
 }
 
+type TranscriptSeqByEntryId = Map<string, number>;
+
+function resolveEntryTranscriptSeq(
+  sessionManager: SessionManager,
+  entryId: string | null | undefined,
+  seqByEntryId: TranscriptSeqByEntryId,
+): number | undefined {
+  if (!entryId) {
+    return 0;
+  }
+  const cached = seqByEntryId.get(entryId);
+  if (cached !== undefined) {
+    return cached;
+  }
+  let seq = 0;
+  for (const entry of sessionManager.getBranch(entryId)) {
+    if (entry.type === "message" || entry.type === "compaction") {
+      seq += 1;
+    }
+    seqByEntryId.set(entry.id, seq);
+  }
+  return seqByEntryId.get(entryId);
+}
+
+function resolveAppendedMessageSeq(params: {
+  sessionManager: SessionManager;
+  entryId: unknown;
+  parentEntryId: string | null | undefined;
+  seqByEntryId: TranscriptSeqByEntryId;
+}): number | undefined {
+  if (typeof params.entryId !== "string") {
+    return undefined;
+  }
+  const parentSeq = resolveEntryTranscriptSeq(
+    params.sessionManager,
+    params.parentEntryId,
+    params.seqByEntryId,
+  );
+  if (parentSeq === undefined) {
+    return undefined;
+  }
+  const messageSeq = parentSeq + 1;
+  params.seqByEntryId.set(params.entryId, messageSeq);
+  return messageSeq;
+}
+
 // `details` is runtime/UI metadata, not model-visible tool output. Keep the
-// transcript useful for debugging without letting metadata blobs dominate
-// replay repair, transcript broadcasts, or future tooling that reads persisted
+// session JSONL useful for debugging without letting metadata blobs dominate
+// disk, replay repair, transcript broadcasts, or future tooling that reads raw
 // sessions. Model-visible text belongs in tool result `content`.
 const MAX_PERSISTED_TOOL_RESULT_DETAILS_BYTES = 8_192;
 const MAX_PERSISTED_DETAIL_STRING_CHARS = 2_000;
@@ -472,9 +518,6 @@ export function installSessionToolResultGuard(
   opts?: {
     /** Optional session key for transcript update broadcasts. */
     sessionKey?: string;
-    /** Optional agent/session identity for SQLite-backed transcript broadcasts. */
-    agentId?: string;
-    sessionId?: string;
     /**
      * Optional transform applied to any message before persistence.
      */
@@ -499,7 +542,7 @@ export function installSessionToolResultGuard(
      */
     allowedToolNames?: Iterable<string>;
     /**
-     * Synchronous hook invoked before any message is written to the persisted transcript.
+     * Synchronous hook invoked before any message is written to the session JSONL.
      * If the hook returns { block: true }, the message is silently dropped.
      * If it returns { message }, the modified message is written instead.
      */
@@ -539,7 +582,32 @@ export function installSessionToolResultGuard(
   const beforeWrite = opts?.beforeMessageWriteHook;
   const redactionConfig = opts?.redactLoggingConfig;
   const maxToolResultChars = resolveMaxToolResultChars(opts);
+  const transcriptSeqByEntryId: TranscriptSeqByEntryId = new Map();
   let suppressNextUserMessagePersistence = opts?.suppressNextUserMessagePersistence === true;
+
+  const getSessionFile = () =>
+    (sessionManager as { getSessionFile?: () => string | null }).getSessionFile?.();
+
+  const appendMessageAndCacheTranscriptSeq = (
+    message: AgentMessage,
+  ): { entryId: string; messageSeq?: number; sessionFile?: string | null } => {
+    const parentEntryId = sessionManager.getLeafId();
+    const entryId = originalAppend(message as never);
+    const sessionFile = getSessionFile();
+    if (!sessionFile) {
+      return { entryId, sessionFile };
+    }
+    return {
+      entryId,
+      sessionFile,
+      messageSeq: resolveAppendedMessageSeq({
+        sessionManager,
+        entryId,
+        parentEntryId,
+        seqByEntryId: transcriptSeqByEntryId,
+      }),
+    };
+  };
 
   /**
    * Run the before_message_write hook. Returns the (possibly modified) message,
@@ -578,8 +646,8 @@ export function installSessionToolResultGuard(
           }),
         );
         if (flushed) {
-          originalAppend(
-            capToolResultForPersistence(flushed, maxToolResultChars, redactionConfig) as never,
+          appendMessageAndCacheTranscriptSeq(
+            capToolResultForPersistence(flushed, maxToolResultChars, redactionConfig),
           );
         }
       }
@@ -632,9 +700,9 @@ export function installSessionToolResultGuard(
       if (!persisted) {
         return undefined;
       }
-      return originalAppend(
-        capToolResultForPersistence(persisted, maxToolResultChars, redactionConfig) as never,
-      );
+      return appendMessageAndCacheTranscriptSeq(
+        capToolResultForPersistence(persisted, maxToolResultChars, redactionConfig),
+      ).entryId;
     }
 
     // Skip tool call extraction for aborted/errored assistant messages.
@@ -678,15 +746,18 @@ export function installSessionToolResultGuard(
       suppressNextUserMessagePersistence = false;
       return undefined;
     }
-    const result = originalAppend(finalMessage as never);
-
-    if (opts?.sessionId || opts?.sessionKey) {
+    const {
+      entryId: result,
+      messageSeq,
+      sessionFile,
+    } = appendMessageAndCacheTranscriptSeq(finalMessage);
+    if (sessionFile) {
       emitSessionTranscriptUpdate({
-        ...(opts?.agentId ? { agentId: opts.agentId } : {}),
-        ...(opts?.sessionId ? { sessionId: opts.sessionId } : {}),
+        sessionFile,
         sessionKey: opts?.sessionKey,
         message: finalMessage,
         messageId: typeof result === "string" ? result : undefined,
+        ...(messageSeq !== undefined ? { messageSeq } : {}),
       });
     }
 

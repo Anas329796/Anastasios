@@ -1,4 +1,7 @@
-import { resolveSendableOutboundReplyParts } from "openclaw/plugin-sdk/reply-payload";
+import {
+  hasOutboundReplyContent,
+  resolveSendableOutboundReplyParts,
+} from "openclaw/plugin-sdk/reply-payload";
 import { isParentOwnedBackgroundAcpSession } from "../../acp/session-interaction-mode.js";
 import {
   resolveAgentConfig,
@@ -26,7 +29,8 @@ import { normalizeChatType } from "../../channels/chat-type.js";
 import { shouldSuppressLocalExecApprovalPrompt } from "../../channels/plugins/exec-approval-local.js";
 import { applyMergePatch } from "../../config/merge-patch.js";
 import { resolveGroupSessionKey } from "../../config/sessions/group.js";
-import { readSqliteSessionRoutingInfo } from "../../config/sessions/session-entries.sqlite.js";
+import { parseSessionThreadInfoFast } from "../../config/sessions/thread-info.js";
+import { appendAssistantMessageToSessionTranscript } from "../../config/sessions/transcript.js";
 import type { SessionEntry } from "../../config/sessions/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { logVerbose } from "../../globals.js";
@@ -82,12 +86,11 @@ import { normalizeVerboseLevel } from "../thinking.js";
 import { resolveConversationBindingContextFromMessage } from "./conversation-binding-input.js";
 import {
   createInternalHookEvent,
-  getSessionEntry,
-  listSessionEntries,
-  mergeSessionEntry,
-  resolveSessionRowEntry,
+  loadSessionStore,
+  resolveSessionStoreEntry,
+  resolveStorePath,
   triggerInternalHook,
-  upsertSessionEntry,
+  updateSessionStoreEntry,
 } from "./dispatch-from-config.runtime.js";
 import type {
   DispatchFromConfigParams,
@@ -212,11 +215,12 @@ const resolveRoutedPolicyConversationType = (
   return undefined;
 };
 
-const resolveSessionRowLookup = (
+const resolveSessionStoreLookup = (
   ctx: FinalizedMsgContext,
   cfg: OpenClawConfig,
 ): {
   sessionKey?: string;
+  storePath?: string;
   entry?: SessionEntry;
 } => {
   const targetSessionKey =
@@ -228,17 +232,18 @@ const resolveSessionRowLookup = (
     return {};
   }
   const agentId = resolveSessionAgentId({ sessionKey, config: cfg });
+  const storePath = resolveStorePath(cfg.session?.store, { agentId });
   try {
-    const store = Object.fromEntries(
-      listSessionEntries({ agentId }).map(({ sessionKey: key, entry }) => [key, entry]),
-    );
+    const store = loadSessionStore(storePath);
     return {
       sessionKey,
-      entry: resolveSessionRowEntry({ entries: store, sessionKey }).existing,
+      storePath,
+      entry: resolveSessionStoreEntry({ store, sessionKey }).existing,
     };
   } catch {
     return {
       sessionKey,
+      storePath,
     };
   }
 };
@@ -276,13 +281,14 @@ const resolveBoundAcpDispatchSessionKey = (params: {
 
 const createShouldEmitVerboseProgress = (params: {
   sessionKey?: string;
+  storePath?: string;
   fallbackLevel: string;
 }) => {
   return () => {
-    if (params.sessionKey) {
+    if (params.sessionKey && params.storePath) {
       try {
-        const agentId = resolveSessionAgentId({ sessionKey: params.sessionKey, config: {} });
-        const entry = getSessionEntry({ agentId, sessionKey: params.sessionKey });
+        const store = loadSessionStore(params.storePath);
+        const entry = resolveSessionStoreEntry({ store, sessionKey: params.sessionKey }).existing;
         const currentLevel = normalizeVerboseLevel(entry?.verboseLevel ?? "");
         if (currentLevel) {
           return currentLevel !== "off";
@@ -328,30 +334,53 @@ const resolveHarnessSourceVisibleRepliesDefault = (params: {
 };
 
 async function clearPendingFinalDeliveryAfterSuccess(params: {
+  storePath?: string;
   sessionKey?: string;
 }): Promise<void> {
-  if (!params.sessionKey) {
+  if (!params.storePath || !params.sessionKey) {
     return;
   }
-  const agentId = resolveSessionAgentId({ sessionKey: params.sessionKey, config: {} });
-  const entry = getSessionEntry({ agentId, sessionKey: params.sessionKey });
-  if (!entry?.pendingFinalDelivery && !entry?.pendingFinalDeliveryText) {
-    return;
-  }
-  upsertSessionEntry({
-    agentId,
+  await updateSessionStoreEntry({
+    storePath: params.storePath,
     sessionKey: params.sessionKey,
-    entry: mergeSessionEntry(entry, {
-      pendingFinalDelivery: undefined,
-      pendingFinalDeliveryText: undefined,
-      pendingFinalDeliveryCreatedAt: undefined,
-      pendingFinalDeliveryLastAttemptAt: undefined,
-      pendingFinalDeliveryAttemptCount: undefined,
-      pendingFinalDeliveryLastError: undefined,
-      pendingFinalDeliveryContext: undefined,
-      updatedAt: Date.now(),
-    }),
+    update: async (entry) => {
+      if (!entry.pendingFinalDelivery && !entry.pendingFinalDeliveryText) {
+        return null;
+      }
+      return {
+        pendingFinalDelivery: undefined,
+        pendingFinalDeliveryText: undefined,
+        pendingFinalDeliveryCreatedAt: undefined,
+        pendingFinalDeliveryLastAttemptAt: undefined,
+        pendingFinalDeliveryAttemptCount: undefined,
+        pendingFinalDeliveryLastError: undefined,
+        pendingFinalDeliveryContext: undefined,
+        updatedAt: Date.now(),
+      };
+    },
   });
+}
+
+async function mirrorInternalSourceReplyToTranscript(params: {
+  metadata: NonNullable<ReturnType<typeof getReplyPayloadMetadata>>["sourceReplyTranscriptMirror"];
+  cfg: OpenClawConfig;
+}): Promise<void> {
+  const mirror = params.metadata;
+  if (!mirror) {
+    return;
+  }
+  const result = await appendAssistantMessageToSessionTranscript({
+    sessionKey: mirror.sessionKey,
+    agentId: mirror.agentId,
+    text: mirror.text,
+    mediaUrls: mirror.mediaUrls,
+    idempotencyKey: mirror.idempotencyKey,
+    updateMode: "inline",
+    config: params.cfg,
+  });
+  if (!result.ok) {
+    logVerbose(`dispatch-from-config: internal source reply mirror skipped: ${result.reason}`);
+  }
 }
 
 export type {
@@ -433,10 +462,10 @@ export async function dispatchReplyFromConfig(
     inboundDedupeReplayUnsafe = true;
   };
 
-  const initialSessionRowEntry = resolveSessionRowLookup(ctx, cfg);
+  const initialSessionStoreEntry = resolveSessionStoreLookup(ctx, cfg);
   const boundAcpDispatchSessionKey = resolveBoundAcpDispatchSessionKey({ ctx, cfg });
   const acpDispatchSessionKey =
-    boundAcpDispatchSessionKey ?? initialSessionRowEntry.sessionKey ?? sessionKey;
+    boundAcpDispatchSessionKey ?? initialSessionStoreEntry.sessionKey ?? sessionKey;
   const markProgress = () => {
     if (!canTrackSession || !sessionKey) {
       return;
@@ -446,36 +475,31 @@ export async function dispatchReplyFromConfig(
       markDiagnosticSessionProgress({ sessionKey: acpDispatchSessionKey });
     }
   };
-  const sessionRowEntry = boundAcpDispatchSessionKey
-    ? resolveSessionRowLookup({ ...ctx, SessionKey: boundAcpDispatchSessionKey }, cfg)
-    : initialSessionRowEntry;
+  const sessionStoreEntry = boundAcpDispatchSessionKey
+    ? resolveSessionStoreLookup({ ...ctx, SessionKey: boundAcpDispatchSessionKey }, cfg)
+    : initialSessionStoreEntry;
   const sessionAgentId = resolveSessionAgentId({ sessionKey: acpDispatchSessionKey, config: cfg });
   const sessionAgentCfg = resolveAgentConfig(cfg, sessionAgentId);
   const shouldEmitVerboseProgress = createShouldEmitVerboseProgress({
     sessionKey: acpDispatchSessionKey,
+    storePath: sessionStoreEntry.storePath,
     fallbackLevel:
       normalizeVerboseLevel(
-        sessionRowEntry.entry?.verboseLevel ??
+        sessionStoreEntry.entry?.verboseLevel ??
           sessionAgentCfg?.verboseDefault ??
           cfg.agents?.defaults?.verboseDefault ??
           "",
       ) ?? "off",
   });
-  const replyRoute = resolveEffectiveReplyRoute({ ctx, entry: sessionRowEntry.entry });
-  // Restore route thread context only from the active turn or typed SQLite
-  // conversation metadata. Do not read thread ids from the normalized session
-  // entry shadow: stale origin/thread fields can be folded into compatibility
-  // route fields during row normalization.
-  const typedRouteThreadId =
-    acpDispatchSessionKey && sessionAgentId
-      ? readSqliteSessionRoutingInfo({
-          agentId: sessionAgentId,
-          sessionKey: acpDispatchSessionKey,
-        })?.conversationThreadId
-      : undefined;
-  const routeThreadId = ctx.MessageThreadId ?? typedRouteThreadId;
+  const replyRoute = resolveEffectiveReplyRoute({ ctx, entry: sessionStoreEntry.entry });
+  // Restore route thread context only from the active turn or the thread-scoped session key.
+  // Do not read thread ids from the normalised session store here: `origin.threadId` can be
+  // folded back into lastThreadId/deliveryContext during store normalisation and resurrect a
+  // stale route after thread delivery was intentionally cleared.
+  const routeThreadId =
+    ctx.MessageThreadId ?? parseSessionThreadInfoFast(acpDispatchSessionKey).threadId;
   const inboundAudio = isInboundAudioContext(ctx);
-  const sessionTtsAuto = normalizeTtsAutoMode(sessionRowEntry.entry?.ttsAuto);
+  const sessionTtsAuto = normalizeTtsAutoMode(sessionStoreEntry.entry?.ttsAuto);
   const workspaceDir = resolveAgentWorkspaceDir(cfg, sessionAgentId);
   const { ensureRuntimePluginsLoaded } = await traceReplyPhase("reply.load_runtime_plugins", () =>
     loadRuntimePlugins(),
@@ -506,7 +530,7 @@ export async function dispatchReplyFromConfig(
   // flow when the provider handles its own messages.
   //
   // Debug: `pnpm test src/auto-reply/reply/dispatch-from-config.test.ts`
-  const suppressAcpChildUserDelivery = isParentOwnedBackgroundAcpSession(sessionRowEntry.entry);
+  const suppressAcpChildUserDelivery = isParentOwnedBackgroundAcpSession(sessionStoreEntry.entry);
   const normalizedRouteReplyChannel = normalizeMessageChannel(replyRoute.channel);
   const normalizedProviderChannel = normalizeMessageChannel(ctx.Provider);
   const normalizedSurfaceChannel = normalizeMessageChannel(ctx.Surface);
@@ -676,16 +700,16 @@ export async function dispatchReplyFromConfig(
   // blocked; explicit message tool sends remain available.
   const sendPolicy = resolveSendPolicy({
     cfg,
-    entry: sessionRowEntry.entry,
-    sessionKey: sessionRowEntry.sessionKey ?? sessionKey,
+    entry: sessionStoreEntry.entry,
+    sessionKey: sessionStoreEntry.sessionKey ?? sessionKey,
     channel:
       (shouldRouteToOriginating ? routeReplyChannel : undefined) ??
-      sessionRowEntry.entry?.channel ??
+      sessionStoreEntry.entry?.channel ??
       replyRoute.channel ??
       ctx.Surface ??
       ctx.Provider ??
       undefined,
-    chatType: sessionRowEntry.entry?.chatType,
+    chatType: sessionStoreEntry.entry?.chatType,
   });
   const {
     globalPolicy,
@@ -711,7 +735,7 @@ export async function dispatchReplyFromConfig(
       ? resolveHarnessSourceVisibleRepliesDefault({
           cfg,
           ctx,
-          entry: sessionRowEntry.entry,
+          entry: sessionStoreEntry.entry,
           sessionAgentId,
           sessionKey: acpDispatchSessionKey,
         })
@@ -994,7 +1018,9 @@ export async function dispatchReplyFromConfig(
     const sendFinalPayload = async (
       payload: ReplyPayload,
     ): Promise<{ queuedFinal: boolean; routedFinalCount: number }> => {
-      if (resolveSendableOutboundReplyParts(payload).hasContent) {
+      const sourceReplyTranscriptMirror =
+        getReplyPayloadMetadata(payload)?.sourceReplyTranscriptMirror;
+      if (hasOutboundReplyContent(payload, { trimText: true })) {
         markInboundDedupeReplayUnsafe();
       }
       const ttsPayload = await maybeApplyTtsToReplyPayload({
@@ -1015,14 +1041,27 @@ export async function dispatchReplyFromConfig(
             `dispatch-from-config: route-reply (final) failed: ${result.error ?? "unknown error"}`,
           );
         }
+        if (result.ok) {
+          await mirrorInternalSourceReplyToTranscript({
+            metadata: sourceReplyTranscriptMirror,
+            cfg,
+          });
+        }
         return {
           queuedFinal: result.ok,
           routedFinalCount: result.ok ? 1 : 0,
         };
       }
       markInboundDedupeReplayUnsafe();
+      const queuedFinal = dispatcher.sendFinalReply(normalizedPayload);
+      if (queuedFinal) {
+        await mirrorInternalSourceReplyToTranscript({
+          metadata: sourceReplyTranscriptMirror,
+          cfg,
+        });
+      }
       return {
-        queuedFinal: dispatcher.sendFinalReply(normalizedPayload),
+        queuedFinal,
         routedFinalCount: 0,
       };
     };
@@ -1035,7 +1074,7 @@ export async function dispatchReplyFromConfig(
             content: hookContext.content,
             body: hookContext.bodyForAgent ?? hookContext.body,
             channel: hookContext.channelId,
-            sessionKey: sessionRowEntry.sessionKey ?? sessionKey,
+            sessionKey: sessionStoreEntry.sessionKey ?? sessionKey,
             senderId: hookContext.senderId,
             isGroup: hookContext.isGroup,
             timestamp: hookContext.timestamp,
@@ -1044,7 +1083,7 @@ export async function dispatchReplyFromConfig(
             channelId: hookContext.channelId,
             accountId: hookContext.accountId,
             conversationId: inboundClaimContext.conversationId,
-            sessionKey: sessionRowEntry.sessionKey ?? sessionKey,
+            sessionKey: sessionStoreEntry.sessionKey ?? sessionKey,
             senderId: hookContext.senderId,
           },
         ),
@@ -1111,7 +1150,7 @@ export async function dispatchReplyFromConfig(
     // outbound source delivery.
     if (suppressDelivery) {
       logVerbose(
-        `Delivery suppressed by ${deliverySuppressionReason} for session ${sessionRowEntry.sessionKey ?? sessionKey ?? "unknown"} — agent will still process the message`,
+        `Delivery suppressed by ${deliverySuppressionReason} for session ${sessionStoreEntry.sessionKey ?? sessionKey ?? "unknown"} — agent will still process the message`,
       );
     }
 
@@ -1432,7 +1471,7 @@ export async function dispatchReplyFromConfig(
             const run = async () => {
               if (
                 payload.isReasoning !== true &&
-                resolveSendableOutboundReplyParts(payload).hasContent
+                hasOutboundReplyContent(payload, { trimText: true })
               ) {
                 markInboundDedupeReplayUnsafe();
               }
@@ -1468,7 +1507,7 @@ export async function dispatchReplyFromConfig(
                       return { ...payload, text: text.trim() ? text : undefined };
                     })()
                   : payload;
-              if (!resolveSendableOutboundReplyParts(visiblePayload).hasContent) {
+              if (!hasOutboundReplyContent(visiblePayload, { trimText: true })) {
                 return;
               }
               // Channels that keep a live draft preview may need to rotate their
@@ -1585,7 +1624,8 @@ export async function dispatchReplyFromConfig(
 
     if (attemptedFinalDelivery && !finalDeliveryFailed) {
       await clearPendingFinalDeliveryAfterSuccess({
-        sessionKey: sessionRowEntry.sessionKey ?? sessionKey,
+        storePath: sessionStoreEntry.storePath,
+        sessionKey: sessionStoreEntry.sessionKey ?? sessionKey,
       });
     }
 

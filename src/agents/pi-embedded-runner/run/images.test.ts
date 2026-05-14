@@ -1,9 +1,8 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import { saveMediaBuffer } from "../../../media/store.js";
-import { closeOpenClawStateDatabaseForTest } from "../../../state/openclaw-state-db.js";
 import { createHostSandboxFsBridge } from "../../test-helpers/host-sandbox-fs-bridge.js";
 import { createUnsafeMountedSandbox } from "../../test-helpers/unsafe-mounted-sandbox.js";
 import {
@@ -105,8 +104,10 @@ describe("detectImageReferences", () => {
     expect(detectImageReferences("[Image: source: /tmp/second.jpg]")).toStrictEqual([
       { raw: "/tmp/second.jpg", type: "path", resolved: "/tmp/second.jpg" },
     ]);
-    expect(detectImageReferences("See file:///tmp/third.webp")).toStrictEqual([
-      { raw: "file:///tmp/third.webp", type: "path", resolved: "/tmp/third.webp" },
+    const thirdPath = path.join(os.tmpdir(), "third.webp");
+    const thirdUrl = pathToFileURL(thirdPath).href;
+    expect(detectImageReferences(`See ${thirdUrl}`)).toStrictEqual([
+      { raw: thirdUrl, type: "path", resolved: thirdPath },
     ]);
     expect(detectImageReferences("See ./fourth.jpeg")).toStrictEqual([
       { raw: "./fourth.jpeg", type: "path", resolved: "./fourth.jpeg" },
@@ -191,6 +192,18 @@ describe("detectImageReferences", () => {
       raw: "./screenshot.png",
       type: "path",
       resolved: "./screenshot.png",
+    });
+  });
+
+  it("detects Windows drive image paths in plain prompts", () => {
+    const ref = expectSingleImageReference(
+      String.raw`Look at C:\Users\Ada\Pictures\screenshot.png`,
+    );
+
+    expect(ref).toStrictEqual({
+      raw: String.raw`C:\Users\Ada\Pictures\screenshot.png`,
+      type: "path",
+      resolved: String.raw`C:\Users\Ada\Pictures\screenshot.png`,
     });
   });
 
@@ -486,21 +499,18 @@ describe("detectAndLoadPromptImages", () => {
   it("loads managed inbound absolute paths when workspaceOnly is enabled", async () => {
     const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-native-image-managed-"));
     const workspaceDir = path.join(stateDir, "workspace-agent");
+    const inboundDir = path.join(stateDir, "media", "inbound");
     await fs.mkdir(workspaceDir, { recursive: true });
+    await fs.mkdir(inboundDir, { recursive: true });
+    const imagePath = path.join(inboundDir, "signal-replay.png");
     const pngB64 =
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/woAAn8B9FD5fHAAAAAASUVORK5CYII=";
+    await fs.writeFile(imagePath, Buffer.from(pngB64, "base64"));
     vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
-    const saved = await saveMediaBuffer(
-      Buffer.from(pngB64, "base64"),
-      "image/png",
-      "inbound",
-      undefined,
-      "signal-replay.png",
-    );
 
     try {
       const result = await detectAndLoadPromptImages({
-        prompt: `Inspect ${saved.path}`,
+        prompt: `Inspect ${imagePath}`,
         workspaceDir,
         model: { input: ["text", "image"] },
         workspaceOnly: true,
@@ -511,7 +521,6 @@ describe("detectAndLoadPromptImages", () => {
       expect(result.skippedCount).toBe(0);
       expect(result.images).toHaveLength(1);
     } finally {
-      closeOpenClawStateDatabaseForTest();
       vi.unstubAllEnvs();
       await fs.rm(stateDir, { recursive: true, force: true });
     }

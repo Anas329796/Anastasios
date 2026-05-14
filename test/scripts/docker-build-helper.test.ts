@@ -179,8 +179,7 @@ describe("docker build helper", () => {
 
     expect(runner).toContain("scripts/e2e/lib/plugin-update/unchanged-scenario.sh");
     expect(probe).toContain("plugin install record changed unexpectedly");
-    expect(probe).toContain("readInstalledPluginRecords()");
-    expect(probe).toContain('records["lossless-claw"] ?? records["@example/lossless-claw"]');
+    expect(probe).toContain("index.installRecords ?? index.records ?? config.plugins?.installs");
     expect(scenario).toContain("Config changed unexpectedly for modern package");
     expect(scenario).not.toContain("before_hash");
   });
@@ -267,6 +266,7 @@ describe("docker build helper", () => {
       };
       expect(workspace).toContain('  "kept@1.0.0": "patches/kept.patch"');
       expect(workspace).toContain("allowUnusedPatches: true");
+      expect(workspace).toContain("minimumReleaseAge: 0");
       expect(workspace).toContain("allowBuilds:");
       expect(manifest.pnpm).toBeUndefined();
     } finally {

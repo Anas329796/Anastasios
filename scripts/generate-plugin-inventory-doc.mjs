@@ -28,7 +28,7 @@ const PLUGIN_DOC_ALIASES = new Map([
   ["tavily", "/tools/tavily"],
   ["tokenjuice", "/tools/tokenjuice"],
 ]);
-/** @type {Map<string, string>} */
+/** @type {ReadonlyMap<string, string>} */
 const PLUGIN_REFERENCE_EXTRA_SECTIONS = new Map();
 
 function readJson(relativePath) {
@@ -377,8 +377,7 @@ ${record.docs.map((link) => `- ${docLink(link)}`).join("\n")}`;
 
 function renderReferencePage(record) {
   const relatedDocs = renderRelatedDocs(record);
-  const extraSectionsValue = PLUGIN_REFERENCE_EXTRA_SECTIONS.get(record.id);
-  const extraSections = typeof extraSectionsValue === "string" ? extraSectionsValue : "";
+  const extraSections = PLUGIN_REFERENCE_EXTRA_SECTIONS.get(record.id) ?? "";
   return `---
 summary: "${record.description.replaceAll('"', '\\"')}"
 read_when:
@@ -561,11 +560,12 @@ openclaw gateway restart
 openclaw plugins inspect discord --runtime --json
 \`\`\`
 
-Bare package specs try ClawHub first, then npm fallback. To force a source, use
-\`clawhub:@openclaw/discord\` or \`npm:@openclaw/discord\`. After install, follow
-the plugin's setup doc, such as [Discord](/channels/discord), to add credentials
-and channel config. See [Manage plugins](/plugins/manage-plugins) for update,
-uninstall, and publishing commands.
+During the launch cutover, ordinary bare package specs still install from npm.
+Use \`clawhub:@openclaw/discord\` or \`npm:@openclaw/discord\` when you need an
+explicit source. After install, follow the plugin's setup doc, such as
+[Discord](/channels/discord), to add credentials and channel config. See
+[Manage plugins](/plugins/manage-plugins) for update, uninstall, and publishing
+commands.
 
 ## Core npm package
 

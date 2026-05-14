@@ -1,17 +1,21 @@
+import { recordChannelActivity } from "openclaw/plugin-sdk/channel-activity-runtime";
+import { buildChannelTurnContext } from "openclaw/plugin-sdk/channel-inbound";
 import {
   createChannelMessageReplyPipeline,
   deliverInboundReplyWithMessageSendContext,
 } from "openclaw/plugin-sdk/channel-message";
 import { readChannelAllowFromStore } from "openclaw/plugin-sdk/conversation-runtime";
-import { upsertChannelPairingRequest } from "openclaw/plugin-sdk/conversation-runtime";
+import {
+  recordInboundSession,
+  upsertChannelPairingRequest,
+} from "openclaw/plugin-sdk/conversation-runtime";
 import { buildModelsProviderData } from "openclaw/plugin-sdk/models-provider-runtime";
 import { dispatchReplyWithBufferedBlockDispatcher } from "openclaw/plugin-sdk/reply-dispatch-runtime";
+import { resolveInboundLastRouteSessionKey } from "openclaw/plugin-sdk/routing";
 import { getRuntimeConfig } from "openclaw/plugin-sdk/runtime-config-snapshot";
-import {
-  getSessionEntry,
-  listSessionEntries,
-  patchSessionEntry,
-} from "openclaw/plugin-sdk/session-store-runtime";
+import { resolvePinnedMainDmOwnerFromAllowlist } from "openclaw/plugin-sdk/security-runtime";
+import { readSessionUpdatedAt, resolveStorePath } from "openclaw/plugin-sdk/session-store-runtime";
+import { loadSessionStore } from "openclaw/plugin-sdk/session-store-runtime";
 import { listSkillCommandsForAgents } from "openclaw/plugin-sdk/skill-commands-runtime";
 import { enqueueSystemEvent } from "openclaw/plugin-sdk/system-event-runtime";
 import { loadWebMedia } from "openclaw/plugin-sdk/web-media";
@@ -24,9 +28,14 @@ import { wasSentByBot } from "./sent-message-cache.js";
 
 export type TelegramBotDeps = {
   getRuntimeConfig: typeof getRuntimeConfig;
-  getSessionEntry: typeof getSessionEntry;
-  listSessionEntries: typeof listSessionEntries;
-  patchSessionEntry: typeof patchSessionEntry;
+  resolveStorePath: typeof resolveStorePath;
+  loadSessionStore?: typeof loadSessionStore;
+  readSessionUpdatedAt?: typeof readSessionUpdatedAt;
+  recordInboundSession?: typeof recordInboundSession;
+  recordChannelActivity?: typeof recordChannelActivity;
+  resolveInboundLastRouteSessionKey?: typeof resolveInboundLastRouteSessionKey;
+  resolvePinnedMainDmOwnerFromAllowlist?: typeof resolvePinnedMainDmOwnerFromAllowlist;
+  buildChannelTurnContext?: typeof buildChannelTurnContext;
   readChannelAllowFromStore: typeof readChannelAllowFromStore;
   upsertChannelPairingRequest: typeof upsertChannelPairingRequest;
   enqueueSystemEvent: typeof enqueueSystemEvent;
@@ -49,17 +58,32 @@ export const defaultTelegramBotDeps: TelegramBotDeps = {
   get getRuntimeConfig() {
     return getRuntimeConfig;
   },
-  get getSessionEntry() {
-    return getSessionEntry;
-  },
-  get listSessionEntries() {
-    return listSessionEntries;
-  },
-  get patchSessionEntry() {
-    return patchSessionEntry;
+  get resolveStorePath() {
+    return resolveStorePath;
   },
   get readChannelAllowFromStore() {
     return readChannelAllowFromStore;
+  },
+  get loadSessionStore() {
+    return loadSessionStore;
+  },
+  get readSessionUpdatedAt() {
+    return readSessionUpdatedAt;
+  },
+  get recordInboundSession() {
+    return recordInboundSession;
+  },
+  get recordChannelActivity() {
+    return recordChannelActivity;
+  },
+  get resolveInboundLastRouteSessionKey() {
+    return resolveInboundLastRouteSessionKey;
+  },
+  get resolvePinnedMainDmOwnerFromAllowlist() {
+    return resolvePinnedMainDmOwnerFromAllowlist;
+  },
+  get buildChannelTurnContext() {
+    return buildChannelTurnContext;
   },
   get upsertChannelPairingRequest() {
     return upsertChannelPairingRequest;

@@ -39,6 +39,11 @@ type DoctorHealthContribution = FlowContribution & {
   run: (ctx: DoctorHealthFlowContext) => Promise<void>;
 };
 
+function isUpdateDoctorRun(env: NodeJS.ProcessEnv | Record<string, string | undefined>): boolean {
+  const value = env.OPENCLAW_UPDATE_IN_PROGRESS;
+  return value === "1" || value === "true";
+}
+
 function resolveDoctorMode(cfg: OpenClawConfig): DoctorFlowMode {
   return cfg.gateway?.mode === "remote" ? "remote" : "local";
 }
@@ -116,9 +121,9 @@ async function runGatewayConfigHealth(ctx: DoctorHealthFlowContext): Promise<voi
 
 async function runAuthProfileHealth(ctx: DoctorHealthFlowContext): Promise<void> {
   const { maybeRepairLegacyFlatAuthProfileStores } =
-    await import("../commands/doctor/legacy/auth-flat-profiles.js");
+    await import("../commands/doctor-auth-flat-profiles.js");
   const { maybeRepairLegacyOAuthProfileIds } =
-    await import("../commands/doctor/legacy/oauth-profile-ids.js");
+    await import("../commands/doctor-auth-legacy-oauth.js");
   const { noteAuthProfileHealth, noteLegacyCodexProviderOverride } =
     await import("../commands/doctor-auth.js");
   const { buildGatewayConnectionDetails } = await import("../gateway/call.js");
@@ -223,8 +228,7 @@ async function runClaudeCliHealth(ctx: DoctorHealthFlowContext): Promise<void> {
 
 async function runLegacyStateHealth(ctx: DoctorHealthFlowContext): Promise<void> {
   const { detectLegacyStateMigrations, runLegacyStateMigrations } =
-    await import("../commands/doctor/state-migrations.js");
-  const { createPreMigrationBackup } = await import("../commands/migrate/apply.js");
+    await import("../commands/doctor-state-migrations.js");
   const { note } = await import("../terminal/note.js");
   const legacyState = await detectLegacyStateMigrations({ cfg: ctx.cfg });
   if (legacyState.preview.length === 0) {
@@ -241,13 +245,8 @@ async function runLegacyStateHealth(ctx: DoctorHealthFlowContext): Promise<void>
   if (!migrate) {
     return;
   }
-  const backupPath = await createPreMigrationBackup({});
-  if (backupPath) {
-    note(backupPath, "Backup");
-  }
   const migrated = await runLegacyStateMigrations({
     detected: legacyState,
-    backupPath,
   });
   if (migrated.changes.length > 0) {
     note(migrated.changes.join("\n"), "Doctor changes");
@@ -336,30 +335,29 @@ async function runCodexSessionRouteHealth(ctx: DoctorHealthFlowContext): Promise
   }
 }
 
+async function runSessionLocksHealth(ctx: DoctorHealthFlowContext): Promise<void> {
+  const { noteSessionLockHealth } = await import("../commands/doctor-session-locks.js");
+  await noteSessionLockHealth({ shouldRepair: ctx.prompter.shouldRepair });
+}
+
 async function runSessionTranscriptsHealth(ctx: DoctorHealthFlowContext): Promise<void> {
-  const { noteSessionTranscriptHealth } =
-    await import("../commands/doctor/legacy/session-transcript-health.js");
+  const { noteSessionTranscriptHealth } = await import("../commands/doctor-session-transcripts.js");
   await noteSessionTranscriptHealth({ shouldRepair: ctx.prompter.shouldRepair });
+}
+
+async function runConfigAuditScrubHealth(ctx: DoctorHealthFlowContext): Promise<void> {
+  const { maybeScrubConfigAuditLog } = await import("../commands/doctor-config-audit-scrub.js");
+  await maybeScrubConfigAuditLog({ shouldRepair: ctx.prompter.shouldRepair });
 }
 
 async function runLegacyCronHealth(ctx: DoctorHealthFlowContext): Promise<void> {
   const { maybeRepairLegacyCronStore, noteLegacyWhatsAppCrontabHealthCheck } =
-    await import("../commands/doctor/legacy/cron.js");
+    await import("../commands/doctor-cron.js");
   await noteLegacyWhatsAppCrontabHealthCheck();
   await maybeRepairLegacyCronStore({
     cfg: ctx.cfg,
     options: ctx.options,
     prompter: ctx.prompter,
-  });
-}
-
-async function runSqliteStateMigrationHealth(ctx: DoctorHealthFlowContext): Promise<void> {
-  const { maybeRepairLegacyRuntimeStateFiles } =
-    await import("../commands/doctor/legacy/runtime-state.js");
-  await maybeRepairLegacyRuntimeStateFiles({
-    prompter: ctx.prompter,
-    env: ctx.env ?? process.env,
-    cfg: ctx.cfg,
   });
 }
 
@@ -385,6 +383,17 @@ async function runGatewayServicesHealth(ctx: DoctorHealthFlowContext): Promise<v
   );
   await noteMacLaunchAgentOverrides();
   await noteMacLaunchctlGatewayEnvOverrides(ctx.cfg);
+}
+
+async function runStartupChannelMaintenanceHealth(ctx: DoctorHealthFlowContext): Promise<void> {
+  const { maybeRunDoctorStartupChannelMaintenance } =
+    await import("./doctor-startup-channel-maintenance.js");
+  await maybeRunDoctorStartupChannelMaintenance({
+    cfg: ctx.cfg,
+    env: process.env,
+    runtime: ctx.runtime,
+    shouldRepair: ctx.prompter.shouldRepair,
+  });
 }
 
 async function runSecurityHealth(ctx: DoctorHealthFlowContext): Promise<void> {
@@ -577,13 +586,14 @@ async function runGatewayDaemonHealth(ctx: DoctorHealthFlowContext): Promise<voi
 async function runWriteConfigHealth(ctx: DoctorHealthFlowContext): Promise<void> {
   const { formatCliCommand } = await import("../cli/command-format.js");
   const { applyWizardMetadata } = await import("../commands/onboard-helpers.js");
-  const { CONFIG_PATH, replaceConfigFile } = await import("../config/config.js");
+  const { replaceConfigFile } = await import("../config/config.js");
   const { logConfigUpdated } = await import("../config/logging.js");
   const { shortenHomePath } = await import("../utils.js");
   const shouldWriteConfig =
     ctx.configResult.shouldWriteConfig ||
     JSON.stringify(ctx.cfg) !== JSON.stringify(ctx.cfgForPersistence);
   if (shouldWriteConfig) {
+    const updateDoctorRun = isUpdateDoctorRun(ctx.env ?? process.env);
     ctx.cfg = applyWizardMetadata(ctx.cfg, {
       command: "doctor",
       mode: resolveDoctorMode(ctx.cfg),
@@ -596,12 +606,18 @@ async function runWriteConfigHealth(ctx: DoctorHealthFlowContext): Promise<void>
       nextConfig: ctx.cfg,
       afterWrite: { mode: "auto" },
       writeOptions: {
-        allowConfigSizeDrop: ctx.configResult.shouldWriteConfig === true,
+        allowConfigSizeDrop: ctx.configResult.shouldWriteConfig === true || updateDoctorRun,
         skipPluginValidation: ctx.configResult.skipPluginValidationOnWrite === true,
       },
     });
     logConfigUpdated(ctx.runtime);
-    const backupPath = `${CONFIG_PATH}.bak`;
+    const preUpdateSnapshotPath = `${ctx.configPath}.pre-update`;
+    if (updateDoctorRun && fs.existsSync(preUpdateSnapshotPath)) {
+      ctx.runtime.log(
+        `Update changed config; pre-update backup: ${shortenHomePath(preUpdateSnapshotPath)}`,
+      );
+    }
+    const backupPath = `${ctx.configPath}.bak`;
     if (fs.existsSync(backupPath)) {
       ctx.runtime.log(`Backup: ${shortenHomePath(backupPath)}`);
     }
@@ -689,11 +705,6 @@ export function resolveDoctorHealthContributions(): DoctorHealthContribution[] {
       run: runPluginRegistryHealth,
     }),
     createDoctorHealthContribution({
-      id: "doctor:session-transcripts",
-      label: "Session transcripts",
-      run: runSessionTranscriptsHealth,
-    }),
-    createDoctorHealthContribution({
       id: "doctor:state-integrity",
       label: "State integrity",
       run: runStateIntegrityHealth,
@@ -704,14 +715,24 @@ export function resolveDoctorHealthContributions(): DoctorHealthContribution[] {
       run: runCodexSessionRouteHealth,
     }),
     createDoctorHealthContribution({
+      id: "doctor:session-locks",
+      label: "Session locks",
+      run: runSessionLocksHealth,
+    }),
+    createDoctorHealthContribution({
+      id: "doctor:session-transcripts",
+      label: "Session transcripts",
+      run: runSessionTranscriptsHealth,
+    }),
+    createDoctorHealthContribution({
+      id: "doctor:config-audit-scrub",
+      label: "Config audit",
+      run: runConfigAuditScrubHealth,
+    }),
+    createDoctorHealthContribution({
       id: "doctor:legacy-cron",
       label: "Legacy cron",
       run: runLegacyCronHealth,
-    }),
-    createDoctorHealthContribution({
-      id: "doctor:sqlite-state",
-      label: "SQLite state",
-      run: runSqliteStateMigrationHealth,
     }),
     createDoctorHealthContribution({
       id: "doctor:sandbox",
@@ -722,6 +743,11 @@ export function resolveDoctorHealthContributions(): DoctorHealthContribution[] {
       id: "doctor:gateway-services",
       label: "Gateway services",
       run: runGatewayServicesHealth,
+    }),
+    createDoctorHealthContribution({
+      id: "doctor:startup-channel-maintenance",
+      label: "Startup channel maintenance",
+      run: runStartupChannelMaintenanceHealth,
     }),
     createDoctorHealthContribution({
       id: "doctor:security",

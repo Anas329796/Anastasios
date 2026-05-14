@@ -1,5 +1,5 @@
+import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { TSchema } from "typebox";
-import type { AgentTool } from "../agent-core-contract.js";
 
 export type AgentRuntimeTransport = "sse" | "websocket" | "auto";
 
@@ -314,7 +314,10 @@ export type AgentRuntimeToolPlan = {
 
 export type AgentRuntimeDeliveryPlan = {
   isSilentPayload(
-    payload: Pick<AgentRuntimeReplyPayload, "text" | "mediaUrl" | "mediaUrls">,
+    payload: Pick<
+      AgentRuntimeReplyPayload,
+      "text" | "mediaUrl" | "mediaUrls" | "presentation" | "interactive" | "channelData"
+    >,
   ): boolean;
   resolveFollowupRoute(params: {
     payload: AgentRuntimeReplyPayload;

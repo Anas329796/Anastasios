@@ -2,10 +2,14 @@ import type { HeartbeatToolResponse } from "../../auto-reply/heartbeat-tool-resp
 import type { CliSessionBinding, SessionSystemPromptReport } from "../../config/sessions/types.js";
 import type { DiagnosticTraceContext } from "../../infra/diagnostic-trace-context.js";
 import type { FallbackAttempt } from "../model-fallback.types.js";
-import type { MessagingToolSend } from "../pi-embedded-messaging.types.js";
+import type {
+  MessagingToolSend,
+  MessagingToolSourceReplyPayload,
+} from "../pi-embedded-messaging.types.js";
 
 export type EmbeddedPiAgentMeta = {
   sessionId: string;
+  sessionFile?: string;
   provider: string;
   model: string;
   contextTokens?: number;
@@ -35,7 +39,7 @@ export type EmbeddedPiAgentMeta = {
   /**
    * Usage from the last individual API call (not accumulated across tool-use
    * loops or compaction retries). Used for context-window utilization display
-   * (`totalTokens` in the SQLite session row) because the accumulated `usage.input`
+   * (`totalTokens` in sessions.json) because the accumulated `usage.input`
    * sums input tokens from every API call in the run, which overstates the
    * actual context size.
    */
@@ -184,6 +188,8 @@ export type EmbeddedPiRunResult = {
   messagingToolSentMediaUrls?: string[];
   // Messaging tool targets that successfully sent a message during the run.
   messagingToolSentTargets?: MessagingToolSend[];
+  // Message-tool replies delivered to the active internal UI source.
+  messagingToolSourceReplyPayloads?: MessagingToolSourceReplyPayload[];
   // Structured heartbeat outcome recorded by the heartbeat response tool.
   heartbeatToolResponse?: HeartbeatToolResponse;
   // Count of successful cron.add tool calls in this run.
@@ -208,6 +214,7 @@ export type EmbeddedPiCompactResult = {
     tokensAfter?: number;
     details?: unknown;
     sessionId?: string;
+    sessionFile?: string;
   };
 };
 

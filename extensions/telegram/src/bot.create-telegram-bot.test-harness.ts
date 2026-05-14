@@ -1,7 +1,8 @@
+import { rmSync } from "node:fs";
+import { buildChannelTurnContext } from "openclaw/plugin-sdk/channel-inbound";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import type { MockFn } from "openclaw/plugin-sdk/plugin-test-runtime";
 import type { GetReplyOptions, MsgContext } from "openclaw/plugin-sdk/reply-runtime";
-import type { SessionEntry } from "openclaw/plugin-sdk/session-store-runtime";
 import { beforeEach, vi } from "vitest";
 import type { TelegramBotDeps } from "./bot-deps.js";
 
@@ -9,7 +10,13 @@ type AnyMock = ReturnType<typeof vi.fn>;
 type AnyAsyncMock = ReturnType<typeof vi.fn>;
 type GetRuntimeConfigFn =
   typeof import("openclaw/plugin-sdk/runtime-config-snapshot").getRuntimeConfig;
-type SessionStore = Record<string, SessionEntry>;
+type LoadSessionStoreFn =
+  typeof import("openclaw/plugin-sdk/session-store-runtime").loadSessionStore;
+type ResolveStorePathFn =
+  typeof import("openclaw/plugin-sdk/session-store-runtime").resolveStorePath;
+type ReadSessionUpdatedAtFn =
+  typeof import("openclaw/plugin-sdk/session-store-runtime").readSessionUpdatedAt;
+type SessionStore = ReturnType<LoadSessionStoreFn>;
 type TelegramBotRuntimeForTest = NonNullable<
   Parameters<typeof import("./bot.js").setTelegramBotRuntimeForTest>[0]
 >;
@@ -26,6 +33,10 @@ type ReplyPayloadLike = {
   replyToId?: string;
 };
 
+const { sessionStorePath } = vi.hoisted(() => ({
+  sessionStorePath: `/tmp/openclaw-telegram-${process.pid}-${process.env.VITEST_POOL_ID ?? "0"}.json`,
+}));
+
 const { loadWebMedia } = vi.hoisted((): { loadWebMedia: AnyMock } => ({
   loadWebMedia: vi.fn(),
 }));
@@ -40,43 +51,29 @@ vi.mock("openclaw/plugin-sdk/web-media", () => ({
 
 const {
   getRuntimeConfig,
-  getSessionEntryMock,
-  listSessionEntriesMock,
-  patchSessionEntryMock,
+  loadSessionStoreMock,
+  readSessionUpdatedAtMock,
+  recordInboundSessionMock,
+  resolveStorePathMock,
   sessionStoreEntries,
 } = vi.hoisted(
   (): {
     getRuntimeConfig: MockFn<GetRuntimeConfigFn>;
-    getSessionEntryMock: MockFn<TelegramBotDeps["getSessionEntry"]>;
-    listSessionEntriesMock: MockFn<TelegramBotDeps["listSessionEntries"]>;
-    patchSessionEntryMock: MockFn<TelegramBotDeps["patchSessionEntry"]>;
+    loadSessionStoreMock: MockFn<LoadSessionStoreFn>;
+    readSessionUpdatedAtMock: MockFn<ReadSessionUpdatedAtFn>;
+    recordInboundSessionMock: MockFn<NonNullable<TelegramBotDeps["recordInboundSession"]>>;
+    resolveStorePathMock: MockFn<ResolveStorePathFn>;
     sessionStoreEntries: { value: SessionStore };
   } => ({
     getRuntimeConfig: vi.fn<GetRuntimeConfigFn>(() => ({})),
-    getSessionEntryMock: vi.fn<TelegramBotDeps["getSessionEntry"]>(
-      ({ sessionKey }) => sessionStoreEntries.value[sessionKey],
+    loadSessionStoreMock: vi.fn<LoadSessionStoreFn>(
+      (_storePath, _opts) => sessionStoreEntries.value,
     ),
-    listSessionEntriesMock: vi.fn<TelegramBotDeps["listSessionEntries"]>(() =>
-      Object.entries(sessionStoreEntries.value).map(([sessionKey, entry]) => ({
-        sessionKey,
-        entry,
-      })),
+    resolveStorePathMock: vi.fn<ResolveStorePathFn>(
+      (storePath?: string) => storePath ?? sessionStorePath,
     ),
-    patchSessionEntryMock: vi.fn<TelegramBotDeps["patchSessionEntry"]>(
-      async ({ sessionKey, fallbackEntry, update }) => {
-        const existing = sessionStoreEntries.value[sessionKey] ?? fallbackEntry;
-        if (!existing) {
-          return null;
-        }
-        const patch = await update(existing);
-        if (!patch) {
-          return existing;
-        }
-        const next = { ...existing, ...patch };
-        sessionStoreEntries.value[sessionKey] = next;
-        return next;
-      },
-    ),
+    readSessionUpdatedAtMock: vi.fn<ReadSessionUpdatedAtFn>(() => undefined),
+    recordInboundSessionMock: vi.fn(async () => undefined),
     sessionStoreEntries: { value: {} as SessionStore },
   }),
 );
@@ -85,12 +82,8 @@ export function getLoadConfigMock(): AnyMock {
   return getRuntimeConfig;
 }
 
-export function getSessionEntryMockForTest(): AnyMock {
-  return getSessionEntryMock;
-}
-
-export function getSessionStoreEntriesForTest(): SessionStore {
-  return structuredClone(sessionStoreEntries.value);
+export function getLoadSessionStoreMock(): AnyMock {
+  return loadSessionStoreMock;
 }
 
 export function setSessionStoreEntriesForTest(entries: SessionStore) {
@@ -387,9 +380,15 @@ export const telegramBotRuntimeForTest: TelegramBotRuntimeForTest = {
 };
 export const telegramBotDepsForTest: TelegramBotDeps = {
   getRuntimeConfig,
-  getSessionEntry: getSessionEntryMock,
-  listSessionEntries: listSessionEntriesMock,
-  patchSessionEntry: patchSessionEntryMock,
+  loadSessionStore: loadSessionStoreMock as TelegramBotDeps["loadSessionStore"],
+  resolveStorePath: resolveStorePathMock,
+  readSessionUpdatedAt: readSessionUpdatedAtMock,
+  recordInboundSession: recordInboundSessionMock as TelegramBotDeps["recordInboundSession"],
+  recordChannelActivity: vi.fn() as TelegramBotDeps["recordChannelActivity"],
+  resolveInboundLastRouteSessionKey: ({ route, sessionKey }) =>
+    route.lastRoutePolicy === "main" ? route.mainSessionKey : sessionKey,
+  resolvePinnedMainDmOwnerFromAllowlist: () => null,
+  buildChannelTurnContext,
   readChannelAllowFromStore:
     readChannelAllowFromStore as TelegramBotDeps["readChannelAllowFromStore"],
   upsertChannelPairingRequest:
@@ -482,29 +481,15 @@ beforeEach(() => {
   getRuntimeConfig.mockReset();
   getRuntimeConfig.mockReturnValue(DEFAULT_TELEGRAM_TEST_CONFIG);
   sessionStoreEntries.value = {};
-  getSessionEntryMock.mockReset();
-  getSessionEntryMock.mockImplementation(({ sessionKey }) => sessionStoreEntries.value[sessionKey]);
-  listSessionEntriesMock.mockReset();
-  listSessionEntriesMock.mockImplementation(() =>
-    Object.entries(sessionStoreEntries.value).map(([sessionKey, entry]) => ({
-      sessionKey,
-      entry,
-    })),
-  );
-  patchSessionEntryMock.mockReset();
-  patchSessionEntryMock.mockImplementation(async ({ sessionKey, fallbackEntry, update }) => {
-    const existing = sessionStoreEntries.value[sessionKey] ?? fallbackEntry;
-    if (!existing) {
-      return null;
-    }
-    const patch = await update(existing);
-    if (!patch) {
-      return existing;
-    }
-    const next = { ...existing, ...patch };
-    sessionStoreEntries.value[sessionKey] = next;
-    return next;
-  });
+  rmSync(`${sessionStorePath}.telegram-messages.json`, { force: true });
+  loadSessionStoreMock.mockReset();
+  loadSessionStoreMock.mockImplementation(() => sessionStoreEntries.value);
+  resolveStorePathMock.mockReset();
+  resolveStorePathMock.mockImplementation((storePath?: string) => storePath ?? sessionStorePath);
+  readSessionUpdatedAtMock.mockReset();
+  readSessionUpdatedAtMock.mockReturnValue(undefined);
+  recordInboundSessionMock.mockReset();
+  recordInboundSessionMock.mockResolvedValue(undefined);
   loadWebMedia.mockReset();
   readChannelAllowFromStore.mockReset();
   readChannelAllowFromStore.mockResolvedValue([]);

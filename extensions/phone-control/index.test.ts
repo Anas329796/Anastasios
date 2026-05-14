@@ -1,9 +1,8 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { resetPluginStateStoreForTests } from "openclaw/plugin-sdk/plugin-state-runtime";
 import { createTestPluginApi } from "openclaw/plugin-sdk/plugin-test-api";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import registerPhoneControl from "./index.js";
 import type {
   OpenClawPluginApi,
@@ -32,6 +31,24 @@ function createApi(params: {
       },
       config: {
         current: () => params.getConfig(),
+        mutateConfigFile: async ({
+          mutate,
+        }: {
+          mutate: (draft: Record<string, unknown>) => void;
+        }) => {
+          const nextConfig = structuredClone(params.getConfig());
+          mutate(nextConfig);
+          await params.writeConfig(nextConfig);
+          return {
+            path: "/tmp/openclaw.json",
+            previousHash: null,
+            snapshot: {},
+            nextConfig,
+            afterWrite: { mode: "auto" },
+            followUp: { mode: "auto", requiresRestart: false },
+            result: undefined,
+          };
+        },
         replaceConfigFile: ({ nextConfig }: { nextConfig: unknown }) =>
           params.writeConfig(nextConfig as Record<string, unknown>),
       },
@@ -75,7 +92,6 @@ async function withRegisteredPhoneControl(
   }) => Promise<void>,
 ) {
   const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), PHONE_CONTROL_STATE_PREFIX));
-  vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
   try {
     let config = createPhoneControlConfig();
     const writeConfigFile = vi.fn(async (next: Record<string, unknown>) => {
@@ -109,11 +125,6 @@ async function withRegisteredPhoneControl(
 }
 
 describe("phone-control plugin", () => {
-  afterEach(() => {
-    vi.unstubAllEnvs();
-    resetPluginStateStoreForTests();
-  });
-
   it("arms sms.send as part of the writes group", async () => {
     await withRegisteredPhoneControl(async ({ command, writeConfigFile, getConfig }) => {
       expect(command.name).toBe("phone");

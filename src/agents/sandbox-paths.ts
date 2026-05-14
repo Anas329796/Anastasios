@@ -11,7 +11,7 @@ import { assertNoPathAliasEscape, type PathAliasPolicy } from "../infra/path-ali
 import { isPathInside } from "../infra/path-guards.js";
 import { resolvePreferredOpenClawTmpDir } from "../infra/tmp-openclaw-dir.js";
 import { isPassThroughRemoteMediaSource } from "../media/media-source-url.js";
-import { getMediaMaterializationDir } from "../media/store.js";
+import { resolveConfigDir } from "../utils.js";
 
 const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
 const DATA_URL_RE = /^data:/i;
@@ -68,7 +68,13 @@ export function resolveSandboxPath(params: { filePath: string; cwd: string; root
   if (!relative || relative === "") {
     return { resolved, relative: "" };
   }
-  if (relative.startsWith("..") || path.isAbsolute(relative) || isWindowsDrivePath(relative)) {
+  if (
+    relative === ".." ||
+    relative.startsWith("../") ||
+    relative.startsWith("..\\") ||
+    path.isAbsolute(relative) ||
+    isWindowsDrivePath(relative)
+  ) {
     throw new Error(`Path escapes sandbox root (${shortPath(rootResolved)}): ${params.filePath}`);
   }
   return { resolved, relative };
@@ -107,7 +113,7 @@ function isManagedMediaPathUnderRoot(candidate: string): boolean {
   if (!hostPathLooksAbsolute(expanded)) {
     return false;
   }
-  const mediaRoot = getMediaMaterializationDir();
+  const mediaRoot = path.join(resolveConfigDir(), "media");
   const resolvedMediaRoot = path.resolve(mediaRoot);
   const resolvedExpanded = path.resolve(expanded);
   if (
@@ -129,7 +135,7 @@ export async function resolveAllowedManagedMediaPath(
     return undefined;
   }
   const resolved = path.resolve(expanded);
-  const managedMediaRoot = path.resolve(getMediaMaterializationDir());
+  const managedMediaRoot = path.resolve(resolveConfigDir(), "media");
   await assertNoManagedMediaAliasEscape({
     filePath: resolved,
     managedMediaRoot,

@@ -224,7 +224,7 @@ describe("registerSubCliCommands", () => {
   });
 
   it("passes completion context to channel registration", async () => {
-    const argv = ["node", "openclaw", "completion"];
+    const argv = ["node", "openclaw", "completion", "--write-state"];
     const program = new Command().name("openclaw");
 
     await registerSubCliByName(program, "channels", argv, { purpose: "completion" });
@@ -253,13 +253,13 @@ describe("registerSubCliCommands", () => {
     expect(registerPluginCliCommandsFromValidatedConfig).not.toHaveBeenCalled();
   });
 
-  it("keeps plugin CLI registrations available for the plugins command root", async () => {
+  it("does not preload plugin CLI registrations for bare plugin parent help", async () => {
     process.argv = ["node", "openclaw", "plugins"];
     const program = new Command().name("openclaw");
 
     await registerSubCliByName(program, "plugins");
 
     expect(registerPluginsCli).toHaveBeenCalledTimes(1);
-    expect(registerPluginCliCommandsFromValidatedConfig).toHaveBeenCalledTimes(1);
+    expect(registerPluginCliCommandsFromValidatedConfig).not.toHaveBeenCalled();
   });
 });

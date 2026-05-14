@@ -1,3 +1,7 @@
+import fs from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
 export type MemoryConfig = {
   embedding: {
     provider: string;
@@ -11,6 +15,7 @@ export type MemoryConfig = {
   autoCapture?: boolean;
   autoRecall?: boolean;
   captureMaxChars?: number;
+  customTriggers?: string[];
   recallMaxChars?: number;
   storageOptions?: Record<string, string>;
 };
@@ -21,6 +26,34 @@ export type MemoryCategory = (typeof MEMORY_CATEGORIES)[number];
 const DEFAULT_MODEL = "text-embedding-3-small";
 export const DEFAULT_CAPTURE_MAX_CHARS = 500;
 export const DEFAULT_RECALL_MAX_CHARS = 1000;
+const LEGACY_STATE_DIRS: string[] = [];
+
+function resolveDefaultDbPath(): string {
+  const home = homedir();
+  const preferred = join(home, ".openclaw", "memory", "lancedb");
+  try {
+    if (fs.existsSync(preferred)) {
+      return preferred;
+    }
+  } catch {
+    // best-effort
+  }
+
+  for (const legacy of LEGACY_STATE_DIRS) {
+    const candidate = join(home, legacy, "memory", "lancedb");
+    try {
+      if (fs.existsSync(candidate)) {
+        return candidate;
+      }
+    } catch {
+      // best-effort
+    }
+  }
+
+  return preferred;
+}
+
+const DEFAULT_DB_PATH = resolveDefaultDbPath();
 
 const EMBEDDING_DIMENSIONS: Record<string, number> = {
   "text-embedding-3-small": 1536,
@@ -77,6 +110,7 @@ export const memoryConfigSchema = {
         "autoCapture",
         "autoRecall",
         "captureMaxChars",
+        "customTriggers",
         "recallMaxChars",
         "storageOptions",
       ],
@@ -110,6 +144,28 @@ export const memoryConfigSchema = {
     }
     if (typeof recallMaxChars === "number" && (recallMaxChars < 100 || recallMaxChars > 10_000)) {
       throw new Error("recallMaxChars must be between 100 and 10000");
+    }
+    let customTriggers: string[] | undefined;
+    if (cfg.customTriggers !== undefined) {
+      if (!Array.isArray(cfg.customTriggers)) {
+        throw new Error("customTriggers must be an array of strings");
+      }
+      customTriggers = cfg.customTriggers.map((trigger, index) => {
+        if (typeof trigger !== "string") {
+          throw new Error(`customTriggers.${index} must be a string`);
+        }
+        const normalized = trigger.trim();
+        if (!normalized) {
+          throw new Error(`customTriggers.${index} must not be empty`);
+        }
+        if (normalized.length > 100) {
+          throw new Error(`customTriggers.${index} must be at most 100 characters`);
+        }
+        return normalized;
+      });
+      if (customTriggers.length > 50) {
+        throw new Error("customTriggers must include at most 50 entries");
+      }
     }
 
     const dreaming =
@@ -148,10 +204,11 @@ export const memoryConfigSchema = {
         dimensions: typeof embedding.dimensions === "number" ? embedding.dimensions : undefined,
       },
       dreaming,
-      dbPath: typeof cfg.dbPath === "string" && cfg.dbPath.trim() ? cfg.dbPath.trim() : undefined,
+      dbPath: typeof cfg.dbPath === "string" ? cfg.dbPath : DEFAULT_DB_PATH,
       autoCapture: cfg.autoCapture === true,
       autoRecall: cfg.autoRecall !== false,
       captureMaxChars: captureMaxChars ?? DEFAULT_CAPTURE_MAX_CHARS,
+      ...(customTriggers ? { customTriggers } : {}),
       recallMaxChars: recallMaxChars ?? DEFAULT_RECALL_MAX_CHARS,
       ...(storageOptions ? { storageOptions } : {}),
     };
@@ -187,9 +244,9 @@ export const memoryConfigSchema = {
     },
     dbPath: {
       label: "Database Path",
-      placeholder: "s3://memory-bucket/openclaw or ~/memory/lancedb",
+      placeholder: "~/.openclaw/memory/lancedb",
       advanced: true,
-      help: "Required external LanceDB path or cloud storage URI. OpenClaw no longer creates a managed LanceDB directory by default.",
+      help: "Local filesystem path or cloud storage URI (s3://, gs://) for LanceDB database",
     },
     autoCapture: {
       label: "Auto-Capture",
@@ -204,6 +261,11 @@ export const memoryConfigSchema = {
       help: "Maximum message length eligible for auto-capture",
       advanced: true,
       placeholder: String(DEFAULT_CAPTURE_MAX_CHARS),
+    },
+    customTriggers: {
+      label: "Custom Triggers",
+      help: "Literal phrases that should make auto-capture consider a message memory-worthy",
+      advanced: true,
     },
     recallMaxChars: {
       label: "Recall Query Max Chars",

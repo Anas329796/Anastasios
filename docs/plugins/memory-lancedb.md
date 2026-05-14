@@ -196,10 +196,11 @@ in. For example, ZhiPu `embedding-3` uses `2048` dimensions:
 
 `memory-lancedb` has two separate text limits:
 
-| Setting           | Default | Range     | Applies to                                    |
-| ----------------- | ------- | --------- | --------------------------------------------- |
-| `recallMaxChars`  | `1000`  | 100-10000 | text sent to the embedding API for recall     |
-| `captureMaxChars` | `500`   | 100-10000 | assistant message length eligible for capture |
+| Setting           | Default | Range     | Applies to                                                |
+| ----------------- | ------- | --------- | --------------------------------------------------------- |
+| `recallMaxChars`  | `1000`  | 100-10000 | text sent to the embedding API for recall                 |
+| `captureMaxChars` | `500`   | 100-10000 | message length eligible for auto-capture                  |
+| `customTriggers`  | `[]`    | 0-50      | literal phrases that make auto-capture consider a message |
 
 `recallMaxChars` controls auto-recall, the `memory_recall` tool, the
 `memory_forget` query path, and `openclaw ltm search`. Auto-recall prefers the
@@ -209,6 +210,10 @@ out of the embedding request.
 
 `captureMaxChars` controls whether a response is short enough to be considered
 for automatic capture. It does not cap recall query embeddings.
+
+`customTriggers` lets you add literal auto-capture phrases without writing
+regular expressions. The built-in triggers include common English, Czech,
+Chinese, Japanese, and Korean memory phrases.
 
 ## Commands
 
@@ -242,9 +247,8 @@ Agents also get LanceDB memory tools from the active memory plugin:
 
 ## Storage
 
-`memory-lancedb` uses an explicit external LanceDB path. OpenClaw no longer
-creates a managed `~/.openclaw/memory/lancedb` directory by default; configure
-`dbPath` when you select this plugin:
+By default, LanceDB data lives under `~/.openclaw/memory/lancedb`. Override the
+path with `dbPath`:
 
 ```json5
 {
@@ -253,7 +257,7 @@ creates a managed `~/.openclaw/memory/lancedb` directory by default; configure
       "memory-lancedb": {
         enabled: true,
         config: {
-          dbPath: "~/memory/lancedb",
+          dbPath: "~/.openclaw/memory/lancedb",
           embedding: {
             apiKey: "${OPENAI_API_KEY}",
             model: "text-embedding-3-small",

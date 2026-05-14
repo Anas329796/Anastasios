@@ -40,9 +40,8 @@
     },
     "dbPath": {
       "label": "Database Path",
-      "placeholder": "s3://memory-bucket/openclaw or ~/memory/lancedb",
-      "advanced": true,
-      "help": "Required external LanceDB path or cloud storage URI. OpenClaw no longer creates a managed LanceDB directory by default."
+      "placeholder": "~/.openclaw/memory/lancedb",
+      "advanced": true
     },
     "autoCapture": {
       "label": "Auto-Capture",
@@ -61,6 +60,11 @@
       "help": "Maximum message length eligible for auto-capture",
       "advanced": true,
       "placeholder": "500"
+    },
+    "customTriggers": {
+      "label": "Custom Triggers",
+      "help": "Literal phrases that should make auto-capture consider a message memory-worthy",
+      "advanced": true
     },
     "recallMaxChars": {
       "label": "Recall Query Max Chars",
@@ -117,6 +121,15 @@
         "type": "number",
         "minimum": 100,
         "maximum": 10000
+      },
+      "customTriggers": {
+        "type": "array",
+        "maxItems": 50,
+        "items": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        }
       },
       "recallMaxChars": {
         "type": "number",
