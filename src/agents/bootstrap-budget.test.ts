@@ -47,6 +47,32 @@ describe("buildBootstrapInjectionStats", () => {
     expect(stats[1]?.injectedChars).toBe(20);
     expect(stats[1]?.truncated).toBe(true);
   });
+
+  it("falls back to basename of path when name is missing (#47941)", () => {
+    const bootstrapFiles = [
+      {
+        name: undefined as unknown as string,
+        path: "/workspace/SELF_IMPROVEMENT_REMINDER.md",
+        content: "reminder text",
+        missing: false,
+      },
+      {
+        name: "" as unknown as string,
+        path: "/workspace/NOTES.md",
+        content: "notes",
+        missing: false,
+      },
+    ] as unknown as WorkspaceBootstrapFile[];
+
+    const injectedFiles = [
+      { path: "/workspace/SELF_IMPROVEMENT_REMINDER.md", content: "reminder text" },
+      { path: "/workspace/NOTES.md", content: "notes" },
+    ];
+
+    const stats = buildBootstrapInjectionStats({ bootstrapFiles, injectedFiles });
+    expect(stats[0]?.name).toBe("SELF_IMPROVEMENT_REMINDER.md");
+    expect(stats[1]?.name).toBe("NOTES.md");
+  });
 });
 
 describe("analyzeBootstrapBudget", () => {
