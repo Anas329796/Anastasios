@@ -128,6 +128,21 @@ const BLOCKED_HOSTNAMES = new Set([
   "metadata.google.internal",
 ]);
 
+const CLOUD_METADATA_IPV4_ADDRESS = "169.254.169.254";
+
+// Hostnames that map to cloud-instance metadata services (IAM credentials,
+// instance roles, etc.) stay blocked even when the caller opts into
+// `allowPrivateNetwork` / `dangerouslyAllowPrivateNetwork`. These endpoints
+// look like "private network" technically (link-local IP / `.internal`
+// domain) but exposing them bypasses the cloud workload IAM boundary
+// (CWE-918 SSRF → credential theft). Add to this set when more cloud
+// providers expose hostname-based metadata access.
+const ALWAYS_BLOCKED_CLOUD_METADATA_HOSTNAMES = new Set(["metadata.google.internal"]);
+
+// Loopback aliases that are safe to permit when allowPrivateNetwork is set
+// (e.g. BlueBubbles Private API at localhost:1234, local LiteLLM proxies).
+const LOOPBACK_HOSTNAMES = new Set(["localhost", "localhost.localdomain"]);
+
 function normalizeHostnameSet(values?: string[]): Set<string> {
   if (!values || values.length === 0) {
     return new Set<string>();
@@ -240,15 +255,48 @@ export function isPrivateIpAddress(address: string, policy?: SsrFPolicy): boolea
   return false;
 }
 
-export function isBlockedHostname(hostname: string): boolean {
+export function isBlockedHostname(hostname: string, policy?: SsrFPolicy): boolean {
   const normalized = normalizeHostname(hostname);
   if (!normalized) {
     return false;
   }
-  return isBlockedHostnameNormalized(normalized);
+  return isBlockedHostnameNormalized(normalized, policy);
 }
 
-function isBlockedHostnameNormalized(normalized: string): boolean {
+function isBlockedHostnameNormalized(normalized: string, policy?: SsrFPolicy): boolean {
+  // Cloud-instance metadata endpoints stay blocked even with
+  // allowPrivateNetwork — they expose IAM credentials and the SSRF policy
+  // surface should not be widened by accident. See
+  // ALWAYS_BLOCKED_CLOUD_METADATA_HOSTNAMES.
+  if (isAlwaysBlockedCloudMetadataHostOrIpNormalized(normalized)) {
+    return true;
+  }
+
+  const allowPrivateNetwork =
+    policy?.allowPrivateNetwork === true || policy?.dangerouslyAllowPrivateNetwork === true;
+  if (allowPrivateNetwork) {
+    // Pass loopback aliases and `.localhost` / `.local` (mDNS) suffixes —
+    // these are the legitimate use cases for opting into private network
+    // access (BlueBubbles Private API, local LiteLLM proxies, mDNS-bound
+    // services on the home LAN).
+    if (LOOPBACK_HOSTNAMES.has(normalized)) {
+      return false;
+    }
+    if (normalized.endsWith(".localhost") || normalized.endsWith(".local")) {
+      return false;
+    }
+    // `.internal` stays blocked: the suffix is heavily reused by cloud
+    // metadata (e.g. `*.compute.internal`, `metadata.google.internal`) and
+    // by enterprise reserved domains. allowPrivateNetwork is meant for
+    // "I want my LAN service" not "I want internal cloud namespaces".
+    if (normalized.endsWith(".internal")) {
+      return true;
+    }
+    // Other hostnames (public DNS, RFC1918 IPs reached by hostname) are
+    // permitted; isPrivateIpAddress still gets to weigh in via the caller.
+    return false;
+  }
+
   if (BLOCKED_HOSTNAMES.has(normalized)) {
     return true;
   }
@@ -264,16 +312,29 @@ export function isBlockedHostnameOrIp(hostname: string, policy?: SsrFPolicy): bo
   if (!normalized) {
     return false;
   }
-  return isBlockedHostnameNormalized(normalized) || isPrivateIpAddress(normalized, policy);
+  return isBlockedHostnameNormalized(normalized, policy) || isPrivateIpAddress(normalized, policy);
 }
 
 const BLOCKED_HOST_OR_IP_MESSAGE = "Blocked hostname or private/internal/special-use IP address";
 const BLOCKED_RESOLVED_IP_MESSAGE = "Blocked: resolves to private/internal/special-use IP address";
 
-function assertAllowedHostOrIpOrThrow(hostnameOrIp: string, policy?: SsrFPolicy): void {
-  if (isBlockedHostnameOrIp(hostnameOrIp, policy)) {
-    throw new SsrFBlockedError(BLOCKED_HOST_OR_IP_MESSAGE);
+function isAlwaysBlockedCloudMetadataIpNormalized(normalized: string): boolean {
+  const strictIp = parseCanonicalIpAddress(normalized);
+  if (!strictIp) {
+    return false;
   }
+  if (isIpv4Address(strictIp)) {
+    return strictIp.toString() === CLOUD_METADATA_IPV4_ADDRESS;
+  }
+  const embeddedIpv4 = extractEmbeddedIpv4FromIpv6(strictIp);
+  return embeddedIpv4?.toString() === CLOUD_METADATA_IPV4_ADDRESS;
+}
+
+function isAlwaysBlockedCloudMetadataHostOrIpNormalized(normalized: string): boolean {
+  return (
+    ALWAYS_BLOCKED_CLOUD_METADATA_HOSTNAMES.has(normalized) ||
+    isAlwaysBlockedCloudMetadataIpNormalized(normalized)
+  );
 }
 
 function resolveHostnamePolicyChecks(
@@ -295,9 +356,28 @@ function resolveHostnamePolicyChecks(
     throw new SsrFBlockedError(`Blocked hostname (not in allowlist): ${hostname}`);
   }
 
+  // Hostname-suffix policy and metadata destinations always apply, including
+  // when private-network access is explicitly enabled. `.internal`,
+  // metadata.google.internal, IMDSv2 IPs, and other always-blocked targets
+  // must never bypass classification just because allowPrivateNetwork or
+  // allowedHostnames widened the IP-level checks. The hostname classifier
+  // itself accounts for allowPrivateNetwork (loopback / `.local` /
+  // `.localhost` are permitted there) — only the IP-level private-address
+  // assertion is gated by skipPrivateNetworkChecks below.
+  if (isBlockedHostnameNormalized(normalized, policy)) {
+    throw new SsrFBlockedError(BLOCKED_HOST_OR_IP_MESSAGE);
+  }
+  if (isAlwaysBlockedCloudMetadataHostOrIpNormalized(normalized)) {
+    throw new SsrFBlockedError(BLOCKED_HOST_OR_IP_MESSAGE);
+  }
+
   if (!skipPrivateNetworkChecks) {
-    // Fail fast for literal hosts/IPs before any DNS lookup side-effects.
-    assertAllowedHostOrIpOrThrow(normalized, policy);
+    // Fail fast for literal IPs before any DNS lookup side-effects. The
+    // hostname classifier already ran above, so this only adds the
+    // IP-private-address check that allowPrivateNetwork is allowed to skip.
+    if (isPrivateIpAddress(normalized, policy)) {
+      throw new SsrFBlockedError(BLOCKED_HOST_OR_IP_MESSAGE);
+    }
   }
 
   return { normalized, skipPrivateNetworkChecks };
@@ -310,6 +390,15 @@ function assertAllowedResolvedAddressesOrThrow(
   for (const entry of results) {
     // Reuse the exact same host/IP classifier as the pre-DNS check to avoid drift.
     if (isBlockedHostnameOrIp(entry.address, policy)) {
+      throw new SsrFBlockedError(BLOCKED_RESOLVED_IP_MESSAGE);
+    }
+  }
+}
+
+function assertNoAlwaysBlockedResolvedAddressesOrThrow(results: readonly LookupAddress[]): void {
+  for (const entry of results) {
+    const normalized = normalizeHostname(entry.address);
+    if (normalized && isAlwaysBlockedCloudMetadataIpNormalized(normalized)) {
       throw new SsrFBlockedError(BLOCKED_RESOLVED_IP_MESSAGE);
     }
   }
@@ -450,6 +539,8 @@ export async function resolvePinnedHostnameWithPolicy(
     throw new Error(`Unable to resolve hostname: ${hostname}`);
   }
 
+  assertNoAlwaysBlockedResolvedAddressesOrThrow(results);
+
   if (!skipPrivateNetworkChecks) {
     // Phase 2: re-check DNS answers so public hostnames cannot pivot to private targets.
     assertAllowedResolvedAddressesOrThrow(results, params.policy);
@@ -505,6 +596,7 @@ function resolvePinnedDispatcherLookup(
     address,
     family: address.includes(":") ? 6 : 4,
   }));
+  assertNoAlwaysBlockedResolvedAddressesOrThrow(records);
   if (!shouldSkipPrivateNetworkChecks(pinned.hostname, policy)) {
     assertAllowedResolvedAddressesOrThrow(records, policy);
   }
