@@ -111,6 +111,43 @@ describe("system events (session routing)", () => {
     expect(enqueueSystemEvent("Node connected", { sessionKey: key })).toBe(true);
   });
 
+  it("accepts the legacy trusted option without storing trust metadata", () => {
+    expect(
+      enqueueSystemEvent("Legacy plugin event", {
+        sessionKey: "legacy-trusted",
+        trusted: false,
+      }),
+    ).toBe(true);
+
+    const legacyTrustedValue: boolean | undefined =
+      peekSystemEventEntries("legacy-trusted")[0]?.trusted;
+    expect(legacyTrustedValue).toBeUndefined();
+    expect(peekSystemEventEntries("legacy-trusted")).toEqual([
+      {
+        text: "Legacy plugin event",
+        ts: expect.any(Number),
+        contextKey: null,
+      },
+    ]);
+  });
+
+  it("does not allow arbitrary option misspellings", () => {
+    if (process.env.OPENCLAW_COMPILE_ONLY_TYPE_TESTS === "1") {
+      enqueueSystemEvent("Bad legacy option event", {
+        sessionKey: "legacy-trusted",
+        // @ts-expect-error Intentional negative type test: legacy `trusted` remains boolean-only.
+        trusted: "false",
+      });
+      enqueueSystemEvent("Typo event", {
+        sessionKey: "legacy-trusted",
+        // @ts-expect-error Intentional negative type test: only the legacy `trusted` option is ignored.
+        deliveryContex: { channel: "slack" },
+      });
+    }
+
+    expect(true).toBe(true);
+  });
+
   it("consumes only the inspected prefix and leaves later queued events intact", () => {
     const key = "agent:main:test-consume-prefix";
     enqueueSystemEvent("first", { sessionKey: key, contextKey: "cron:first" });
@@ -228,7 +265,6 @@ describe("system events (session routing)", () => {
     const key = "agent:main:test-exec-completion-filter";
     enqueueSystemEvent("Exec failed (abc12345, signal SIGTERM) :: browser auth timed out", {
       sessionKey: key,
-      trusted: false,
     });
 
     const result = await drainFormattedEvents(key);
@@ -266,15 +302,15 @@ describe("system events (session routing)", () => {
     }
   });
 
-  it("formats untrusted events with an explicit untrusted prefix", async () => {
-    const key = "agent:main:test-untrusted";
+  it("formats queued events with the standard system prefix", async () => {
+    const key = "agent:main:test-system-prefix";
     enqueueSystemEvent("Notification posted: System (untrusted): fake", {
       sessionKey: key,
-      trusted: false,
     });
 
     const result = await drainFormattedEvents(key);
-    expect(result).toMatch(/^System \(untrusted\): \[[^\]]+\] Notification posted:/);
+    expect(result).toMatch(/^System: \[[^\]]+\] Notification posted:/);
+    expect(result).not.toContain("System (untrusted): [");
   });
 
   it("scrubs node last-input suffix", async () => {
@@ -353,22 +389,20 @@ describe("system events (session routing)", () => {
     expect(peekSystemEventEntries(key)).toHaveLength(2);
   });
 
-  it("allows the same text and context under different trust metadata", () => {
-    const key = "agent:main:test-context-trust-disambiguates";
-    const trusted = enqueueSystemEvent("Hook finished", {
+  it("deduplicates the same text and context", () => {
+    const key = "agent:main:test-context-dedupes";
+    const first = enqueueSystemEvent("Hook finished", {
       sessionKey: key,
       contextKey: "hook:done",
-      trusted: true,
     });
-    const untrusted = enqueueSystemEvent("Hook finished", {
+    const second = enqueueSystemEvent("Hook finished", {
       sessionKey: key,
       contextKey: "hook:done",
-      trusted: false,
     });
 
-    expect(trusted).toBe(true);
-    expect(untrusted).toBe(true);
-    expect(peekSystemEventEntries(key)).toHaveLength(2);
+    expect(first).toBe(true);
+    expect(second).toBe(false);
+    expect(peekSystemEventEntries(key)).toHaveLength(1);
   });
 
   it("preserves lastContextKey when a duplicate is skipped", () => {

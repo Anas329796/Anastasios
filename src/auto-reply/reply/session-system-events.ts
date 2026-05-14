@@ -27,13 +27,18 @@ const selectGenericSystemEvents = (events: readonly SystemEvent[]): SystemEvent[
   return selected;
 };
 
+export type FormattedSystemEventsResult = {
+  text: string;
+  hasQueuedEvents: boolean;
+};
+
 /** Drain queued system events, format as `System:` lines, return the block (or undefined). */
-export async function drainFormattedSystemEvents(params: {
+export async function drainFormattedSystemEventBlock(params: {
   cfg: OpenClawConfig;
   sessionKey: string;
   isMainSession: boolean;
   isNewSession: boolean;
-}): Promise<string | undefined> {
+}): Promise<FormattedSystemEventsResult | undefined> {
   const compactSystemEvent = (line: string): string | null => {
     const trimmed = line.trim();
     if (!trimmed) {
@@ -110,11 +115,10 @@ export async function drainFormattedSystemEvents(params: {
     if (!compacted) {
       continue;
     }
-    const prefix = event.trusted === false ? "System (untrusted)" : "System";
     const timestamp = `[${formatSystemEventTimestamp(event.ts, params.cfg)}]`;
     let index = 0;
     for (const subline of compacted.split("\n")) {
-      systemLines.push(`${prefix}: ${index === 0 ? `${timestamp} ` : ""}${subline}`);
+      systemLines.push(`System: ${index === 0 ? `${timestamp} ` : ""}${subline}`);
       index += 1;
     }
   }
@@ -134,7 +138,20 @@ export async function drainFormattedSystemEvents(params: {
 
   // Each sub-line gets its own prefix so continuation lines can't be mistaken
   // for regular user content.
-  return summaryLines.length > 0
-    ? [...summaryLines, ...systemLines].join("\n")
-    : systemLines.join("\n");
+  return {
+    text:
+      summaryLines.length > 0
+        ? [...summaryLines, ...systemLines].join("\n")
+        : systemLines.join("\n"),
+    hasQueuedEvents: systemLines.length > 0,
+  };
+}
+
+export async function drainFormattedSystemEvents(params: {
+  cfg: OpenClawConfig;
+  sessionKey: string;
+  isMainSession: boolean;
+  isNewSession: boolean;
+}): Promise<string | undefined> {
+  return (await drainFormattedSystemEventBlock(params))?.text;
 }
