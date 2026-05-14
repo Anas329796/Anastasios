@@ -54,7 +54,10 @@ import { getTopicName, resolveTopicNameCachePath, updateTopicName } from "./topi
 
 export type {
   BuildTelegramMessageContextParams,
+  TelegramForwardedBatchContextEntry,
+  TelegramMessageContextOptions,
   TelegramMediaRef,
+  TelegramUntrustedStructuredContextEntry,
 } from "./bot-message-context.types.js";
 
 type TelegramMessageContextRuntime = typeof import("./bot-message-context.runtime.js");
