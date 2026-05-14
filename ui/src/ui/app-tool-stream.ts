@@ -226,11 +226,12 @@ function buildToolStreamMessage(entry: ToolStreamEntry): Record<string, unknown>
     name: entry.name,
     arguments: entry.args ?? {},
   });
-  if (entry.output) {
+  const resultText = formatToolOutput(entry.output);
+  if (resultText != null) {
     content.push({
       type: "toolresult",
       name: entry.name,
-      text: entry.output,
+      text: resultText,
     });
   }
   return {
@@ -586,7 +587,7 @@ export function handleAgentEvent(host: ToolStreamHost, payload?: AgentEventPaylo
       sessionKey,
       name,
       args,
-      output: output || undefined,
+      output: output !== undefined ? output : undefined,
       startedAt: typeof payload.ts === "number" ? payload.ts : now,
       updatedAt: now,
       message: {},
@@ -599,7 +600,7 @@ export function handleAgentEvent(host: ToolStreamHost, payload?: AgentEventPaylo
       entry.args = args;
     }
     if (output !== undefined) {
-      entry.output = output || undefined;
+      entry.output = output;
     }
     entry.updatedAt = now;
   }
