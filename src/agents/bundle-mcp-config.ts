@@ -6,13 +6,22 @@ import {
   type BundleMcpDiagnostic,
   type BundleMcpServerConfig,
 } from "../plugins/bundle-mcp.js";
+import { isToolAllowedByPolicyName } from "./tool-policy-match.js";
+import { normalizeToolName } from "./tool-policy.js";
 
 type MergedBundleMcpConfig = {
   config: BundleMcpConfig;
   diagnostics: BundleMcpDiagnostic[];
 };
 
+type BundleMcpToolPolicy = {
+  allow?: string[];
+  deny?: string[];
+};
+
 type BundleMcpServerMapper = (server: BundleMcpServerConfig, name: string) => BundleMcpServerConfig;
+
+const BUNDLE_MCP_PLUGIN_POLICY_ENTRIES = new Set(["bundle-mcp", "group:plugins"]);
 
 const OPENCLAW_TRANSPORT_TO_CLI_BUNDLE_TYPE: Record<string, string> = {
   "streamable-http": "http",
@@ -41,6 +50,72 @@ export function toCliBundleMcpServerConfig(server: BundleMcpServerConfig): Bundl
     }
   }
   return next as BundleMcpServerConfig;
+}
+
+function buildMcpServerPolicyCandidates(name: string): string[] {
+  const serverName = normalizeToolName(name);
+  if (!serverName) {
+    return [];
+  }
+  const mcpServerName = serverName.startsWith("mcp__") ? serverName : `mcp__${serverName}`;
+  return Array.from(new Set([serverName, mcpServerName, `${mcpServerName}__tool`]));
+}
+
+function policyEntryTargetsMcpServer(entry: string, serverName: string): boolean {
+  const normalizedEntry = normalizeToolName(entry);
+  const normalizedServerName = normalizeToolName(serverName);
+  if (!normalizedEntry || !normalizedServerName) {
+    return false;
+  }
+  if (BUNDLE_MCP_PLUGIN_POLICY_ENTRIES.has(normalizedEntry)) {
+    return true;
+  }
+  if (normalizedEntry === "*") {
+    return true;
+  }
+  const mcpServerName = normalizedServerName.startsWith("mcp__")
+    ? normalizedServerName
+    : `mcp__${normalizedServerName}`;
+  if (normalizedEntry === normalizedServerName || normalizedEntry === mcpServerName) {
+    return true;
+  }
+  if (normalizedEntry.startsWith(`${mcpServerName}__`)) {
+    return true;
+  }
+  return buildMcpServerPolicyCandidates(serverName).some(
+    (candidate) => !isToolAllowedByPolicyName(candidate, { deny: [entry] }),
+  );
+}
+
+function isMcpServerAllowedByToolPolicy(name: string, policy: BundleMcpToolPolicy): boolean {
+  const deny = policy.deny ?? [];
+  if (deny.some((entry) => policyEntryTargetsMcpServer(entry, name))) {
+    return false;
+  }
+  const allow = policy.allow ?? [];
+  if (allow.length === 0) {
+    return true;
+  }
+  return allow.some((entry) => policyEntryTargetsMcpServer(entry, name));
+}
+
+export function filterBundleMcpConfigByToolPolicies(params: {
+  config: BundleMcpConfig;
+  policies?: Array<BundleMcpToolPolicy | undefined>;
+}): BundleMcpConfig {
+  const policies = (params.policies ?? []).filter((policy): policy is BundleMcpToolPolicy =>
+    Boolean(policy?.allow || policy?.deny),
+  );
+  if (policies.length === 0) {
+    return params.config;
+  }
+  return {
+    mcpServers: Object.fromEntries(
+      Object.entries(params.config.mcpServers).filter(([name]) =>
+        policies.every((policy) => isMcpServerAllowedByToolPolicy(name, policy)),
+      ),
+    ),
+  };
 }
 
 export function loadMergedBundleMcpConfig(params: {
