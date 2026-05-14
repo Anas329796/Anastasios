@@ -3625,6 +3625,281 @@ describe("runAgentTurnWithFallback", () => {
     expect(persistedStore.main.modelOverrideSource).toBeUndefined();
   });
 
+  it("keeps auto fallback selection visible when success rollback writes keep failing", async () => {
+    state.runWithModelFallbackMock.mockImplementation(
+      async (params: { run: (provider: string, model: string) => Promise<unknown> }) => ({
+        result: await params.run("openai-codex", "gpt-5.4"),
+        provider: "openai-codex",
+        model: "gpt-5.4",
+        attempts: [],
+      }),
+    );
+    state.runEmbeddedPiAgentMock.mockResolvedValue({
+      payloads: [{ text: "ok" }],
+      meta: {},
+    });
+
+    const followupRun = createFollowupRun();
+    followupRun.run.provider = "anthropic";
+    followupRun.run.model = "claude-opus-4-6";
+
+    const sessionEntry: SessionEntry = {
+      sessionId: "session",
+      updatedAt: Date.now(),
+      totalTokens: 1,
+      compactionCount: 0,
+    };
+    const sessionStore = { main: sessionEntry };
+    const persistedStore: Record<string, SessionEntry> = { main: { ...sessionEntry } };
+    const updateSessionStoreMock = vi.mocked(updateSessionStore);
+    let storeWriteAttempt = 0;
+    updateSessionStoreMock.mockImplementation(
+      async (_storePath: string, update: (store: Record<string, SessionEntry>) => void) => {
+        storeWriteAttempt += 1;
+        if (storeWriteAttempt >= 2) {
+          throw new Error("sessions store still locked");
+        }
+        update(persistedStore);
+      },
+    );
+
+    const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
+    const result = await runAgentTurnWithFallback({
+      commandBody: "hello",
+      followupRun,
+      sessionCtx: {
+        Provider: "telegram",
+        MessageSid: "msg",
+      } as unknown as TemplateContext,
+      opts: {},
+      typingSignals: createMockTypingSignaler(),
+      blockReplyPipeline: null,
+      blockStreamingEnabled: false,
+      resolvedBlockStreamingBreak: "message_end",
+      applyReplyToMode: (payload) => payload,
+      shouldEmitToolResult: () => true,
+      shouldEmitToolOutput: () => false,
+      pendingToolTasks: new Set(),
+      resetSessionAfterCompactionFailure: async () => false,
+      resetSessionAfterRoleOrderingConflict: async () => false,
+      isHeartbeat: false,
+      sessionKey: "main",
+      getActiveSessionEntry: () => sessionEntry,
+      activeSessionStore: sessionStore,
+      storePath: "/tmp/sessions.json",
+      resolvedVerboseLevel: "off",
+    });
+
+    expect(result.kind).toBe("success");
+    expect(storeWriteAttempt).toBe(3);
+    expectRecordFields(sessionEntry as unknown as Record<string, unknown>, {
+      providerOverride: "openai-codex",
+      modelOverride: "gpt-5.4",
+      modelOverrideSource: "auto",
+      modelOverrideFallbackOriginProvider: "anthropic",
+      modelOverrideFallbackOriginModel: "claude-opus-4-6",
+    });
+    expectRecordFields(persistedStore.main as unknown as Record<string, unknown>, {
+      providerOverride: "openai-codex",
+      modelOverride: "gpt-5.4",
+      modelOverrideSource: "auto",
+      modelOverrideFallbackOriginProvider: "anthropic",
+      modelOverrideFallbackOriginModel: "claude-opus-4-6",
+    });
+  });
+
+  it("does not roll back a matching user model switch after fallback success", async () => {
+    state.runWithModelFallbackMock.mockImplementation(
+      async (params: { run: (provider: string, model: string) => Promise<unknown> }) => ({
+        result: await params.run("openai-codex", "gpt-5.4"),
+        provider: "openai-codex",
+        model: "gpt-5.4",
+        attempts: [],
+      }),
+    );
+
+    const followupRun = createFollowupRun();
+    followupRun.run.provider = "anthropic";
+    followupRun.run.model = "claude-opus-4-6";
+
+    const sessionEntry: SessionEntry = {
+      sessionId: "session",
+      updatedAt: Date.now(),
+      totalTokens: 1,
+      compactionCount: 0,
+    };
+    const sessionStore = { main: sessionEntry };
+    const persistedStore: Record<string, SessionEntry> = { main: { ...sessionEntry } };
+    const updateSessionStoreMock = vi.mocked(updateSessionStore);
+    let storeWriteAttempt = 0;
+    updateSessionStoreMock.mockImplementation(
+      async (_storePath: string, update: (store: Record<string, SessionEntry>) => void) => {
+        storeWriteAttempt += 1;
+        if (storeWriteAttempt === 2) {
+          persistedStore.main = {
+            ...persistedStore.main,
+            providerOverride: "openai-codex",
+            modelOverride: "gpt-5.4",
+            modelOverrideSource: "user",
+            modelOverrideFallbackOriginProvider: undefined,
+            modelOverrideFallbackOriginModel: undefined,
+          };
+        }
+        update(persistedStore);
+      },
+    );
+    state.runEmbeddedPiAgentMock.mockImplementation(async () => {
+      sessionEntry.providerOverride = "openai-codex";
+      sessionEntry.modelOverride = "gpt-5.4";
+      sessionEntry.modelOverrideSource = "user";
+      delete sessionEntry.modelOverrideFallbackOriginProvider;
+      delete sessionEntry.modelOverrideFallbackOriginModel;
+      return {
+        payloads: [{ text: "ok" }],
+        meta: {},
+      };
+    });
+
+    const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
+    const result = await runAgentTurnWithFallback({
+      commandBody: "hello",
+      followupRun,
+      sessionCtx: {
+        Provider: "telegram",
+        MessageSid: "msg",
+      } as unknown as TemplateContext,
+      opts: {},
+      typingSignals: createMockTypingSignaler(),
+      blockReplyPipeline: null,
+      blockStreamingEnabled: false,
+      resolvedBlockStreamingBreak: "message_end",
+      applyReplyToMode: (payload) => payload,
+      shouldEmitToolResult: () => true,
+      shouldEmitToolOutput: () => false,
+      pendingToolTasks: new Set(),
+      resetSessionAfterCompactionFailure: async () => false,
+      resetSessionAfterRoleOrderingConflict: async () => false,
+      isHeartbeat: false,
+      sessionKey: "main",
+      getActiveSessionEntry: () => sessionEntry,
+      activeSessionStore: sessionStore,
+      storePath: "/tmp/sessions.json",
+      resolvedVerboseLevel: "off",
+    });
+
+    expect(result.kind).toBe("success");
+    expect(storeWriteAttempt).toBe(2);
+    expectRecordFields(sessionEntry as unknown as Record<string, unknown>, {
+      providerOverride: "openai-codex",
+      modelOverride: "gpt-5.4",
+      modelOverrideSource: "user",
+      modelOverrideFallbackOriginProvider: undefined,
+      modelOverrideFallbackOriginModel: undefined,
+    });
+    expectRecordFields(persistedStore.main as unknown as Record<string, unknown>, {
+      providerOverride: "openai-codex",
+      modelOverride: "gpt-5.4",
+      modelOverrideSource: "user",
+      modelOverrideFallbackOriginProvider: undefined,
+      modelOverrideFallbackOriginModel: undefined,
+    });
+  });
+
+  it("rolls back fallback model selection while preserving concurrent auth switches", async () => {
+    state.runWithModelFallbackMock.mockImplementation(
+      async (params: { run: (provider: string, model: string) => Promise<unknown> }) => ({
+        result: await params.run("openai-codex", "gpt-5.4"),
+        provider: "openai-codex",
+        model: "gpt-5.4",
+        attempts: [],
+      }),
+    );
+
+    const followupRun = createFollowupRun();
+    followupRun.run.provider = "anthropic";
+    followupRun.run.model = "claude-opus-4-6";
+
+    const sessionEntry: SessionEntry = {
+      sessionId: "session",
+      updatedAt: Date.now(),
+      totalTokens: 1,
+      compactionCount: 0,
+    };
+    const sessionStore = { main: sessionEntry };
+    const persistedStore: Record<string, SessionEntry> = { main: { ...sessionEntry } };
+    const updateSessionStoreMock = vi.mocked(updateSessionStore);
+    let storeWriteAttempt = 0;
+    updateSessionStoreMock.mockImplementation(
+      async (_storePath: string, update: (store: Record<string, SessionEntry>) => void) => {
+        storeWriteAttempt += 1;
+        if (storeWriteAttempt === 2) {
+          persistedStore.main = {
+            ...persistedStore.main,
+            authProfileOverride: "anthropic:work",
+            authProfileOverrideSource: "user",
+          };
+        }
+        update(persistedStore);
+      },
+    );
+    state.runEmbeddedPiAgentMock.mockImplementation(async () => {
+      sessionEntry.authProfileOverride = "anthropic:work";
+      sessionEntry.authProfileOverrideSource = "user";
+      return {
+        payloads: [{ text: "ok" }],
+        meta: {},
+      };
+    });
+
+    const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
+    const result = await runAgentTurnWithFallback({
+      commandBody: "hello",
+      followupRun,
+      sessionCtx: {
+        Provider: "telegram",
+        MessageSid: "msg",
+      } as unknown as TemplateContext,
+      opts: {},
+      typingSignals: createMockTypingSignaler(),
+      blockReplyPipeline: null,
+      blockStreamingEnabled: false,
+      resolvedBlockStreamingBreak: "message_end",
+      applyReplyToMode: (payload) => payload,
+      shouldEmitToolResult: () => true,
+      shouldEmitToolOutput: () => false,
+      pendingToolTasks: new Set(),
+      resetSessionAfterCompactionFailure: async () => false,
+      resetSessionAfterRoleOrderingConflict: async () => false,
+      isHeartbeat: false,
+      sessionKey: "main",
+      getActiveSessionEntry: () => sessionEntry,
+      activeSessionStore: sessionStore,
+      storePath: "/tmp/sessions.json",
+      resolvedVerboseLevel: "off",
+    });
+
+    expect(result.kind).toBe("success");
+    expect(storeWriteAttempt).toBe(2);
+    expectRecordFields(sessionEntry as unknown as Record<string, unknown>, {
+      providerOverride: undefined,
+      modelOverride: undefined,
+      modelOverrideSource: undefined,
+      modelOverrideFallbackOriginProvider: undefined,
+      modelOverrideFallbackOriginModel: undefined,
+      authProfileOverride: "anthropic:work",
+      authProfileOverrideSource: "user",
+    });
+    expectRecordFields(persistedStore.main as unknown as Record<string, unknown>, {
+      providerOverride: undefined,
+      modelOverride: undefined,
+      modelOverrideSource: undefined,
+      modelOverrideFallbackOriginProvider: undefined,
+      modelOverrideFallbackOriginModel: undefined,
+      authProfileOverride: "anthropic:work",
+      authProfileOverrideSource: "user",
+    });
+  });
+
   it("does not persist fallback selection for legacy user overrides without modelOverrideSource", async () => {
     // Regression: older persisted sessions can have a user-selected override
     // (modelOverride set) but no modelOverrideSource field, because the field

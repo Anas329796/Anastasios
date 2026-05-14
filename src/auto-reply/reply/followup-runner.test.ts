@@ -286,8 +286,8 @@ async function persistRunSessionUsageForFollowupTest(
   const nextEntry: SessionEntry = {
     ...entry,
     updatedAt: Date.now(),
-    modelProvider: params.providerUsed ?? entry.modelProvider,
-    model: params.modelUsed ?? entry.model,
+    modelProvider: params.sessionModelProvider ?? params.providerUsed ?? entry.modelProvider,
+    model: params.sessionModel ?? params.modelUsed ?? entry.model,
     contextTokens: params.contextTokensUsed ?? entry.contextTokens,
     systemPromptReport: params.systemPromptReport ?? entry.systemPromptReport,
   };
@@ -341,11 +341,16 @@ async function loadFreshFollowupRunnerModuleForTest() {
     enqueueFollowupRun: enqueueFollowupRunForFollowupTest,
     refreshQueuedFollowupSession: refreshQueuedFollowupSessionForFollowupTest,
   }));
-  vi.doMock("./session-run-accounting.js", () => ({
-    persistRunSessionUsage: persistRunSessionUsageForFollowupTest,
-    incrementRunCompactionCount: incrementRunCompactionCountForFollowupTest,
-    resolveRunSessionModelPersistence: vi.fn(() => ({})),
-  }));
+  vi.doMock("./session-run-accounting.js", async () => {
+    const actual = await vi.importActual<typeof import("./session-run-accounting.js")>(
+      "./session-run-accounting.js",
+    );
+    return {
+      ...actual,
+      persistRunSessionUsage: persistRunSessionUsageForFollowupTest,
+      incrementRunCompactionCount: incrementRunCompactionCountForFollowupTest,
+    };
+  });
   vi.doMock("./agent-runner-memory.js", () => ({
     runMemoryFlushIfNeeded: async (params: { sessionEntry?: SessionEntry }) => params.sessionEntry,
     runPreflightCompactionIfNeeded: (...args: unknown[]) =>
@@ -1329,6 +1334,169 @@ describe("createFollowupRunner messaging delivery and dedupe", () => {
     expect(requireMockCallArg(persistSpy, 0).providerUsed).toBe("anthropic");
     expect(requireMockCallArg(persistSpy, 0).usageIsContextSnapshot).toBeUndefined();
     persistSpy.mockRestore();
+  });
+
+  it("records fallback notice state when queued followups run on a fallback runtime", async () => {
+    const storePath = "/tmp/openclaw-followup-fallback-notice.json";
+    const sessionKey = "main";
+    const sessionEntry: SessionEntry = { sessionId: "session", updatedAt: Date.now() };
+    const sessionStore: Record<string, SessionEntry> = { [sessionKey]: sessionEntry };
+    registerFollowupTestSessionStore(storePath, sessionStore);
+    runEmbeddedPiAgentMock.mockResolvedValueOnce({
+      payloads: [{ text: "hello world!" }],
+      meta: {
+        agentMeta: {
+          usage: { input: 10, output: 5 },
+          lastCallUsage: { input: 6, output: 3 },
+          model: "gpt-5.4",
+          provider: "openai-codex",
+        },
+      },
+    });
+
+    const runner = createFollowupRunner({
+      opts: { onBlockReply: createAsyncReplySpy() },
+      typing: createMockTypingController(),
+      typingMode: "instant",
+      defaultModel: "anthropic/claude-opus-4-6",
+      sessionEntry,
+      sessionStore,
+      sessionKey,
+      storePath,
+    });
+
+    await expect(
+      runner(
+        createQueuedRun({
+          run: {
+            provider: "anthropic",
+            model: "claude-opus-4-6",
+          },
+        }),
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(sessionStore[sessionKey]).toMatchObject({
+      modelProvider: "anthropic",
+      model: "claude-opus-4-6",
+      fallbackNoticeSelectedModel: "anthropic/claude-opus-4-6",
+      fallbackNoticeActiveModel: "openai-codex/gpt-5.4",
+    });
+  });
+
+  it("delivers successful fallback followups when fallback notice persistence fails", async () => {
+    const storePath = "/dev/null/openclaw-followup-fallback-notice.json";
+    const sessionKey = "main";
+    const sessionEntry: SessionEntry = { sessionId: "session", updatedAt: Date.now() };
+    const sessionStore: Record<string, SessionEntry> = { [sessionKey]: sessionEntry };
+    registerFollowupTestSessionStore(storePath, sessionStore);
+    runEmbeddedPiAgentMock.mockResolvedValueOnce({
+      payloads: [{ text: "hello world!" }],
+      meta: {
+        agentMeta: {
+          usage: { input: 10, output: 5 },
+          lastCallUsage: { input: 6, output: 3 },
+          model: "gpt-5.4",
+          provider: "openai-codex",
+        },
+      },
+    });
+    const onBlockReply = createAsyncReplySpy();
+
+    const runner = createFollowupRunner({
+      opts: { onBlockReply },
+      typing: createMockTypingController(),
+      typingMode: "instant",
+      defaultModel: "anthropic/claude-opus-4-6",
+      sessionEntry,
+      sessionStore,
+      sessionKey,
+      storePath,
+    });
+
+    await expect(
+      runner(
+        createQueuedRun({
+          run: {
+            provider: "anthropic",
+            model: "claude-opus-4-6",
+          },
+        }),
+      ),
+    ).resolves.toBeUndefined();
+
+    expectBlockReplyText(onBlockReply, "hello world!");
+    expect(sessionStore[sessionKey]).toMatchObject({
+      fallbackNoticeSelectedModel: "anthropic/claude-opus-4-6",
+      fallbackNoticeActiveModel: "openai-codex/gpt-5.4",
+    });
+  });
+
+  it("uses the auto fallback origin as queued followup selected routing", async () => {
+    const storePath = "/tmp/openclaw-followup-fallback-origin.json";
+    const sessionKey = "main";
+    const sessionEntry: SessionEntry = {
+      sessionId: "session",
+      updatedAt: Date.now(),
+      providerOverride: "openai-codex",
+      modelOverride: "gpt-5.4",
+      modelOverrideSource: "auto",
+      modelOverrideFallbackOriginProvider: "anthropic",
+      modelOverrideFallbackOriginModel: "claude-opus-4-6",
+      authProfileOverride: "openai-codex:fallback",
+      authProfileOverrideSource: "auto",
+      authProfileOverrideCompactionCount: 2,
+    };
+    const sessionStore: Record<string, SessionEntry> = { [sessionKey]: sessionEntry };
+    registerFollowupTestSessionStore(storePath, sessionStore);
+    runEmbeddedPiAgentMock.mockResolvedValueOnce({
+      payloads: [{ text: "hello world!" }],
+      meta: {
+        agentMeta: {
+          usage: { input: 10, output: 5 },
+          lastCallUsage: { input: 6, output: 3 },
+          model: "gpt-5.4",
+          provider: "openai-codex",
+        },
+      },
+    });
+
+    const runner = createFollowupRunner({
+      opts: { onBlockReply: createAsyncReplySpy() },
+      typing: createMockTypingController(),
+      typingMode: "instant",
+      defaultModel: "anthropic/claude-opus-4-6",
+      sessionEntry,
+      sessionStore,
+      sessionKey,
+      storePath,
+    });
+
+    await expect(
+      runner(
+        createQueuedRun({
+          run: {
+            provider: "openai-codex",
+            model: "gpt-5.4",
+          },
+        }),
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(sessionStore[sessionKey]).toMatchObject({
+      modelProvider: "anthropic",
+      model: "claude-opus-4-6",
+      fallbackNoticeSelectedModel: "anthropic/claude-opus-4-6",
+      fallbackNoticeActiveModel: "openai-codex/gpt-5.4",
+    });
+    expect(sessionStore[sessionKey].providerOverride).toBeUndefined();
+    expect(sessionStore[sessionKey].modelOverride).toBeUndefined();
+    expect(sessionStore[sessionKey].modelOverrideSource).toBeUndefined();
+    expect(sessionStore[sessionKey].modelOverrideFallbackOriginProvider).toBeUndefined();
+    expect(sessionStore[sessionKey].modelOverrideFallbackOriginModel).toBeUndefined();
+    expect(sessionStore[sessionKey].authProfileOverride).toBeUndefined();
+    expect(sessionStore[sessionKey].authProfileOverrideSource).toBeUndefined();
+    expect(sessionStore[sessionKey].authProfileOverrideCompactionCount).toBeUndefined();
   });
 
   it("does not send cross-channel payload content to dispatcher when origin routing fails", async () => {

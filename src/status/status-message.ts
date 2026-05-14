@@ -903,14 +903,15 @@ export function buildStatusMessage(args: StatusArgs): string {
     selectedAuthMode && selectedAuthMode !== "unknown"
       ? (args.modelAuth ?? selectedAuthMode)
       : undefined;
+  const activeModelAuthOverride =
+    fallbackNoticeOverridesRuntimeModel && args.activeModelAuth === args.modelAuth
+      ? undefined
+      : args.activeModelAuth;
   const activeAuthMode =
-    normalizeAuthMode(fallbackNoticeOverridesRuntimeModel ? undefined : args.activeModelAuth) ??
-    resolveModelAuthMode(activeProvider, args.config);
+    normalizeAuthMode(activeModelAuthOverride) ?? resolveModelAuthMode(activeProvider, args.config);
   const activeAuthLabelValue =
     activeAuthMode && activeAuthMode !== "unknown"
-      ? fallbackNoticeOverridesRuntimeModel
-        ? activeAuthMode
-        : (args.activeModelAuth ?? activeAuthMode)
+      ? (activeModelAuthOverride ?? activeAuthMode)
       : undefined;
   const selectedAuthLabelValue =
     rawSelectedAuthLabelValue ?? (runtimeAliasModelEquivalent ? activeAuthLabelValue : undefined);

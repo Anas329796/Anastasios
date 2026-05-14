@@ -3028,6 +3028,45 @@ describe("persistSessionUsageUpdate", () => {
     expect(stored[sessionKey].outputTokens).toBe(100);
   });
 
+  it("returns false when usage accounting cannot find the session entry", async () => {
+    const storePath = await createStorePath("openclaw-usage-missing-entry-");
+    await seedSessionStore({
+      storePath,
+      sessionKey: "other",
+      entry: { sessionId: "s1", updatedAt: Date.now() },
+    });
+
+    await expect(
+      persistSessionUsageUpdate({
+        storePath,
+        sessionKey: "main",
+        usage: { input: 1_000, output: 100 },
+        providerUsed: "ollama",
+        modelUsed: "qwen3",
+        contextTokensUsed: 200_000,
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it("returns false when model-only accounting cannot find the session entry", async () => {
+    const storePath = await createStorePath("openclaw-usage-missing-model-entry-");
+    await seedSessionStore({
+      storePath,
+      sessionKey: "other",
+      entry: { sessionId: "s1", updatedAt: Date.now() },
+    });
+
+    await expect(
+      persistSessionUsageUpdate({
+        storePath,
+        sessionKey: "main",
+        providerUsed: "ollama",
+        modelUsed: "qwen3",
+        contextTokensUsed: 200_000,
+      }),
+    ).resolves.toBe(false);
+  });
+
   it("keeps runtime alias usage as the session model instead of treating it as fallback", () => {
     expect(
       resolveRunSessionModelPersistence({
