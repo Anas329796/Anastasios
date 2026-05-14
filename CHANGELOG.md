@@ -11,6 +11,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Providers/plugins: load the owning provider plugin for manifest model-catalog aliases such as Azure OpenAI Responses and avoid caching nested in-flight hook-resolution misses, so provider hooks recover after targeted plugin activation completes. Thanks @obviyus.
 - iOS: restore first-use Contacts, Calendar, and Reminders permission prompts and add Privacy & Access status/actions in Settings. Thanks @BunsDev.
 - Agents: allow dot-dot-prefixed filenames such as `..note.txt` through sandbox FS bridge, remote sandbox reads, and apply_patch summaries without mistaking the name for parent traversal.
 - CLI/migrate: humanize Codex conflict-status messaging across the migrate UI so selection prompts and plan/result rows say "Codex skill already installed in workspace" instead of surfacing internal `MIGRATION_REASON_*` codes. Thanks @sjf.
