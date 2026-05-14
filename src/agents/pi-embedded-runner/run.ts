@@ -1497,6 +1497,9 @@ export async function runEmbeddedPiAgent(
             model: modelId,
             assistant: currentAttemptAssistant ?? sessionLastAssistant,
           });
+          const activeAuthProfileMode = lastProfileId
+            ? attemptAuthProfileStore.profiles?.[lastProfileId]?.type
+            : undefined;
           const resolveReplayInvalidForAttempt = (incompleteTurnText?: string | null) =>
             accumulatedReplayState.replayInvalid ||
             resolveReplayInvalidFlag({
@@ -1516,6 +1519,7 @@ export async function runEmbeddedPiAgent(
                 sessionKey: resolvedSessionKey ?? params.sessionId,
                 provider: activeErrorContext.provider,
                 model: activeErrorContext.model,
+                authProfileMode: activeAuthProfileMode,
               })
             : undefined;
           const assistantErrorText =
@@ -2387,6 +2391,7 @@ export async function runEmbeddedPiAgent(
             modelId,
             provider,
             activeErrorContext,
+            authProfileMode: activeAuthProfileMode,
             lastAssistant: assistantForFailover,
             config: params.config,
             sessionKey: params.sessionKey ?? params.sessionId,
@@ -2492,6 +2497,7 @@ export async function runEmbeddedPiAgent(
             sessionKey: params.sessionKey ?? params.sessionId,
             provider: activeErrorContext.provider,
             model: activeErrorContext.model,
+            authProfileMode: activeAuthProfileMode,
             verboseLevel: params.verboseLevel,
             reasoningLevel: params.reasoningLevel,
             thinkingLevel: params.thinkLevel,
