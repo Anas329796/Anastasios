@@ -214,6 +214,24 @@ describe("tsdown config", () => {
         false,
       ),
     ).toBe(true);
+    expect(externalize("../../node_modules/node-fetch/@types/index.d.ts", undefined, true)).toBe(
+      true,
+    );
+    expect(
+      externalize(
+        "../../../node_modules/node-fetch",
+        "node_modules/@anthropic-ai/sdk/internal/types.d.mts",
+        false,
+      ),
+    ).toBe(true);
+    expect(
+      externalize(
+        "../../../node_modules/node-fetch",
+        "node_modules/grammy/out/types.node.js",
+        false,
+      ),
+    ).toBe(false);
+    expect(externalize("../../node_modules/node-fetch/src/index.js", undefined, true)).toBe(false);
     expect(externalize("axios", "node_modules/@slack/web-api/dist/WebClient.d.ts", false)).toBe(
       true,
     );
