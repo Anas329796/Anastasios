@@ -38,7 +38,6 @@ function requireLoadedVideoProvider(
 
 describe("video-generation provider registry", () => {
   beforeEach(() => {
-    vi.resetModules();
     resolvePluginCapabilityProvidersMock.mockReset();
     resolvePluginCapabilityProvidersMock.mockReturnValue([]);
   });
