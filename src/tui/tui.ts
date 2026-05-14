@@ -776,7 +776,7 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
     );
   };
 
-  const busyStates = new Set(["sending", "waiting", "streaming", "running"]);
+  const busyStates = new Set(["sending", "waiting", "streaming", "running", "awaiting follow-up"]);
   let statusText: Text | null = null;
   let statusLoader: Loader | null = null;
 
@@ -837,6 +837,11 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
           phrases: waitingPhrase ? [waitingPhrase] : undefined,
         }),
       );
+      return;
+    }
+
+    if (activityStatus === "awaiting follow-up") {
+      statusLoader.setMessage(`awaiting follow-up event • ${elapsed} | ${connectionStatus}`);
       return;
     }
 
