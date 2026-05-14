@@ -89,6 +89,33 @@ describe("createChannelOutboundRuntimeSend", () => {
     expect(params.accountId).toBe("default");
   });
 
+  it("maps html-mode runtime sends to outbound HTML formatting", async () => {
+    const sendText = vi.fn(async () => ({ channel: "telegram", messageId: "tg-html" }));
+    mocks.loadChannelOutboundAdapter.mockResolvedValue({
+      sendText,
+    });
+
+    const { createChannelOutboundRuntimeSend } = await import("./channel-outbound-send.js");
+    const runtimeSend = createChannelOutboundRuntimeSend({
+      channelId: "telegram" as never,
+      unavailableMessage: "unavailable",
+    });
+
+    await runtimeSend.sendMessage("12345", '<a href="https://example.com">Example</a>', {
+      cfg: {},
+      textMode: "html",
+      plainText: "Example (https://example.com)",
+      formatting: { textLimit: 4000 },
+    });
+
+    const params = expectSingleCallParams(sendText);
+    expect(params.cfg).toEqual({});
+    expect(params.to).toBe("12345");
+    expect(params.text).toBe('<a href="https://example.com">Example</a>');
+    expect(params.plainText).toBe("Example (https://example.com)");
+    expect(params.formatting).toEqual({ textLimit: 4000, parseMode: "HTML" });
+  });
+
   it("routes block sends through payload delivery", async () => {
     const sendPayload = vi.fn(async () => ({ channel: "slack", messageId: "slack-blocks" }));
     const sendText = vi.fn();

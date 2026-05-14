@@ -2,6 +2,7 @@ import { loadChannelOutboundAdapter } from "../../channels/plugins/outbound/load
 import type { ChannelId } from "../../channels/plugins/types.public.js";
 import { getRuntimeConfig } from "../../config/config.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import type { OutboundDeliveryFormattingOptions } from "../../infra/outbound/formatting.js";
 import type { OutboundMediaAccess } from "../../media/load-options.js";
 import { normalizeOptionalString } from "../../shared/string-coerce.js";
 
@@ -21,6 +22,9 @@ type RuntimeSendOpts = {
   silent?: boolean;
   forceDocument?: boolean;
   gifPlayback?: boolean;
+  formatting?: OutboundDeliveryFormattingOptions;
+  textMode?: "markdown" | "html";
+  plainText?: string;
   gatewayClientScopes?: readonly string[];
 };
 
@@ -33,6 +37,12 @@ function resolveRuntimeReplyToId(opts: RuntimeSendOpts): string | undefined {
   return raw == null ? undefined : normalizeOptionalString(String(raw));
 }
 
+function resolveRuntimeFormatting(
+  opts: RuntimeSendOpts,
+): OutboundDeliveryFormattingOptions | undefined {
+  return opts.textMode === "html" ? { ...opts.formatting, parseMode: "HTML" } : opts.formatting;
+}
+
 export function createChannelOutboundRuntimeSend(params: {
   channelId: ChannelId;
   unavailableMessage: string;
@@ -42,6 +52,7 @@ export function createChannelOutboundRuntimeSend(params: {
       const outbound = await loadChannelOutboundAdapter(params.channelId);
       const threadId = resolveRuntimeThreadId(opts);
       const replyToId = resolveRuntimeReplyToId(opts);
+      const formatting = resolveRuntimeFormatting(opts);
       const buildContext = () => ({
         cfg: opts.cfg ?? getRuntimeConfig(),
         to,
@@ -56,6 +67,8 @@ export function createChannelOutboundRuntimeSend(params: {
         silent: opts.silent,
         forceDocument: opts.forceDocument,
         gifPlayback: opts.gifPlayback,
+        formatting,
+        plainText: opts.plainText,
         gatewayClientScopes: opts.gatewayClientScopes,
       });
       const hasMedia = Boolean(opts.mediaUrl);

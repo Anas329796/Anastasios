@@ -253,10 +253,12 @@ describe("telegramOutbound", () => {
         to: "12345",
         text: "hello",
         formatting: { parseMode: "HTML" },
+        plainText: "hello plain",
         deps: { sendTelegram: sendMessageTelegramMock },
       });
       const options = lastCallOptions(sendMessageTelegramMock, "12345", "hello");
       expect(options.textMode).toBe("html");
+      expect(options.plainText).toBe("hello plain");
     };
     const proveMedia = async () => {
       sendMessageTelegramMock.mockResolvedValueOnce({ messageId: "tg-media", chatId: "12345" });

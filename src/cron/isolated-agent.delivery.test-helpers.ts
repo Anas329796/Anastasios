@@ -34,15 +34,16 @@ export function mockAgentPayloads(
 
 export function expectDirectTelegramDelivery(
   deps: CliDeps,
-  params: { chatId: string; text: string; messageThreadId?: number },
+  params: { chatId: string; text: string; messageThreadId?: number; textMode?: "html" },
 ) {
   expect(deps.sendMessageTelegram).toHaveBeenCalledTimes(1);
   expect(deps.sendMessageTelegram).toHaveBeenCalledWith(
     params.chatId,
     params.text,
-    expect.objectContaining(
-      params.messageThreadId === undefined ? {} : { messageThreadId: params.messageThreadId },
-    ),
+    expect.objectContaining({
+      ...(params.messageThreadId === undefined ? {} : { messageThreadId: params.messageThreadId }),
+      ...(params.textMode === undefined ? {} : { textMode: params.textMode }),
+    }),
   );
 }
 
