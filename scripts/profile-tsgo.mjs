@@ -8,10 +8,11 @@ import {
   applyLocalTsgoPolicy,
   shouldAcquireLocalHeavyCheckLockForTsgo,
 } from "./lib/local-heavy-check-runtime.mjs";
+import { resolveTsgoInvocation } from "./lib/tsgo-invocation.mjs";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const artifactRoot = path.resolve(repoRoot, ".artifacts/tsgo-profile");
-const tsgoPath = path.resolve(repoRoot, "node_modules", ".bin", "tsgo");
+const tsgoInvocation = resolveTsgoInvocation(repoRoot);
 
 const GRAPH_DEFINITIONS = {
   core: {
@@ -139,12 +140,11 @@ function runTsgo(label, args, params = {}) {
 
   const startedAt = Date.now();
   try {
-    const result = spawnSync(tsgoPath, finalArgs, {
+    const result = spawnSync(tsgoInvocation.command, [...tsgoInvocation.argsPrefix, ...finalArgs], {
       cwd: repoRoot,
       env,
       encoding: "utf8",
       maxBuffer: params.maxBuffer ?? 128 * 1024 * 1024,
-      shell: process.platform === "win32",
     });
     const elapsedMs = Date.now() - startedAt;
     const stdout = result.stdout ?? "";

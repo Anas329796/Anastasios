@@ -12,20 +12,23 @@ import {
   getSparseTsgoGuardError,
   shouldSkipSparseTsgoGuardError,
 } from "./lib/tsgo-sparse-guard.mjs";
+import { resolveTsgoInvocation } from "./lib/tsgo-invocation.mjs";
 
 const { args: finalArgs, env } = applyLocalTsgoPolicy(
   process.argv.slice(2),
   resolveLocalHeavyCheckEnv(process.env),
 );
 
-const tsgoPath = path.resolve("node_modules", ".bin", "tsgo");
+const tsgoInvocation = resolveTsgoInvocation(process.cwd());
 const tsBuildInfoFile = readFlagValue(finalArgs, "--tsBuildInfoFile");
 if (tsBuildInfoFile) {
   fs.mkdirSync(path.dirname(path.resolve(tsBuildInfoFile)), { recursive: true });
 }
 const sparseGuardError = getSparseTsgoGuardError(finalArgs, { cwd: process.cwd() });
+const resourceGuardError = env.OPENCLAW_TSGO_RESOURCE_GUARD_ERROR ?? "";
 const releaseLock =
   sparseGuardError ||
+  resourceGuardError ||
   env.OPENCLAW_TSGO_HEAVY_CHECK_LOCK_HELD === "1" ||
   !shouldAcquireLocalHeavyCheckLockForTsgo(finalArgs, env)
     ? () => {}
@@ -36,7 +39,10 @@ const releaseLock =
       });
 
 try {
-  if (sparseGuardError) {
+  if (resourceGuardError) {
+    console.error(resourceGuardError);
+    process.exitCode = 1;
+  } else if (sparseGuardError) {
     console.error(sparseGuardError);
     if (shouldSkipSparseTsgoGuardError(env)) {
       console.error("[tsgo] skipping sparse-missing project because OPENCLAW_TSGO_SPARSE_SKIP=1");
@@ -45,10 +51,9 @@ try {
       process.exitCode = 1;
     }
   } else {
-    const result = spawnSync(tsgoPath, finalArgs, {
+    const result = spawnSync(tsgoInvocation.command, [...tsgoInvocation.argsPrefix, ...finalArgs], {
       stdio: "inherit",
       env,
-      shell: process.platform === "win32",
     });
 
     if (result.error) {

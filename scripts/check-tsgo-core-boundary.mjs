@@ -2,9 +2,10 @@
 
 import { spawnSync } from "node:child_process";
 import path from "node:path";
+import { resolveTsgoInvocation } from "./lib/tsgo-invocation.mjs";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
-const tsgoPath = path.join(repoRoot, "node_modules", ".bin", "tsgo");
+const tsgoInvocation = resolveTsgoInvocation(repoRoot);
 
 const coreGraphs = [
   { name: "core", config: "tsconfig.core.json" },
@@ -23,12 +24,15 @@ function normalizeFilePath(filePath) {
 }
 
 function listGraphFiles(graph) {
-  const result = spawnSync(tsgoPath, ["-p", graph.config, "--pretty", "false", "--listFilesOnly"], {
-    cwd: repoRoot,
-    encoding: "utf8",
-    maxBuffer: 256 * 1024 * 1024,
-    shell: process.platform === "win32",
-  });
+  const result = spawnSync(
+    tsgoInvocation.command,
+    [...tsgoInvocation.argsPrefix, "-p", graph.config, "--pretty", "false", "--listFilesOnly"],
+    {
+      cwd: repoRoot,
+      encoding: "utf8",
+      maxBuffer: 256 * 1024 * 1024,
+    },
+  );
   if (result.error) {
     throw result.error;
   }
