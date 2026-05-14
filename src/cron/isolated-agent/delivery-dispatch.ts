@@ -121,6 +121,7 @@ type DispatchCronDeliveryParams = {
   deliveryBestEffort: boolean;
   deliveryPayloadHasStructuredContent: boolean;
   deliveryPayloads: ReplyPayload[];
+  emptyOutputHadFreshDescendants?: boolean;
   synthesizedText?: string;
   ttsAuto?: TtsAutoMode;
   summary?: string;
@@ -548,6 +549,20 @@ export async function dispatchCronDelivery(
       ...params.telemetry,
     });
   };
+  const failEmptyDescendantFollowup = async (): Promise<RunCronAgentTurnResult> => {
+    deliveryAttempted = true;
+    await cleanupDirectCronSessionIfNeeded();
+    return params.withRunSession({
+      status: "error",
+      error:
+        "cron produced no deliverable text after sanitization and descendant follow-up did not recover a final reply",
+      summary,
+      outputText,
+      delivered: false,
+      deliveryAttempted: true,
+      ...params.telemetry,
+    });
+  };
 
   const deliverViaDirect = async (
     delivery: SuccessfulDeliveryTarget,
@@ -759,18 +774,18 @@ export async function dispatchCronDelivery(
   const finalizeTextDelivery = async (
     delivery: SuccessfulDeliveryTarget,
   ): Promise<RunCronAgentTurnResult | null> => {
-    if (!synthesizedText) {
-      return null;
-    }
-    const initialSynthesizedText = synthesizedText.trim();
-    const expectedSubagentFollowup = expectsSubagentFollowup(initialSynthesizedText);
+    const initialSynthesizedText = synthesizedText?.trim();
+    const expectedSubagentFollowup = initialSynthesizedText
+      ? expectsSubagentFollowup(initialSynthesizedText)
+      : false;
     const subagentRegistryRuntime = await loadDeliverySubagentRegistryRuntime();
     const subagentFollowupSessionKey = params.runSessionKey;
     let activeSubagentRuns = subagentRegistryRuntime.countActiveDescendantRuns(
       subagentFollowupSessionKey,
     );
     const shouldCheckCompletedDescendants =
-      activeSubagentRuns === 0 && isLikelyInterimCronMessage(initialSynthesizedText);
+      activeSubagentRuns === 0 &&
+      (!initialSynthesizedText || isLikelyInterimCronMessage(initialSynthesizedText));
     const needsSubagentFollowupRuntime =
       shouldCheckCompletedDescendants || activeSubagentRuns > 0 || expectedSubagentFollowup;
     const subagentFollowupRuntime = needsSubagentFollowupRuntime
@@ -787,7 +802,10 @@ export async function dispatchCronDelivery(
           runStartedAt: params.runStartedAt,
         })
       : undefined;
-    const hadDescendants = activeSubagentRuns > 0 || Boolean(completedDescendantReply);
+    const hadDescendants =
+      activeSubagentRuns > 0 ||
+      Boolean(completedDescendantReply) ||
+      params.emptyOutputHadFreshDescendants === true;
     if (activeSubagentRuns > 0 || expectedSubagentFollowup) {
       let finalReply = await subagentFollowupRuntime?.waitForDescendantSubagentSummary({
         sessionKey: subagentFollowupSessionKey,
@@ -833,7 +851,8 @@ export async function dispatchCronDelivery(
     }
     if (
       hadDescendants &&
-      synthesizedText.trim() === initialSynthesizedText &&
+      synthesizedText?.trim() === initialSynthesizedText &&
+      initialSynthesizedText &&
       isLikelyInterimCronMessage(initialSynthesizedText) &&
       !isSilentReplyText(initialSynthesizedText, SILENT_REPLY_TOKEN)
     ) {
@@ -849,6 +868,9 @@ export async function dispatchCronDelivery(
         deliveryAttempted,
         ...params.telemetry,
       });
+    }
+    if (hadDescendants && !synthesizedText?.trim()) {
+      return await failEmptyDescendantFollowup();
     }
     const normalizedSynthesizedText = normalizeSilentReplyText(synthesizedText);
     if (

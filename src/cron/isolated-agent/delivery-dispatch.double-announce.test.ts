@@ -141,6 +141,7 @@ function makeBaseParams(overrides: {
   sessionTarget?: string;
   deliveryBestEffort?: boolean;
   runSessionKey?: string;
+  emptyOutputHadFreshDescendants?: boolean;
   resolvedDeliveryMode?: "explicit" | "implicit";
 }): Parameters<typeof dispatchCronDelivery>[0] {
   const resolvedDelivery = {
@@ -172,6 +173,7 @@ function makeBaseParams(overrides: {
     deliveryBestEffort: overrides.deliveryBestEffort ?? false,
     deliveryPayloadHasStructuredContent: false,
     deliveryPayloads: overrides.synthesizedText ? [{ text: overrides.synthesizedText }] : [],
+    emptyOutputHadFreshDescendants: overrides.emptyOutputHadFreshDescendants,
     synthesizedText: overrides.synthesizedText ?? "on it",
     summary: overrides.synthesizedText ?? "on it",
     outputText: overrides.synthesizedText ?? "on it",
@@ -347,6 +349,130 @@ describe("dispatchCronDelivery — double-announce guard", () => {
     expectDeliveryCall(0, {
       payloads: [{ text: "Run-scoped child result, everything finished successfully." }],
     });
+  });
+
+  it("waits for active descendant output when the parent result has no deliverable text", async () => {
+    vi.mocked(countActiveDescendantRuns).mockReturnValueOnce(1).mockReturnValueOnce(0);
+    vi.mocked(waitForDescendantSubagentSummary).mockResolvedValue(
+      "Active child finished with the final result.",
+    );
+
+    const params = makeBaseParams({ synthesizedText: "placeholder", runStartedAt: 1_000 });
+    params.deliveryPayloads = [];
+    params.synthesizedText = undefined;
+    params.summary = undefined;
+    params.outputText = undefined;
+
+    const state = await dispatchCronDelivery(params);
+
+    expect(waitForDescendantSubagentSummary).toHaveBeenCalledWith({
+      sessionKey: "agent:main",
+      initialReply: undefined,
+      timeoutMs: 30_000,
+      observedActiveDescendants: true,
+    });
+    expect(state.deliveryAttempted).toBe(true);
+    expect(state.delivered).toBe(true);
+    expect(deliverOutboundPayloads).toHaveBeenCalledTimes(1);
+    expectDeliveryCall(0, {
+      payloads: [{ text: "Active child finished with the final result." }],
+    });
+  });
+
+  it("delivers completed descendant output when the parent result has no deliverable text", async () => {
+    const runStartedAt = 1_000;
+    vi.mocked(countActiveDescendantRuns).mockReturnValue(0);
+    vi.mocked(readDescendantSubagentFallbackReply).mockResolvedValue(
+      "Completed child result, everything finished successfully.",
+    );
+
+    const params = makeBaseParams({ synthesizedText: "placeholder", runStartedAt });
+    params.deliveryPayloads = [];
+    params.synthesizedText = undefined;
+    params.summary = undefined;
+    params.outputText = undefined;
+
+    const state = await dispatchCronDelivery(params);
+
+    expect(readDescendantSubagentFallbackReply).toHaveBeenCalledWith({
+      sessionKey: "agent:main",
+      runStartedAt,
+    });
+    expect(state.deliveryAttempted).toBe(true);
+    expect(state.delivered).toBe(true);
+    expect(deliverOutboundPayloads).toHaveBeenCalledTimes(1);
+    expectDeliveryCall(0, {
+      payloads: [{ text: "Completed child result, everything finished successfully." }],
+    });
+  });
+
+  it("fails explicitly when active descendants produce no deliverable text after an empty parent reply", async () => {
+    vi.mocked(countActiveDescendantRuns).mockReturnValueOnce(1).mockReturnValueOnce(0);
+    vi.mocked(waitForDescendantSubagentSummary).mockResolvedValue(undefined);
+    vi.mocked(readDescendantSubagentFallbackReply).mockResolvedValue(undefined);
+
+    const params = makeBaseParams({ synthesizedText: "placeholder", runStartedAt: 1_000 });
+    params.deliveryPayloads = [];
+    params.synthesizedText = undefined;
+    params.summary = undefined;
+    params.outputText = undefined;
+
+    const state = await dispatchCronDelivery(params);
+
+    expect(waitForDescendantSubagentSummary).toHaveBeenCalledWith({
+      sessionKey: "agent:main",
+      initialReply: undefined,
+      timeoutMs: 30_000,
+      observedActiveDescendants: true,
+    });
+    expect(readDescendantSubagentFallbackReply).toHaveBeenCalledWith({
+      sessionKey: "agent:main",
+      runStartedAt: 1_000,
+    });
+    expectResultFields(state.result, {
+      status: "error",
+      delivered: false,
+      deliveryAttempted: true,
+    });
+    expect((state.result as { error?: string }).error).toContain(
+      "descendant follow-up did not recover a final reply",
+    );
+    expect(state.deliveryAttempted).toBe(true);
+    expect(state.delivered).toBe(false);
+    expect(deliverOutboundPayloads).not.toHaveBeenCalled();
+    expect(enqueueSystemEvent).not.toHaveBeenCalled();
+  });
+
+  it("fails explicitly when a completed fresh descendant has no recovered fallback text", async () => {
+    vi.mocked(countActiveDescendantRuns).mockReturnValue(0);
+    vi.mocked(readDescendantSubagentFallbackReply).mockResolvedValue(undefined);
+
+    const params = makeBaseParams({
+      synthesizedText: "placeholder",
+      runStartedAt: 1_000,
+      emptyOutputHadFreshDescendants: true,
+    });
+    params.deliveryPayloads = [];
+    params.synthesizedText = undefined;
+    params.summary = undefined;
+    params.outputText = undefined;
+
+    const state = await dispatchCronDelivery(params);
+
+    expect(readDescendantSubagentFallbackReply).toHaveBeenCalledWith({
+      sessionKey: "agent:main",
+      runStartedAt: 1_000,
+    });
+    expectResultFields(state.result, {
+      status: "error",
+      delivered: false,
+      deliveryAttempted: true,
+    });
+    expect((state.result as { error?: string }).error).toContain(
+      "descendant follow-up did not recover a final reply",
+    );
+    expect(deliverOutboundPayloads).not.toHaveBeenCalled();
+    expect(enqueueSystemEvent).not.toHaveBeenCalled();
   });
 
   it("normal text delivery sends exactly once and sets deliveryAttempted=true", async () => {
