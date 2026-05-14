@@ -40,6 +40,7 @@ Docs: https://docs.openclaw.ai
 - Channels/WeCom: refresh the official onboarding install to `@wecom/wecom-openclaw-plugin@2026.5.7` and update existing managed npm installs instead of failing on the package directory. Fixes #79884. (#80390) Thanks @brokemac79.
 - Control UI/WebChat: keep short assistant replies clear of in-bubble copy/open action buttons by applying the existing reserved action spacing in the grouped chat renderer. Fixes #79509. (#81244) Thanks @JARVIS-Glasses.
 - Anthropic: reseed Claude CLI fresh-session retries from bounded OpenClaw transcript history after session rotation, preventing conversation amnesia. Fixes #80905. (#80934) Thanks @bitloi.
+- Agents/session-file repair: move displaced persisted tool results back next to their assistant tool calls and drop orphaned or duplicate tool results before loading JSONL session transcripts, preventing restart-persistent transcript corruption after interrupted tool runs. Fixes #58608. Thanks @funkylazer.
 - Require explicit browser device pairing [AI]. (#81289) Thanks @pgondhi987.
 - Require Control UI pairing before proxy-scoped access [AI]. (#81288) Thanks @pgondhi987.
 - Installer: honor `--version` for git installs and install from the checked-in lockfile, preventing recent dependency pins from tripping pnpm's minimum-release-age gate during tag installs.
