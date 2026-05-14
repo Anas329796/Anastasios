@@ -18,6 +18,7 @@ import { formatErrorMessage } from "../infra/errors.js";
 import { buildOutboundSessionContext } from "../infra/outbound/session-context.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import {
+  isAcpSessionKey,
   isSubagentSessionKey,
   normalizeAgentId,
   resolveAgentIdFromSessionKey,
@@ -1022,7 +1023,11 @@ async function agentCommandInternal(
     });
     for (;;) {
       try {
-        const spawnedBy = normalizedSpawned.spawnedBy ?? sessionEntry?.spawnedBy;
+        const spawnedBy =
+          normalizedSpawned.spawnedBy ??
+          (isSubagentSessionKey(sessionKey) || isAcpSessionKey(sessionKey)
+            ? sessionEntry?.spawnedBy
+            : undefined);
         const effectiveFallbacksOverride = resolveEffectiveModelFallbacks({
           cfg,
           agentId: sessionAgentId,
